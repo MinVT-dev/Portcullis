@@ -3,6 +3,8 @@
 Status: **draft**, written before the AMP 3 API is available.
 Everything that depends on the API is marked as an assumption (A-n) or an open question (Q-n) and must be checked against the real API browser once the beta is running.
 
+Contents: 1 Goal · 2 Lessons from V2/V3 · 3 What we know about AMP 3 · 4 Supported games · 5 Command design · 6 Architecture · 7 Accessibility · 8 Delivery plan · 9 Assumptions · 10 Open questions · 11 Decisions · 12 Risks · Appendix A: V3 command map
+
 ---
 
 ## 1. Goal
@@ -11,11 +13,14 @@ A Discord bot that lets a community run and watch its CubeCoders AMP 3 game serv
 
 "Same area as V2/V3" is taken to mean:
 
-- same product: slash commands for server control, console/chat/event relay to Discord channels, whitelist requests, banners, permissions, audit, schedules, alerts, polls, player tracking, account linking;
+- same product: server control, console/chat/event relay to Discord channels, whitelist requests, banners, permissions, audit, schedules, alerts, polls, player tracking, account linking;
 - same stack: Python 3.11+, discord.py 2.x, SQLite, a `bot_perms.json` style permission file, Docker plus "run as an AMP instance";
 - same habits from V3 4.8.0: credentials only from env or `.env`, secrets redacted in logs, console input validated and rate limited, confirmation on destructive actions, `pytest` + `pip-audit` in CI.
 
-What changes is the inside, because AMP 3's API is a different shape (section 3) and because V3's AMP layer cannot be reused as is (section 2).
+Two things change on purpose:
+
+- **The inside.** AMP 3's API is a different shape (section 3) and V3's AMP layer cannot be reused (section 2).
+- **The command surface.** V3 has 117 slash commands. This edition targets 23 (section 5).
 
 ## 2. What we learned from V2 and V3
 
@@ -25,9 +30,9 @@ V3 is V2 with a large reliability and security pass on top. Both share one struc
 |---|---|---|
 | AMP client | `AMP.py` (`AMPInstance`, ~1,060 lines) | **Replace.** See below. |
 | Instance discovery | `AMP_Handler.py` | Replace with a shard registry. |
-| Console polling | `AMP_Console.py` (thread per instance, `Core/GetUpdates` every second) | Replace with whatever AMP 3 offers for streaming (Q-4). |
-| Per-game behaviour | `modules/<Game>/amp_*.py` + `cog_*.py`, subclassing `AMPInstance` | Keep the idea, change the shape (game plugins no longer subclass the API client). |
-| Discord features | `cogs/*.py` (~25 cogs, ~210 commands) | Port feature by feature, mostly keeping command names. |
+| Console polling | `AMP_Console.py` (thread per instance, `Core/GetUpdates` every second) | Replace with whatever AMP 3 offers for streaming or webhooks (Q-4). |
+| Per-game behaviour | `modules/<Game>/amp_*.py` + `cog_*.py`, subclassing `AMPInstance` | Mostly replace with data (section 4). Code only where data can't express it. |
+| Discord features | `cogs/*.py` (19 cogs, 117 commands) | Port feature by feature into a much smaller command set (section 5). |
 | Storage | `DB.py` + `DB_Update.py` (SQLite, hand-rolled version upgrades) | Keep SQLite, use numbered migrations. |
 | Permissions | `bot_perms.json` nodes like `server.console.interact`, `-node` denies | Keep the file format so V3 users can copy theirs. |
 | Event bus, rate limiter, validation | `utils_events.py`, `utils_ratelimit.py`, `utils_validation.py` | Keep, already tested. |
@@ -35,7 +40,7 @@ V3 is V2 with a large reliability and security pass on top. Both share one struc
 Why `AMP.py` cannot be carried over:
 
 1. **It is RPC over POST.** Every call is `POST /API/<Module>/<Method>` with a JSON body. AMP 3 is REST (`GET /api/shards/{shardId}/schedules`, `PUT`, `DELETE`, ...).
-2. **It mixes four jobs in one class.** HTTP transport, login, AMP role/permission setup, DB access (`_setDBattr`), console threads and game behaviour all live on `AMPInstance`, and API response fields are copied onto the object with `setattr`. Nothing can be tested without a live AMP and a database (V3's CI only byte-compiles the cogs for this reason).
+2. **It does too many jobs in one class.** HTTP transport, login, AMP role setup, DB access (`_setDBattr`), console threads and game behaviour all live on `AMPInstance`, and API response fields are copied onto the object with `setattr`. Nothing can be tested without a live AMP and a database (V3's CI only byte-compiles the cogs for this reason).
 3. **It is synchronous.** `requests` plus `time.sleep` inside a discord.py bot. V3 4.8.0 spent a lot of effort moving blocking calls to worker threads; a fresh core should be async from the start (`aiohttp` is already a dependency).
 4. **It guesses response shapes.** `CallAPI` has branches for `result` being an int, a bool, a dict, or a `Title: Unauthorized Access` body. An OpenAPI spec lets us type every response instead.
 
@@ -43,7 +48,7 @@ So the plan is: **new core, ported features.** Not a line-by-line port, and not 
 
 ## 3. What we know about AMP 3 so far
 
-From Mike's messages and the API browser screenshot (shared 2026-10-07):
+From Mike's messages and the API browser screenshot (2026-10-07):
 
 - The beta will include an API browser. It is **Scalar over an OpenAPI document**, served by AMP itself (screenshot: `localhost:7278/scalar/v1`).
 - Paths are REST under `/api/`, e.g. `GET /api/shards/{shardId}/schedules/catalog`. `shardId` is a UUID.
@@ -51,9 +56,110 @@ From Mike's messages and the API browser screenshot (shared 2026-10-07):
 - Scheduling is a full API: catalog of triggers and tasks (with emitted signals), list/create/get/replace/delete schedules, enable/disable, trigger an immediate run, run history, preview next fire times.
 - Access is **capability based per shard**: "Requires the shard's `ScheduleRead` capability", and `403` means the caller lacks that capability on the shard. `404` means no such shard.
 
+From CubeCoders' public posts ("Announcing - AMP 3", 2026-08-29, and "Licencing changes in AMP 3", 2026-09-21, both on discourse.cubecoders.com):
+
+- **AMP 3 uses all existing AMP 2 templates**, so the game list carries over (section 4).
+- AMP 3 can read in existing AMP 2 instance data. **Users and roles are not imported**, because they "work differently in AMP 3". The Gatekeeper bot account therefore has to be set up again on AMP 3.
+- The old controller/target hierarchy is gone, and the panel no longer needs filesystem access to instances. This matches "Spires" in the API.
+- **Webhooks become available on all licence tiers.** If they cover server events, they are a candidate for console/player events instead of polling (Q-4).
+- OIDC single sign-on moves to all tiers. A bot still needs a non-interactive login (Q-1).
+- AMP 2 development continues next to AMP 3. No release date has been announced, and beta access is invitation-only.
+
 That is enough to fix the architecture; it is not enough to write the client.
 
-## 4. Architecture
+## 4. Supported games
+
+**Short answer: there is no separate AMP 3 games list yet, but CubeCoders has said AMP 3 uses all AMP 2 templates, so the AMP 2 list is the AMP 3 list for now.**
+
+The sources:
+
+- The canonical list is the forum post "Supported Applications Compatibility" (discourse.cubecoders.com/t/supported-applications-compatibility/1828). It has two dedicated modules (**Minecraft Java Edition** and **Rust**); everything else runs on AMP's **Generic** module through templates.
+- The templates themselves live in the public repo `CubeCoders/AMPTemplates`. On 2026-10-08 it held **244 templates** (last commit 2026-10-05).
+
+What the templates already tell AMP, counted from that repo:
+
+| Template field | Templates that set it | What it means for Gatekeeper |
+|---|---|---|
+| `Console.UserJoinRegex` / `UserLeaveRegex` | 164 of 244 | AMP itself can see joins and leaves for these games. |
+| `Console.UserChatRegex` | 64 of 244 | AMP can pick out in-game chat for these games. |
+| `Console.UserActions` (kick/ban commands) | 1 of 244 | Almost no template describes moderation commands. |
+| `App.AdminMethod` | 156 STDIO, 48 Source RCON, the rest Quake/Telnet/GoldSrc/BattlEye RCON or log tailing | How AMP talks to the server. Not Gatekeeper's problem. |
+
+### What this means for the design
+
+V2/V3 hard-code nine game modules (Generic, Minecraft, Valheim, Terraria, Factorio, 7 Days to Die, Project Zomboid, Starbound, CS:GO). Each one re-implements chat parsing and whitelist commands. With 244 templates that does not scale, and most of it duplicates what the templates already describe.
+
+So Gatekeeper gets three levels of support instead of a game list:
+
+| Level | Games | What works |
+|---|---|---|
+| **Every game** | All 244 templates plus Minecraft and Rust | Status, start/stop/restart/kill, console relay and console commands, backups, schedules, alerts, banners. Nothing game-specific. |
+| **Player and chat aware** | Templates with join/leave regexes (164) and chat regexes (64) | Player join/leave events and the player tracker. Chat relay where a chat regex exists. This depends on AMP 3 exposing these as API events (Q-6). If it doesn't, Gatekeeper reads the same regexes from the template. |
+| **Game profile** | Games with a profile file in `games/profiles/*.toml` | Whitelist add/remove, sending chat from Discord into the game, kick/ban, avatar lookup. |
+
+A game profile is data, not code:
+
+```toml
+# games/profiles/valheim.toml
+match = ["valheim"]                 # template / module ids this applies to
+whitelist_add = "addpermitted {id}"
+whitelist_remove = "removepermitted {id}"
+say = "say {name}: {message}"
+id_kind = "steamid"                 # what /link and /whitelist ask the user for
+```
+
+Only Minecraft Java needs real code: `tellraw` JSON for chat (with V3's `json.dumps` fix), and the Mojang UUID/name lookup. Profiles for the eight games V3 already supports come first. After that, anyone can add a game with a pull request that contains no Python.
+
+## 5. Command design
+
+### The problem
+
+V3 has **117 slash commands** (not counting the cog template) under 23 top-level names; the full list is in Appendix A. **51 of them each set one value** (`/server settings host`, `/banner_settings timezone`, ...), and **14 are developer tools** (`/bot utils roleid`, `/bot cog reload`, ...). The result is a long command picker that is hard to scan, and admins have to know a command exists before they can find a setting.
+
+### Target
+
+**23 slash commands under 13 top-level names, plus one right-click user menu.** Members see six commands at most.
+
+### Principles
+
+1. **Settings are panels, not commands.** One `/setup` command opens a panel (select menus, buttons, modals) for bot-wide settings, and `/setup server:<name>` opens the same panel for one server. This replaces the 51 setter commands. A panel also shows the current values, which a setter command never does.
+2. **Actions on a thing are buttons on that thing.** `/server status` shows Start/Stop/Restart/Kill/Backup buttons. `/schedule list`, `/alert list`, `/poll list` and `/backups` show Run/Pause/Delete-type buttons next to each item. That removes the separate `delete`, `pause`, `resume`, `close`, `results` and `mute` commands.
+3. **Choices become options, not separate commands.** `/server power server:<name> action:<start|stop|restart|kill>` replaces four commands. `/server send ... as:<console|chat|broadcast>` replaces `msg` and `broadcast`.
+4. **Developer tools are not slash commands.** Sync, cog reload, restart and ping become owner-only text commands (`$gk sync`) that never show in the picker. Discord's developer mode already gives role, channel and user IDs.
+5. **Permissions follow actions, not commands.** `bot_perms.json` nodes stay fine-grained (`server.power.kill`, `setup.console.channel`), and each button and panel field checks its own node. There are fewer commands, but control stays as fine-grained as in V3. Default member permissions hide `/setup`, `/admin` and the moderator commands from ordinary members.
+6. **Discord's limits stay out of reach.** Discord allows 25 subcommands per group and two levels of nesting. Every group here stays under five.
+
+### Proposed set
+
+| Command | Who | Replaces in V3 |
+|---|---|---|
+| `/server status [server]` | everyone | `server status`, `server users`, `player online`. Without a server it lists all of them. Power and backup buttons appear for members allowed to use them. |
+| `/server power <server> <action>` | moderators | `server start/stop/restart/kill` |
+| `/server send <server> <text> [as]` | moderators | `server msg`, `server broadcast` |
+| `/backups <server>` | moderators | `backup list/create/delete`, `server backup` (create and delete are buttons) |
+| `/whitelist request <server> [name]` | everyone | `whitelist_request` |
+| `/whitelist add` · `/whitelist remove` | moderators | `whitelist add/remove` |
+| `/link` | everyone | `link start/status/clear` (one panel showing link state, with buttons) |
+| `/player lookup <name>` · `/player top [server]` | everyone | `player lookup/top` |
+| `/poll create` · `/poll list` | moderators | `poll create/close/results/list/delete` |
+| `/schedule create` · `/schedule list` | admins | `schedule create/list/delete/pause/resume/run`. These front AMP 3's own scheduler (section 6). |
+| `/alert create` · `/alert list` | admins | `alert create/list/delete/mute`. `alert channel` moves into `/setup`. |
+| `/audit [filters]` | admins | `audit log/search/stats/export`. `audit channel` moves into `/setup`; export is a button. |
+| `/user <member>` + right-click **Apps → Gatekeeper user** | moderators | `user info/add/update`, `role` |
+| `/setup [server]` | admins | the 51 setters: `bot donator/moderator/permissions/settings/message_timeout`, `server settings`, `server console/chat/event`, `server regex`, `regex_pattern`, `banner`, `banner_settings`, `bannergroup`, the `whitelist` settings and `whitelist_reply` |
+| `/admin diagnostics` · `/admin export` · `/admin import <file>` | admins | `diagnostics`, `config export/import`, `dbserver cleanup`. Import stays a slash command because panels can't take a file upload. |
+| `/help` | everyone | `help`, `about` |
+
+`dbserver change_instance_id` goes away, because shards have stable UUIDs.
+
+### What we give up, and how we handle it
+
+- **Panels are harder to script and to document.** A setter command can be copied from a guide; a panel can't. `/admin export` and `import` cover bulk changes, and the docs show panel screenshots.
+- **Panels expire.** Discord interactions stop working after 15 minutes. Panels say so, and re-running the command opens a fresh one.
+- **Panels need more tests.** Each panel field is a small handler with its own permission check. The fake AMP from Phase 0 makes these testable without Discord or AMP.
+- **Muscle memory.** V3 admins have to relearn where settings live. A table in the docs maps each old command to its panel field (Appendix A is the draft).
+
+## 6. Architecture
 
 ```
 gatekeeper/
@@ -62,26 +168,29 @@ gatekeeper/
     api/          #   one module per API tag: shards, scheduling, files, users, system, ...
     models.py     #   typed request/response models generated from the OpenAPI document
     errors.py     #   AmpError, NotFound, MissingCapability(cap, shard), AuthExpired, Unreachable
-    streams.py    #   console/event streaming (shape depends on Q-4)
+    streams.py    #   console/event streaming or webhook receiver (shape depends on Q-4)
   core/           # Domain logic, AMP-agnostic types, fully unit-testable
     servers.py    #   server registry (shard id <-> friendly name <-> DB row), status cache
     relay.py      #   console/chat/event fan-out to the event bus
     whitelist.py, linking.py, schedules.py, alerts.py, players.py, audit.py
     permissions.py#   bot_perms.json evaluation (ported from V3, already tested)
-  games/          # Per-game plugins: chat parsing, whitelist commands, player list, avatar
-    base.py, minecraft.py, valheim.py, ...
-  discord/        # discord.py cogs, views, embeds, autocomplete. No AMP calls directly.
-    cogs/...
+  games/
+    profile.py    #   loads and validates profiles/*.toml
+    profiles/     #   valheim.toml, terraria.toml, factorio.toml, ...
+    minecraft.py  #   the one game that needs code (tellraw, Mojang lookups)
+  discord/        # discord.py commands, panels (views), embeds, autocomplete. No AMP calls.
+    commands/     #   one file per top-level command from section 5
+    panels/       #   /setup sections, /link, list views with item buttons
   db/             # aiosqlite, numbered migrations, repositories
   config.py       # env / .env loading, validation at startup
   main.py
 tests/
-  fakes/amp.py    # in-memory fake of the AMP port, used by core and cog tests
+  fakes/amp.py    # in-memory fake of the AMP port, used by core and command tests
 ```
 
 Rules that keep the AMP 3 unknowns contained:
 
-1. **Cogs never import `gatekeeper.amp`.** They call `core` services. When the API changes during the beta, only `amp/` changes.
+1. **Discord code never imports `gatekeeper.amp`.** It calls `core` services. When the API changes during the beta, only `amp/` changes.
 2. **`core` depends on a small interface (`AmpPort`), not on the HTTP client.** Something like:
    ```python
    class AmpPort(Protocol):
@@ -89,106 +198,185 @@ Rules that keep the AMP 3 unknowns contained:
        async def get_status(self, server: ServerId) -> ServerStatus: ...
        async def power(self, server: ServerId, action: PowerAction) -> None: ...
        async def send_console(self, server: ServerId, line: str) -> None: ...
-       def console_stream(self, server: ServerId) -> AsyncIterator[ConsoleLine]: ...
+       def events(self, server: ServerId) -> AsyncIterator[ServerEvent]: ...
        async def list_backups(self, server: ServerId) -> list[Backup]: ...
-       # schedules, users/players, files ... added as features are ported
+       # schedules, players, files ... added as features are ported
    ```
    The real implementation lives in `amp/`, the fake in `tests/fakes/`. This is what lets us build and test most of the bot **before** the API docs arrive.
 3. **Generated models, hand-written facade.** Generate types from AMP's OpenAPI JSON (e.g. `datamodel-code-generator` to pydantic v2), pinned to a spec snapshot checked into `amp/spec/`. Generated classes never leave `amp/`; they are mapped to `core` types. Re-generating after a beta update then shows up as a reviewable diff, and a CI job can fail when the live spec drifts from the snapshot.
-4. **Capabilities become first-class errors.** A `403` turns into `MissingCapability("ScheduleRead", shard)`, which the Discord layer renders as "Gatekeeper's AMP account is missing ScheduleRead on Survival", not a stack trace.
+4. **Capabilities become first-class errors.** A `403` turns into `MissingCapability("ScheduleRead", shard)`, which Discord shows as "Gatekeeper's AMP account is missing ScheduleRead on Survival", not a stack trace.
 
 ### Two permission layers
 
 | Layer | Who it protects | Mechanism |
 |---|---|---|
-| Discord side | Which Discord members may run which bot command | `bot_perms.json` nodes, same format as V3 (`server.start`, `-server.kill`, wildcards). |
+| Discord side | Which Discord members may use which command, button or panel field | `bot_perms.json` nodes, same format as V3, nodes named after actions (section 5, principle 5). |
 | AMP side | What the bot's AMP account may do on each shard | AMP 3 capabilities on the bot's account. |
 
-V2/V3 asked for a **Super Admin** AMP account and then built a "Gatekeeper" role with permission nodes (`amp_permissions.py`). For AMP 3 the default should be the opposite: the bot gets an account with only the capabilities its enabled features need, and `/bot diagnostics` lists which capabilities are missing per shard. Whether the bot can still set up its own role depends on Q-2 and Q-3.
+V2/V3 asked for a **Super Admin** AMP account and then built a "Gatekeeper" role (`amp_permissions.py`). AMP 3 doesn't import roles anyway, so this is the moment to stop doing that. The bot gets an account with only the capabilities its enabled features need, and `/admin diagnostics` lists the missing ones per shard. Whether the bot can still set up its own role depends on Q-2 and Q-3.
 
 ### Scheduling: use AMP's, don't duplicate it
 
-V3 runs its own scheduler (`schedule_cog.py`, a 30 s loop over a `Schedules` table). AMP 3 has a complete scheduling API with triggers, tasks, run history and next-fire preview. The AMP 3 edition should **front AMP's scheduler** (`/schedule create|list|run|enable|disable|history`) and drop its own, except for Discord-only actions AMP cannot do (e.g. "post a message in a channel"). If AMP 3 has a webhook or HTTP task in the catalog, even those could live in AMP (Q-7).
+V3 runs its own scheduler (`schedule_cog.py`, a 30-second loop over a `Schedules` table). AMP 3 has a complete scheduling API with triggers, tasks, run history and next-fire preview. This edition **fronts AMP's scheduler** and drops its own, except for Discord-only actions AMP cannot do, like posting a message in a channel. If AMP 3's task catalog has a webhook task, even those could live in AMP (Q-7).
 
 ### Console, chat and events
 
-V3 polls `Core/GetUpdates` once per second per instance, in a thread each. For AMP 3:
+V3 polls `Core/GetUpdates` once per second per instance, in a thread each. For AMP 3, in order of preference:
 
-- prefer a push stream (WebSocket / SSE) if the API has one (Q-4);
-- otherwise one async poller per online shard with backoff, behind `streams.py`;
-- either way, `core/relay.py` publishes `ConsoleLine` / `ChatMessage` / `PlayerJoined` / `PlayerLeft` on the event bus, and cogs subscribe. Regex filters, the console denylist, rate limiting and `@everyone` stripping from V3 4.8.0 carry over unchanged.
+1. a push stream (WebSocket / SSE) from the API;
+2. AMP 3 webhooks into a small HTTP listener in Gatekeeper. This is simple when Gatekeeper runs next to AMP, but needs an open port otherwise;
+3. one async poller per online shard with backoff.
 
-### Games
-
-V2/V3 pick a module from the instance's module name and subclass the client (`AMPMinecraft(AMPInstance)`). In the new layout a game plugin is a plain class that receives the `AmpPort` and implements optional hooks: `parse_chat`, `whitelist_add/remove`, `list_players`, `avatar_url`, `format_outgoing_chat` (keeping V3's `json.dumps` tellraw fix for Minecraft). Generic is the fallback. How the plugin is picked depends on what the shard object exposes (Q-6).
+Whichever it is sits behind `streams.py`. `core/relay.py` publishes `ConsoleLine` / `ChatMessage` / `PlayerJoined` / `PlayerLeft` on the event bus, and the Discord side subscribes. Regex filters, the console denylist, rate limiting and `@everyone` stripping from V3 4.8.0 carry over unchanged.
 
 ### Storage
 
-SQLite via `aiosqlite`, numbered SQL migrations (`db/migrations/0001_init.sql`, ...), a `schema_version` row. Server rows are keyed by **shard UUID** instead of the AMP 2 instance id. A one-off `import-v3` command reads a V3 `discordBot.db` and copies users, links, regex patterns, banner settings, whitelist replies and config, asking the admin to map each old instance to a shard.
+SQLite via `aiosqlite`, numbered SQL migrations (`db/migrations/0001_init.sql`, ...), a `schema_version` row. Server rows are keyed by **shard UUID** instead of the AMP 2 instance id. An import mode in `/admin import` reads a V3 `discordBot.db` and copies users, links, regex patterns, banner settings, whitelist replies and config, asking the admin to match each old instance to a shard.
 
-## 5. Delivery plan
+## 7. Accessibility
 
-The beta date is "within about 10 weeks" and not fixed, so phases are gated on the API, not on dates.
+Discord does most of the work, but the bot still chooses colours, labels and images.
 
-**Phase 0: before the API (now)**
-- Repo scaffold: `pyproject.toml` (ruff, pyright, pytest config from V3), CI (tests, `pip-audit`, credential check from V3), Dockerfile.
-- `config.py`, logging with redaction, `db/` with migrations and the first schema.
-- `AmpPort` interface plus the in-memory fake.
-- Port the AMP-independent pieces from V3 with their tests: permissions, event bus, rate limiter, validation, embeds, pagination.
-- Discord shell: bot start-up, command sync, `/help`, `/about`, `/bot diagnostics`, all running against the fake.
+- **Status is never colour-only.** Embed colour can show online/offline, but the text always says "Online" or "Offline" too. The same goes for alert severity and whitelist approved/denied.
+- **Buttons have text labels.** Icons are fine next to a label, but never instead of one. Destructive buttons (Kill, Delete) use Discord's danger style *and* a confirmation step, as in V3.
+- **Banner images get a text equivalent.** A generated banner is a picture of text, which screen readers can't read. Each banner message also carries the server name, status and player count as plain text, and the image gets alt text (the attachment `description`).
+- **Custom banner colours are contrast-checked.** V3 lets admins pick any text colour over any background. The banner editor checks each text colour against the background under that text with the WCAG ratio (4.5:1 for normal text, 3:1 for large text) and warns when it fails. On photo backgrounds it checks the worst spot under the text, not the average, and suggests the blur or a darkening overlay.
+- **Nothing essential lives only in an image or a tooltip.** Discord's buttons and select menus are keyboard-reachable already; Gatekeeper must not undo that by hiding information where a keyboard or screen reader can't get to it.
 
-**Phase 1: API spike (first days with the beta)**
+## 8. Delivery plan
+
+The beta date is open-ended (CubeCoders announces no dates, and access is by invitation), so phases are gated on the API, not on dates. Phase 0 is sized so that two people can make real progress before the API arrives.
+
+### Phase 0: before the API (now)
+
+| # | Task | Done when |
+|---|---|---|
+| 0.1 | Repo scaffold: `pyproject.toml` (ruff, pyright, pytest config from V3), `requirements*.txt`, CI (tests, `pip-audit`, the `tokens.py` check from V3), Dockerfile | CI is green on an empty package |
+| 0.2 | `config.py` (env / `.env`, validated at start-up) and logging with redaction | The bot refuses to start with a clear message when a variable is missing |
+| 0.3 | `db/` with migrations and the first schema (servers keyed by UUID, users, links, settings, audit) | A migration test creates and upgrades a database |
+| 0.4 | `AmpPort` interface, `core` types, and the in-memory fake | The fake can list servers, change power state and emit console/player events |
+| 0.5 | Port permissions, event bus, rate limiter and validation from V3, with their tests | V3's four test files pass, with only import changes |
+| 0.6 | Discord shell: start-up, owner text commands (`sync`, `reload`), `/help`, `/admin diagnostics` | The bot runs against the fake in a test guild |
+| 0.7 | `/server status`, `/server power`, `/server send` and console relay against the fake | A moderator can start a fake server from Discord and see its console lines |
+| 0.8 | `/setup` panel framework (sections, fields, a permission per field) with the console/chat/event channel fields | Channels set through the panel are saved and used by the relay |
+| 0.9 | Game profile loader, the eight V3 game profiles, and the Minecraft plugin | Profile tests cover the whitelist and say commands for each game |
+
+0.1 to 0.3 come first. After that the work splits into two tracks that can run side by side: core and commands (0.4 to 0.7), and panels and games (0.8 to 0.9).
+
+### Phase 1: API spike (first days with the beta)
+
 - Export the OpenAPI JSON into `amp/spec/`, generate models, answer the open questions below and update this doc.
-- Prove the four risky paths end to end against a real AMP 3: authenticate as a bot, list shards, start/stop one, read its console.
+- Prove the four risky paths end to end against a real AMP 3: authenticate as a bot, list shards, start/stop one, receive its console output.
+- Implement the real `AmpPort` for exactly what Phase 0 built against the fake, and run the same tests against both.
 
-**Phase 2: MVP**
-- `/server list|status|start|stop|restart|kill|backup`, console/chat/event channel relay, Discord permissions, audit log, capability diagnostics.
-- Generic game plugin and Minecraft.
+### Phase 2: MVP
 
-**Phase 3: feature parity with V3**
-- Whitelist + `/link`, banners and banner groups, player tracker, alerts, polls, schedules on AMP's scheduler, backups, regex filters, presence, config export/import.
-- Remaining game plugins (Valheim, Terraria, Factorio, 7 Days to Die, Project Zomboid, Starbound, CS).
+- Everything from Phase 0, now on real AMP 3: status, power, send, console/chat/event relay, `/setup` channels, permissions, audit log, capability diagnostics.
+- `/backups`, `/whitelist` and `/link`.
+- Release to a few test communities.
 
-**Phase 4: release**
-- `import-v3` migration, docs (README, COMMANDS, PERMISSIONS adapted from V3), AMP 3 template for running Gatekeeper as an AMP instance if AMP 3 still supports that (Q-9), tagged beta release.
+### Phase 3: rest of the V3 features
 
-## 6. Assumptions (to confirm against the API)
+- Banners and banner groups, player tracker, alerts, polls, schedules on AMP's scheduler, regex filters, presence, `/admin export|import`.
+- More game profiles, contributed or requested.
+
+### Phase 4: release
+
+- V3 database import, docs (README, command reference with the old-to-new command map, permissions guide), an AMP 3 template for running Gatekeeper as a shard if AMP 3 supports that (Q-9), tagged release.
+
+## 9. Assumptions (to confirm against the API)
 
 - **A-1** A "shard" is the AMP 3 equivalent of an AMP 2 instance: one game server.
-- **A-2** "Spires" are hosts/controllers (AMP 2's ADS targets) and "Datastores" are storage locations. Gatekeeper only needs to read them.
+- **A-2** "Spires" are hosts (AMP 2's targets) and "Datastores" are storage locations. Gatekeeper only needs to read them.
 - **A-3** The OpenAPI JSON is reachable next to the Scalar page (ASP.NET's default would be `/openapi/v1.json`).
 - **A-4** Everything Gatekeeper needs per server lives under `/api/shards/{shardId}/...`, including power actions, console and players.
 - **A-5** JSON bodies, UUID ids, standard HTTP status codes (`401`, `403` with the capability name, `404`), as in the screenshot.
 - **A-6** One AMP 3 panel per Gatekeeper install, same as V3. Multi-panel support is not planned.
+- **A-7** A shard exposes which template or module it runs, so Gatekeeper can pick a game profile.
 
-## 7. Open questions
+## 10. Open questions
 
 These are what the API page needs to answer. Most are for the docs; a few (marked) are for Mike.
 
-- **Q-1 Bot authentication.** Sign-in shown is passkey based. How does a headless bot authenticate: API keys / personal access tokens, a service-account type, OAuth client credentials, or username + password + TOTP like AMP 2? How long do tokens last and how are they refreshed? *(Ask Mike if the docs don't say.)*
-- **Q-2 Capabilities.** Full list of capabilities; are they granted per shard, per role, or both; can an account with the right capability grant capabilities to a role (V3 configured its own AMP role)?
+- **Q-1 Bot authentication.** The sign-in shown uses passkeys. How does a headless bot authenticate: API keys / personal access tokens, a service account, OAuth/OIDC client credentials, or username + password + TOTP like AMP 2? How long do tokens last and how are they refreshed? *(Ask Mike if the docs don't say.)*
+- **Q-2 Capabilities.** The full list of capabilities. Are they granted per shard, per role, or both? Can an account with the right capability grant capabilities to a role?
 - **Q-3 Least privilege.** Can the bot account get only what it needs on chosen shards, and can the bot read its own effective capabilities (V3 used `Core/CurrentSessionHasPermission`)?
-- **Q-4 Console and events.** Is there a WebSocket/SSE stream for console output, chat, player join/leave and state changes, or is it polling again? What are the message shapes, and is chat separated from console?
+- **Q-4 Console and events.** Is there a WebSocket/SSE stream for console output, chat, player join/leave and state changes? What do AMP 3 webhooks cover, and how are they signed? Or is it polling again?
 - **Q-5 Power and status.** Endpoints for start/stop/restart/kill, live state, metrics (CPU, RAM, player count, TPS) and the online player list.
-- **Q-6 Game identity.** How does a shard say which game/module it runs? Are game-specific actions (whitelist, kick, ban, in-game chat) API endpoints, or console commands only?
-- **Q-7 Scheduling catalog.** Which triggers and tasks exist, and is there an HTTP/webhook task Gatekeeper could receive? Does "emits signals" mean there is an event feed we can subscribe to?
+- **Q-6 Game identity and player events.** How does a shard say which template it runs? Does AMP 3 turn the template's join/leave/chat regexes into API events or a player list, or does Gatekeeper have to apply them to the console itself? Are any game actions (whitelist, kick, ban) API endpoints?
+- **Q-7 Scheduling catalog.** Which triggers and tasks exist, and is there a webhook task? Does "emits signals" mean there is an event feed?
 - **Q-8 Files & Backups.** Backup create/list/delete/restore endpoints and their capabilities.
-- **Q-9 Running inside AMP.** Can Gatekeeper still be deployed as an AMP 3 shard (V2/V3 shipped an AMP template), and is there a generic Python/app module for that? *(Ask Mike.)*
+- **Q-9 Running inside AMP.** Can Gatekeeper still be deployed as an AMP 3 shard (V2/V3 shipped an AMP template), for example through the Generic module? *(Ask Mike.)*
 - **Q-10 Rate limits and stability.** Are there documented rate limits? Will the API be versioned or change freely during the beta?
 - **Q-11 Audit log.** Can the bot write entries to AMP's audit log, so actions taken from Discord show up in AMP with the Discord user named?
 - **Q-12 "Generate MCP".** What does it produce? Not needed for Gatekeeper, but it may be a quick way to explore the API.
 
-## 8. Decisions we need from the team
+## 11. Decisions we need from the team
 
-- **D-1 AMP 3 only, or AMP 2 and 3 in one bot?** Recommendation: **AMP 3 only.** V3 stays the AMP 2 bot. Supporting both doubles the client layer and its testing for a version that is being phased out. The `AmpPort` design leaves the door open if this changes.
+- **D-1 AMP 3 only, or AMP 2 and 3 in one bot?** Recommendation: **AMP 3 only.** V3 stays the AMP 2 bot. CubeCoders keeps developing AMP 2 alongside AMP 3, so V3 users are not stranded. The `AmpPort` design leaves the door open if this changes.
 - **D-2 Name and versioning.** "Gatekeeper V4"? "Gatekeeper AMP 3"? Affects package name, Docker image and docs.
 - **D-3 Licence.** This repo is **AGPL-3.0**; V2/V3 files carry **GPL-3.0-or-later** headers (copyright Katelynn Cadwallader). Porting that code into an AGPL project is allowed (GPLv3 section 13), but the original copyright notices must stay on ported files, and k8t should agree the new edition is AGPL. If AGPL wasn't a deliberate choice, now is the cheapest time to switch to GPL-3.0-or-later to match.
 - **D-4 Python floor.** V3 targets 3.11 and 3.12. Keep 3.11 as the floor unless the AMP 3 container image dictates otherwise.
-- **D-5 Who owns which phase.** Min and k8t split; nothing in this doc assumes a split.
+- **D-5 Command set.** Agree on section 5 before Phase 0 task 0.7. Commands are the hardest thing to change after release.
+- **D-6 Who owns which phase.** Phase 0 splits into two tracks after 0.3; nothing here assumes who takes which.
 
-## 9. Risks
+## 12. Risks
 
 - **The API changes during the beta.** Mitigated by the `amp/` boundary, spec snapshot and drift check; expect to regenerate models several times.
 - **No headless auth at beta start** (passkeys only). Would block everything past Phase 0. Worth asking Mike early (Q-1).
-- **Feature parity is large.** V3 is ~14k lines and ~210 commands. Phase 2 deliberately ships a small MVP first, and not every V3 command needs to come back (e.g. the bot's own scheduler).
-- **Game-specific behaviour may move.** If AMP 3 drops module-specific endpoints, whitelist and chat fall back to console commands per game, which is more fragile.
+- **AMP 3 doesn't expose player/chat events** (Q-6). Gatekeeper would then have to apply the templates' regexes itself, which needs access to template data it may not get through the API.
+- **Panels turn out clumsy for some settings.** If a setting is used often enough to want a command, it can get one later. Adding a command after release is easy; removing one isn't.
+- **Game profiles drift from the templates.** If a template changes a whitelist command, the profile breaks without anyone noticing. A weekly CI job can compare profiles with `CubeCoders/AMPTemplates`.
+
+---
+
+## Appendix A: V3 command map
+
+Every V3 slash command and where it goes. Counted from `GatekeeperV3-Beta` at commit `760b1e7` (4.8.0): 117 commands, not counting the example in `resources/templates/cog_template.py`.
+
+| V3 command(s) | Count | New home |
+|---|---|---|
+| `/bot donator`, `moderator`, `permissions`, `settings` | 4 | `/setup` → Bot |
+| `/bot utils message_timeout` | 1 | `/setup` → Bot |
+| `/bot utils clear, roleid, channelid, userid, steamid, uuid, ping, disconnect, restart, status, sync` | 11 | Owner text commands. ID lookups dropped (Discord developer mode); Steam ID and Minecraft UUID lookups happen inside `/link`. |
+| `/bot cog load, unload, reload` | 3 | Owner text command `$gk reload` |
+| `/server start, stop, restart, kill` | 4 | `/server power` and buttons on `/server status` |
+| `/server msg, broadcast` | 2 | `/server send` |
+| `/server status, users` | 2 | `/server status` |
+| `/server update` | 1 | Automatic (the registry refreshes from AMP), plus a button in `/admin diagnostics` |
+| `/server backup` | 1 | `/backups` |
+| `/server settings info, avatar, displayname, host, donator, role, prefix, hidden` | 8 | `/setup server` → General |
+| `/server console channel, denylist, rate_limit, filter` | 4 | `/setup server` → Console |
+| `/server chat channel`, `/server event channel` | 2 | `/setup server` → Channels |
+| `/server regex add, delete, list` | 3 | `/setup server` → Filters |
+| `/regex_pattern add, delete, update, list` | 4 | `/setup` → Filters (patterns edited in a modal) |
+| `/dbserver cleanup` | 1 | `/admin diagnostics` button |
+| `/dbserver change_instance_id` | 1 | Dropped (shard UUIDs are stable) |
+| `/user info, add, update`, `/role` | 4 | `/user` and the right-click user menu |
+| `/alert create, list` | 2 | `/alert create`, `/alert list` |
+| `/alert delete, mute` | 2 | Buttons on `/alert list` |
+| `/alert channel` | 1 | `/setup` → Channels |
+| `/audit log, search, stats` | 3 | `/audit` with filter options |
+| `/audit export` | 1 | Button on `/audit` |
+| `/audit channel` | 1 | `/setup` → Channels |
+| `/backup list, create, delete` | 3 | `/backups` with buttons |
+| `/bannergroup create_group, info, rename, add, remove, delete_group` | 6 | `/setup` → Banners |
+| `/banner background, settings` | 2 | `/setup server` → Banner |
+| `/banner_settings auto_update, type, auto_remove, timeformat, timezone` | 5 | `/setup` → Banners |
+| `/config export, import` | 2 | `/admin export`, `/admin import` |
+| `/diagnostics` | 1 | `/admin diagnostics` |
+| `/help`, `/about` | 2 | `/help` |
+| `/link start, status, clear` | 3 | `/link` |
+| `/player channel` | 1 | `/setup` → Channels |
+| `/player online` | 1 | `/server status` |
+| `/player lookup, top` | 2 | `/player lookup`, `/player top` |
+| `/poll create, list` | 2 | `/poll create`, `/poll list` |
+| `/poll close, results, delete` | 3 | Buttons on the poll and on `/poll list` |
+| `/schedule create, list` | 2 | `/schedule create`, `/schedule list` (on AMP's scheduler) |
+| `/schedule delete, pause, resume, run` | 4 | Buttons on `/schedule list` |
+| `/whitelist` (server whitelist on/off) | 1 | `/setup server` → Whitelist |
+| `/whitelist add, remove` | 2 | `/whitelist add`, `/whitelist remove` |
+| `/whitelist request_channel, wait_time, auto, donator_bypass, require_link` | 5 | `/setup` → Whitelist |
+| `/whitelist_reply add, remove, list` | 3 | `/setup` → Whitelist |
+| `/whitelist_request` | 1 | `/whitelist request` |
+| **Total** | **117** | **23 slash commands + 1 user menu** |
