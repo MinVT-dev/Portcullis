@@ -3,7 +3,7 @@
 Status: **draft**, written before the AMP 3 API is available.
 Everything that depends on the API is marked as an assumption (A-n) or an open question (Q-n) and must be checked against the real API browser once the beta is running.
 
-Contents: 1 Goal · 2 Lessons from V2/V3 · 3 What we know about AMP 3 · 4 Supported games · 5 Command design · 6 Architecture · 7 Accessibility · 8 Delivery plan · 9 Assumptions · 10 Open questions · 11 Decisions · 12 Risks · Appendix A: V3 command map
+Contents: 1 Goal · 2 Lessons from V2/V3 · 3 What we know about AMP 3 · 4 Supported games · 5 Command design · 6 Architecture · 7 Accessibility · 8 Delivery plan · 9 Assumptions · 10 Open questions · 11 Decisions · 12 Risks · Appendix A: V3 command map · Appendix B: full candidate command list
 
 ---
 
@@ -63,7 +63,15 @@ From CubeCoders' public posts ("Announcing - AMP 3", 2026-08-29, and "Licencing 
 - The old controller/target hierarchy is gone, and the panel no longer needs filesystem access to instances. This matches "Spires" in the API.
 - **Webhooks become available on all licence tiers.** If they cover server events, they are a candidate for console/player events instead of polling (Q-4).
 - OIDC single sign-on moves to all tiers. A bot still needs a non-interactive login (Q-1).
-- AMP 2 development continues next to AMP 3. No release date has been announced, and beta access is invitation-only.
+- AMP 2 development continues next to AMP 3. Beta access is invitation-only.
+
+Re-scan on 2026-10-24 (public forum, CubeCoders GitHub organisation, `cubecoders.com/AMP3`):
+
+- **Beta timing.** A forum post from 2026-10-19, "AMP 3 Release Premiere Countdown!", says a premiere video will show AMP 3 and that the beta keys "will also going out" at the same time, with the premiere explaining how the beta works. Min reports the beta is announced for 7 Nov around 21:00 (Min's timezone). The post's title says "October 6th, 20:00 UTC", which is before the post date, so the title looks like a typo. If Min is on Central European time, 21:00 on 7 Nov is 20:00 UTC, which would match the time in the title. That match is an inference, not something CubeCoders states. The countdown page itself (`cubecoders.com/AMP3`) renders with JavaScript and could not be read.
+- **No public API documentation yet.** No forum post, GitHub issue or CubeCoders repository mentions the AMP 3 API, API keys, OpenAPI or webhook details. The CubeCoders GitHub organisation has no AMP 3 or SDK repository. Everything in the list above about the API still comes from the screenshot.
+- **No new games.** The `AMPTemplates` commits since 2026-10-05 are fixes and updates (a DayZ DLC, new console regexes after a game update, OpenStarbound download fix, Python 3.15). No game was added, so the 244-template figure in section 4 still stands (not recounted).
+- **"AMP 3 AI usage disclosure" (2026-08-31).** Says AMP 3's accessibility attributes were first drafted with AI and then tested by hand, and that AMP 2's Generic module code was ported to the AMP 3 platform. This supports the claim that templates carry over, and says nothing about the API.
+- **A Python template exists.** `AMPTemplates` has a "Python App Runner" template that downloads an app from a git repo, GitHub release or PyPI, installs `requirements.txt`, and runs a script or module, with environment variables read from a `.env` file. That is a ready-made way to run Gatekeeper inside AMP (Q-9), assuming the template works unchanged in AMP 3.
 
 That is enough to fix the architecture; it is not enough to write the client.
 
@@ -265,6 +273,17 @@ The beta date is open-ended (CubeCoders announces no dates, and access is by inv
 
 ### Phase 1: API spike (first days with the beta)
 
+The beta is announced for 7 Nov around 21:00 (Min's timezone), with keys going out at the premiere. The first session with a running AMP 3 should go through this list in order, because each step unblocks the next:
+
+1. Create the bot account the way AMP 3 allows and note how it authenticates (Q-1). If it only supports passkeys, ask Mike straight away.
+2. Save the OpenAPI JSON and the Scalar page's endpoint list into `amp/spec/` (A-3).
+3. Read the capability list and see which ones the bot account needs (Q-2, Q-3).
+4. Find out how console output, chat and player events reach a client (Q-4, Q-6).
+5. Check whether the Python App Runner template works in AMP 3 (Q-9).
+6. Fill in the open questions in section 10 and the "confirm against the API" column in Appendix B.
+
+Then:
+
 - Export the OpenAPI JSON into `amp/spec/`, generate models, answer the open questions below and update this doc.
 - Prove the four risky paths end to end against a real AMP 3: authenticate as a bot, list shards, start/stop one, receive its console output.
 - Implement the real `AmpPort` for exactly what Phase 0 built against the fake, and run the same tests against both.
@@ -306,7 +325,7 @@ These are what the API page needs to answer. Most are for the docs; a few (marke
 - **Q-6 Game identity and player events.** How does a shard say which template it runs? Does AMP 3 turn the template's join/leave/chat regexes into API events or a player list, or does Gatekeeper have to apply them to the console itself? Are any game actions (whitelist, kick, ban) API endpoints?
 - **Q-7 Scheduling catalog.** Which triggers and tasks exist, and is there a webhook task? Does "emits signals" mean there is an event feed?
 - **Q-8 Files & Backups.** Backup create/list/delete/restore endpoints and their capabilities.
-- **Q-9 Running inside AMP.** Can Gatekeeper still be deployed as an AMP 3 shard (V2/V3 shipped an AMP template), for example through the Generic module? *(Ask Mike.)*
+- **Q-9 Running inside AMP.** Can Gatekeeper still be deployed as an AMP 3 shard (V2/V3 shipped an AMP template)? A "Python App Runner" template already exists in `AMPTemplates` (git repo, `requirements.txt`, script, `.env`); does it work unchanged in AMP 3, and does the bot then need its own template at all? *(Ask Mike.)*
 - **Q-10 Rate limits and stability.** Are there documented rate limits? Will the API be versioned or change freely during the beta?
 - **Q-11 Audit log.** Can the bot write entries to AMP's audit log, so actions taken from Discord show up in AMP with the Discord user named?
 - **Q-12 "Generate MCP".** What does it produce? Not needed for Gatekeeper, but it may be a quick way to explore the API.
@@ -380,3 +399,95 @@ Every V3 slash command and where it goes. Counted from `GatekeeperV3-Beta` at co
 | `/whitelist_reply add, remove, list` | 3 | `/setup` → Whitelist |
 | `/whitelist_request` | 1 | `/whitelist request` |
 | **Total** | **117** | **23 slash commands + 1 user menu** |
+
+---
+
+## Appendix B: full candidate command list
+
+Everything we might want, and what we probably don't need. It covers every V3 command (Appendix A shows where each one lands) plus new ideas that came out of AMP 3's API sections and the template data. **None of this is final until it has been checked against the real API.** The last column says what to look for.
+
+- **Keep**: part of the 23-command set in section 5.
+- **Optional**: not in the 23. Add only if members ask for it or the API makes it cheap.
+- **Drop**: not carried over, or an idea we recommend skipping.
+- **Budget**: stay at 25 slash commands or fewer. A new slash command has to replace or fold into an existing one, or become a button or panel field instead.
+
+Count: 23 slash commands and one user menu to keep, 18 optional ideas (only some of them slash commands), 13 drops, and 4 owner-only text commands.
+
+### B.1 Keep: the core set
+
+| Command | Surface | Status | Why | Confirm against the API |
+|---|---|---|---|---|
+| `/server status [server]` | slash | Keep | The command members use most. Lists all servers, or one with its players and metrics. | Q-5 live state, metrics, player list |
+| `/server power <server> <action>` | slash | Keep | Start, stop, restart, kill in one command. | Q-5 endpoints and capability names |
+| `/server send <server> <text> [as]` | slash | Keep | Console command, in-game chat or broadcast. | Q-4 console input, Q-6 chat input |
+| `/backups <server>` | slash | Keep | List, create and delete backups as buttons. | Q-8 backup endpoints |
+| `/whitelist request` | slash | Keep | Members ask for access. | Q-6 whitelist through a game profile or the API |
+| `/whitelist add` | slash | Keep | Moderators add a name. | Q-6 |
+| `/whitelist remove` | slash | Keep | Moderators remove a name. | Q-6 |
+| `/link` | slash | Keep | Proves a member owns an in-game name, so whitelist requests can't claim someone else's. | Q-4 and Q-6 chat or event feed |
+| `/player lookup <name>` | slash | Keep | Who a player is, when last seen. | Q-6 join/leave events |
+| `/player top [server]` | slash | Keep, cut first | Playtime ranking. Nice to have, not essential. | Q-6 |
+| `/poll create` | slash | Keep, cut first | Community polls. Not AMP-specific, so it is the easiest to drop if the set must shrink. | none |
+| `/poll list` | slash | Keep, cut first | Same as above; results and close are buttons. | none |
+| `/schedule create` | slash | Keep | Creates a schedule on AMP's own scheduler. | Q-7 triggers and tasks catalog |
+| `/schedule list` | slash | Keep | Run, enable/disable and delete are buttons. | Q-7 |
+| `/alert create` | slash | Keep | Metric thresholds that post to a channel. Might merge into `/schedule` if AMP 3 triggers can do thresholds. | Q-7 |
+| `/alert list` | slash | Keep | Mute and delete are buttons. | Q-7 |
+| `/audit [filters]` | slash | Keep | Who did what from Discord. Export is a button. | Q-11 can the bot write to AMP's audit log |
+| `/user <member>` | slash | Keep | Info and role for a member. | none |
+| Apps → Gatekeeper user | user menu | Keep | Same as `/user`, from a right-click. | none |
+| `/setup [server]` | slash | Keep | One panel for every setting. | none |
+| `/admin diagnostics` | slash | Keep | Missing capabilities per shard, connection state, clean-up button. | Q-2, Q-3 capabilities, Q-10 rate limits |
+| `/admin export` | slash | Keep | Config backup. | none |
+| `/admin import` | slash | Keep | Config restore and V3 database import. | none |
+| `/help` | slash | Keep | Lists only what the caller can run. Replaces `/about`. | none |
+
+### B.2 Optional: possible additions
+
+| Idea | Surface | Status | Why or why not | Confirm against the API |
+|---|---|---|---|---|
+| `/server console [lines]` | slash or button | Optional | Shows recent console lines without needing a relay channel. Could be a button on status instead. | Q-4 can history be read |
+| CPU, RAM and TPS on `/server status` | status field | Optional | Useful, costs no command. | Q-5 |
+| "Update game" button on status | button | Optional | Runs the game's update. | Q-5 is there an action or task |
+| "Restore" button on `/backups` | button | Optional | Destructive, so it needs a confirmation step and its own permission node. | Q-8 restore endpoint |
+| `/whitelist list <server>` | slash | Optional | Shows who is whitelisted. Only works for games with a profile. | Q-6 |
+| `/kick`, `/ban`, `/unban` | one slash with an action option | Optional | Only 1 of 244 templates defines kick or ban actions, so each game would need a profile entry. | Q-6 |
+| `/notify <server>` | slash | Optional | A member asks to be pinged when a server comes online or restarts. Stored in Gatekeeper's database only. | Q-4 state-change events |
+| `/vote restart` | slash | Optional, not recommended | A poll that restarts a server if it passes. Fun, but overlaps `/poll` and `/server power`. | none |
+| `/access` | slash | Optional | Read-only view of what the bot's AMP account can do per shard. Writing AMP roles from Discord is riskier and should wait. | Q-2, Q-3 |
+| AMP audit entries inside `/audit` | filter | Optional | Shows AMP's own log next to Gatekeeper's. | Q-11 |
+| Spires and datastores in `/admin diagnostics` | diagnostics field | Optional | Read-only host and storage status. | A-2 |
+| Schedule run history and next-fire preview | buttons on `/schedule list` | Optional | The API already has both. | Q-7 |
+| Quick console presets | buttons | Optional | Admin-defined one-click commands such as "save world", set in `/setup`. | Q-4 |
+| Permission editor in `/setup` | panel section | Optional | Edit `bot_perms.json` nodes in Discord. The file stays the source of truth. | none |
+| Banner groups | panel section | Optional | V3 needed 6 commands for them. One banner per channel may be enough. | none |
+| Custom banner background upload | panel field | Optional | Start with presets and colours. | none |
+| Custom whitelist reply messages | panel field | Optional | Low value. | none |
+| "Download latest log" button | button | Optional | A safer slice of the file manager. | Q-8 |
+
+### B.3 Drop: not carried over, or not recommended
+
+| Command or idea | Status | Why |
+|---|---|---|
+| `/bot utils roleid`, `channelid`, `userid` | Drop | Discord's developer mode already gives these. |
+| `/bot utils steamid`, `uuid` | Drop | The lookup happens inside `/link` and `/whitelist`. |
+| `/bot utils clear` | Drop | Discord's own moderation tools do this, and a purge command is a risk. |
+| `/dbserver change_instance_id` | Drop | Shard UUIDs are stable. |
+| `/server update` (V3's refresh) | Drop | The registry refreshes automatically. |
+| `/about` | Drop | Folded into `/help`. |
+| Separate `start`, `stop`, `restart`, `kill`, `msg`, `broadcast` | Drop | Folded into `/server power` and `/server send`. |
+| Bot's own scheduler | Drop | AMP 3 has one (section 6). |
+| Manage AMP users, roles and passwords from Discord | Drop | AMP's panel does it, sign-in is passkey based, and a Discord bug here would be a security problem. |
+| File manager commands (browse, edit, upload) | Drop | Security and size limits, and AMP's panel does it better. |
+| Create or delete shards from Discord | Drop | Destructive and capability-heavy. Revisit only if members ask. |
+| Networking and tunnel management | Drop for now | We don't know yet what AMP 3's Networking section does; no open question covers it yet, so look at it on day one. |
+| AI agent or "ask AMP" commands (AMP's "Generate MCP") | Drop | Not Gatekeeper's job. |
+
+### B.4 Owner-only text commands (not in the picker)
+
+| Command | Status | Why |
+|---|---|---|
+| `$gk sync` | Keep | Pushes the slash command list to Discord. |
+| `$gk ping`, `$gk status` | Keep | Quick health check. |
+| `$gk restart`, `$gk stop` | Keep | Owner can restart or stop the bot. |
+| `$gk reload` | Optional | Only if the new design supports hot-reloading; probably not needed. |
