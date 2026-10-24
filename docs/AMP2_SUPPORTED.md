@@ -326,62 +326,48 @@ Gatekeeper V3 has code for nine games. This is what their templates say about pl
 
 The 55 games that define both join/leave and chat patterns can get player tracking and a chat relay with no game-specific code:
 
-Abiotic Factor, Archean, ARK: Survival Ascended, ARK: Survival Ascended (Minimal), ARK: Survival Evolved, ARK: Survival Evolved (Minimal with Server API), ARK: Survival Evolved (Minimal), Assetto Corsa Competizione, Avorion, BeamMP, Beasts of Bermuda, Conan Exiles (Legacy), Conan Exiles Enhanced, Craftopia, DayZ (Experimental), DayZ (Stable), Don't Starve Together, Empyrion Galactic Survival, Factorio, Hytale, Insurgency Sandstorm, Just Cause 3 Multiplayer Mod, Luanti, Minetest (Legacy), Necesse, OpenStarbound, Palworld, Path of Titans, PixARK, Pumpkin, Risk of Rain 2, Romestead, RuneScape: Dragonwilds, SCUM, Seven Days To Die, Space Engineers, Space Engineers (Torch), STAR WARS Jedi Knight - Jedi Academy, Starbound, Starmade, Staxel, Sven Co-op, Terraria, The Forest, tModLoader (Legacy), tModLoader 1.4+, TShock - Terraria Server, Unturned, V Rising, Vintage Story (Legacy), Vintage Story 1.18.8+, Voyagers of Nera, Wreckfest, Wurm Unlimited, Xonotic.
+Abiotic Factor, Archean, ARK: Survival Ascended, ARK: Survival Ascended (Minimal), ARK: Survival Evolved, ARK: Survival Evolved (Minimal with Server API), ARK: Survival Evolved (Minimal), Assetto Corsa Competizione, Avorion, BeamMP, Beasts of Bermuda, Conan Exiles (Legacy), Conan Exiles Enhanced, Craftopia, DayZ (Experimental), DayZ (Stable), Don't Starve Together, Empyrion Galactic Survival, Factorio, Hytale, Insurgency Sandstorm, Just Cause 3 Multiplayer Mod, Luanti, Minetest (Legacy), Necesse, OpenStarbound, Palworld, Path of Titans, PixARK, Pumpkin, Romestead, RuneScape: Dragonwilds, SCUM, Seven Days To Die, Space Engineers, Space Engineers (Torch), STAR WARS Jedi Knight - Jedi Academy, Starbound, Starmade, Staxel, Sven Co-op, Terraria, The Forest, tModLoader (Legacy), tModLoader 1.4+, TShock - Terraria Server, Unturned, V Rising, Vintage Story (Legacy), Vintage Story 1.18.8+, Voyagers of Nera, Wreckfest, Wurm Unlimited, Xonotic.
 
 Non-commercial licences matter if a community monetises a server: Farming Simulator 19, Farming Simulator 22, Farming Simulator 25, FiveM - Grand Theft Auto V Server, RAGE:MP - Grand Theft Auto V Server, RedM - Red Dead Redemption 2 Server, Stay In Tarkov, Tarkov (Fika Mod) (Legacy), Tarkov (Fika Mod) 4.0.0+, Tarkov (Fika Mod) 4.1.0+ are marked non-commercial use only in their templates.
 
 ## Games we plan to add to Gatekeeper for AMP 3
 
-This is a proposal, not a decision. Min has not named games yet, so the shortlist is ranked on three things I could check or reasonably judge:
+**Decision (Min, 2026-10-24):** every game Gatekeeper can actively support gets the same treatment as the current nine: its own banner, images and styling. Every other game stays generic, with status and the other shared features, as it does today.
 
-1. **Template flags (checked).** Join/leave and chat patterns from the table above. Games with both can get player tracking and a chat relay from a data file with no code. The 55 games in the list above are the pool; games with join/leave only get player tracking and `/say` but no chat relay.
-2. **Popularity (my judgement, not measured).** I did not pull player counts or server-host rankings. Treat the tiers as "widely hosted on AMP and in the wider community" and correct me where your communities differ.
-3. **Whitelist and chat-in (not checked).** The templates carry no whitelist or say commands (`Console.UserActions` is empty for every game on this list), so whether Gatekeeper can whitelist a player or send chat into the game has to be confirmed per game on a real server. That is the main risk for every row below.
+**What "actively support" means here.** The template defines both a join and a leave pattern, so Gatekeeper can track who is online without game-specific code. That is 159 of the 225 games on the Generic module. Of those, 12 templates are already covered by the V3 games, which leaves **146 games to add**: 47 that also have a chat pattern (player tracking and chat relay) and 99 with join/leave only (player tracking, no chat relay). Minecraft Java Edition and Rust are on dedicated AMP modules and are not counted; their flags have to be read from AMP 3.
 
-Games already covered by V3 (Minecraft, Valheim, Terraria, Factorio, 7 Days to Die, Project Zomboid, Starbound, CS:GO) are not repeated here.
+What is checked and what is not:
+- **Checked:** the join/leave and chat patterns above, read from each template.
+- **Not checked:** whitelist and chat-in. No template defines user actions (`Console.UserActions` is empty on every game I looked at), so whether Gatekeeper can whitelist a player or send chat into a game has to be tested on a real server. Games where that fails keep the banner and player tracking but lose the whitelist and say commands.
+- **Not decided:** that join/leave is the right cut-off. If you want chat relay to be required, the list drops to 47 games.
 
-### Tier 1: add first
+### What each supported game needs
 
-| Game | Template | Join/leave | Chat | How AMP talks to it | Why |
-|---|---|---|---|---|---|
-| Palworld | `palworld` | yes | yes | console (STDIO) | Very widely hosted; full player and chat flags. |
-| ARK: Survival Ascended | `ark-sa` | yes | yes | Source RCON | Large community; same profile can cover ARK: Survival Evolved (`ark-se`) and the Minimal variants. |
-| Rust | dedicated module | not checked | not checked | not checked | Very widely hosted. It is one of AMP's two dedicated modules, so its flags and commands must be read from AMP 3 itself. |
-| V Rising | `v-rising` | yes | yes | Source RCON | Popular, full flags, RCON is easy to drive. |
-| Conan Exiles Enhanced | `conan-exiles-enhanced` | yes | yes | Source RCON | Popular, full flags. The Legacy template shares the profile. |
-| DayZ (Stable) | `dayz-original` | yes | yes | BattlEye RCON | Popular; BattlEye RCON is a different protocol from Source RCON, so it needs its own client in the AMP layer or AMP-side commands. |
+Each game gets a small data file (see `docs/DESIGN.md`, section 4) and the same art set as the V3 games: a banner, an icon and an accent colour, plus text equivalents so status never relies on colour or images alone. Join, leave and chat patterns come from the template; the work per game is the art and the whitelist, say and kick commands.
 
-### Tier 2: add next
+### Games to add, with chat relay (47)
 
-| Game | Template | Join/leave | Chat | How AMP talks to it | Why |
-|---|---|---|---|---|---|
-| Satisfactory | `satisfactory` | yes | no | console (STDIO) | Popular; player tracking only, no chat relay. |
-| Enshrouded | `enshrouded` | yes | no | console (STDIO) | Popular; player tracking only. |
-| Don't Starve Together | `dont-starve-together` | yes | yes | console (STDIO) | Steady community; full flags. |
-| Unturned | `unturned` | yes | yes | Telnet | Steady community; full flags. |
-| Space Engineers | `space-engineers-generic` | yes | yes | console (STDIO) | Large community; the Torch variant shares the profile. |
-| Hytale | `hytale` | yes | yes | console (STDIO) | New and likely to grow quickly; full flags. A good early-adopter pick for communities already running Minecraft with Gatekeeper. |
-| The Forest | `the-forest` | yes | yes | console (STDIO) | Full flags; older game, smaller hosting base. |
-| SCUM | `scum` | yes | yes | log file | Full flags, but a log file means no command channel, so no whitelist or chat-in. Player tracking and chat out only. |
+Abiotic Factor, Archean, ARK: Survival Ascended, ARK: Survival Ascended (Minimal), ARK: Survival Evolved, ARK: Survival Evolved (Minimal with Server API), ARK: Survival Evolved (Minimal), Assetto Corsa Competizione, Avorion, BeamMP, Beasts of Bermuda, Conan Exiles (Legacy), Conan Exiles Enhanced, Craftopia, DayZ (Experimental), DayZ (Stable), Don't Starve Together, Empyrion Galactic Survival, Hytale, Insurgency Sandstorm, Just Cause 3 Multiplayer Mod, Luanti, Minetest (Legacy), Necesse, Palworld, Path of Titans, PixARK, Pumpkin, Romestead, RuneScape: Dragonwilds, SCUM, Space Engineers, Space Engineers (Torch), STAR WARS Jedi Knight - Jedi Academy, Starmade, Staxel, Sven Co-op, The Forest, tModLoader (Legacy), Unturned, V Rising, Vintage Story (Legacy), Vintage Story 1.18.8+, Voyagers of Nera, Wreckfest, Wurm Unlimited, Xonotic.
 
-### Tier 3: when asked for
+### Games to add, join/leave only (99)
 
-| Game | Template | Join/leave | Chat | How AMP talks to it | Note |
-|---|---|---|---|---|---|
-| Vintage Story 1.18.8+ | `vintage-story-new` | yes | yes | console (STDIO) | Niche but loyal. Use the new template; the legacy one is separate. |
-| Necesse | `necesse` | yes | yes | console (STDIO) | Small. |
-| Abiotic Factor | `abiotic-factor` | yes | yes | console (STDIO) | New; interest may fade or grow. |
-| Pumpkin | `pumpkin` | yes | yes | console (STDIO) | A Minecraft server written in Rust. Likely reuses the Minecraft plugin approach, so the profile may be nearly free. |
-| BeamMP | `beammp` | yes | yes | console (STDIO) | Driving-game community; full flags. |
-| Luanti | `luanti` | yes | yes | console (STDIO) | Template only, not on the forum list yet. |
-| Sons Of The Forest | `sons-of-the-forest` | yes | no | console (STDIO) | Player tracking only. |
+Alchemy Factory, Alien Swarm: Reactive Drop, American Truck Simulator, ANEURISM IV, Arma 3, Arma Reforger, ASKA, Assetto Corsa, Barotrauma, Black Mesa, Broke Protocol, Call of Duty: Modern Warfare 2 (2009), Carrier Command 2, Contagion, Core Keeper, Counter-Strike 1.6, Counter-Strike: Condition Zero, Counter-Strike: Source, CryoFall, Cube 2: Sauerbraten, Day of Defeat, Day of Defeat: Source, Dead Matter, DeadPoly, Dota 2, Dune Awakening, E.Y.E: Divine Cybermancy, Eco, Enshrouded, Euro Truck Simulator 2, EXFIL, Fistful of Frags, Frozen Flame, Garry's Mod, Garry's Mod (64 Bit), Ground Branch, Half-Life, Half-Life 2: Deathmatch, Half-Life Deathmatch: Source, Half-Life: Opposing Force, HumanitZ, Icarus, Impostor - Among Us Server, Kaboom!, Killing Floor 2, Left 4 Dead, Left 4 Dead 2, Mindustry, Multi Theft Auto: San Andreas, Myth of Empires, NEBULOUS: Fleet Command, Night of the Dead, Nightingale, No More Room in Hell, No One Survived, Nuclear Option, Nukkit, OpenRA - Dune 2000, OpenRA - Red Alert, OpenRA - Tiberian Dawn, OpenTTD, Operation: Harsh Doorstop, Palworld (Modded), Pavlov VR, Pirates, Vikings, & Knights II, PocketMine-MP, Pre-Fortress 2, Project 5: Sightseer, Puck, Reign Of Kings, Renown, Rimworld Together - RimWorld Server, Rising World (Unity Version), Sapiens, Satisfactory, SCP: Secret Laboratory, Skyrim Together Reborn, Sons Of The Forest, Soulmask, StarRupture, Stationeers, Synergy, Tarkov (Fika Mod) (Legacy), Team Fortress 2, Team Fortress 2 (64 Bit), Team Fortress 2 Classified, Team Fortress Classic, TerraTech Worlds, TES3MP - The Elder Scrolls III: Morrowind Server, The Front, The Isle (EVRIMA), The Lord of the Rings: Return to Moria, Titanfall 2, VEIN, Veloren, Windrose, Windward, Windward Horizon, Zombie Panic! Source.
 
-### How to turn this into profiles
+### Suggested order of work
 
-- A profile is a TOML data file (see `docs/DESIGN.md`, section 4). For every game here the join, leave and chat patterns can be copied from the template, so the work per game is the whitelist, say and kick commands plus a test against a real server.
-- Games that share an engine or protocol share work: Source RCON (ARK, V Rising, Conan Exiles, Insurgency) is one client; STDIO games all use the AMP console; Telnet (Unturned, 7 Days to Die in V3) is a second.
-- Do the whitelist and chat-in check for the first two or three games from Tier 1 on the beta before committing to the rest. If AMP 3 exposes console input for every game, the rest follows quickly. If not, tiers shrink to what AMP's own commands can do.
-- Not on the list on purpose: Farming Simulator, FiveM, RAGE:MP, RedM and the Tarkov mods are marked non-commercial in their templates; Call of Duty and Titanfall 2 have no player flags; Risk of Rain 2 is deprecated.
+The art is the slow part, so deliver in batches and ship each batch when its art and commands are tested. The order is a judgement of how widely the games are hosted, not measured data:
+
+1. Palworld, ARK: Survival Ascended and Evolved, Rust, V Rising, Conan Exiles Enhanced, DayZ.
+2. Satisfactory, Enshrouded, Don't Starve Together, Unturned, Space Engineers, Hytale, The Forest, SCUM.
+3. Everything else in the two lists above, in whatever order your communities ask for.
+
+Games that share a protocol share work: Source RCON (ARK, V Rising, Conan Exiles and others) is one client, STDIO games all use the AMP console, Telnet is a second client. Two need extra care: SCUM only gives a log file (no command channel, so likely no whitelist or chat-in), and DayZ uses BattlEye RCON, a different protocol.
+
+### Stays generic
+
+66 games have no join/leave pattern and stay generic, with status and shared features only. This includes Call of Duty: Modern Warfare 3 (2011), OpenRCT2, Squad, Squad 44, Stardew Valley, The Isle (Legacy) and the rest of the table above that shows "no" under Join/leave. A game moves to the supported list if its template gains a join/leave pattern.
+
+Licence and status notes for the supported list: Tarkov (Fika Mod) (Legacy) is marked non-commercial in its template, which matters if a community monetises a server. Risk of Rain 2 is deprecated and is not on the list.
 
 ## Gaps and caveats
 
