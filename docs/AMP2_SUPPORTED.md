@@ -339,7 +339,7 @@ Non-commercial licences matter if a community monetises a server: Farming Simula
 What is checked and what is not:
 - **Checked:** the join/leave and chat patterns above, read from each template.
 - **Not checked:** whitelist and chat-in. No template defines user actions (`Console.UserActions` is empty on every game I looked at), so whether Gatekeeper can whitelist a player or send chat into a game has to be tested on a real server. Games where that fails keep the banner and player tracking but lose the whitelist and say commands.
-- **Not decided:** that join/leave is the right cut-off. If you want chat relay to be required, the list drops to 47 games.
+- **Decided (Min, 2026-10-24):** join/leave is the cut-off. It matches the support level of the current nine, so chat relay is not required.
 
 ### What each supported game needs
 
