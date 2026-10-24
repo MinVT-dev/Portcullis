@@ -69,7 +69,7 @@ Re-scan on 2026-10-24 (public forum, CubeCoders GitHub organisation, `cubecoders
 
 - **Beta timing.** A forum post from 2026-10-19, "AMP 3 Release Premiere Countdown!", says a premiere video will show AMP 3 and that the beta keys "will also going out" at the same time, with the premiere explaining how the beta works. Min reports the beta is announced for 7 Nov around 21:00 (Min's timezone). The post's title says "October 6th, 20:00 UTC", which is before the post date, so the title looks like a typo. If Min is on Central European time, 21:00 on 7 Nov is 20:00 UTC, which would match the time in the title. That match is an inference, not something CubeCoders states. The countdown page itself (`cubecoders.com/AMP3`) renders with JavaScript and could not be read.
 - **No public API documentation yet.** No forum post, GitHub issue or CubeCoders repository mentions the AMP 3 API, API keys, OpenAPI or webhook details. The CubeCoders GitHub organisation has no AMP 3 or SDK repository. Everything in the list above about the API still comes from the screenshot.
-- **No new games.** The `AMPTemplates` commits since 2026-10-05 are fixes and updates (a DayZ DLC, new console regexes after a game update, OpenStarbound download fix, Python 3.15). No game was added, so the 244-template figure in section 4 still stands (not recounted).
+- **No new games.** The `AMPTemplates` commits since 2026-10-05 are fixes and updates (a DayZ DLC, new console regexes after a game update, OpenStarbound download fix, Python 3.15). No game was added, so the 244-template figure in section 4 still stands (recounted on 2026-10-24).
 - **"AMP 3 AI usage disclosure" (2026-08-31).** Says AMP 3's accessibility attributes were first drafted with AI and then tested by hand, and that AMP 2's Generic module code was ported to the AMP 3 platform. This supports the claim that templates carry over, and says nothing about the API.
 - **A Python template exists.** `AMPTemplates` has a "Python App Runner" template that downloads an app from a git repo, GitHub release or PyPI, installs `requirements.txt`, and runs a script or module, with environment variables read from a `.env` file. That is a ready-made way to run Gatekeeper inside AMP (Q-9), assuming the template works unchanged in AMP 3.
 
@@ -88,8 +88,8 @@ What the templates already tell AMP, counted from that repo:
 
 | Template field | Templates that set it | What it means for Gatekeeper |
 |---|---|---|
-| `Console.UserJoinRegex` / `UserLeaveRegex` | 164 of 244 | AMP itself can see joins and leaves for these games. |
-| `Console.UserChatRegex` | 64 of 244 | AMP can pick out in-game chat for these games. |
+| `Console.UserJoinRegex` / `UserLeaveRegex` | 162 of 244 | AMP itself can see joins and leaves for these games. |
+| `Console.UserChatRegex` | 59 of 244 | AMP can pick out in-game chat for these games. |
 | `Console.UserActions` (kick/ban commands) | 1 of 244 | Almost no template describes moderation commands. |
 | `App.AdminMethod` | 156 STDIO, 48 Source RCON, the rest Quake/Telnet/GoldSrc/BattlEye RCON or log tailing | How AMP talks to the server. Not Gatekeeper's problem. |
 
@@ -102,7 +102,7 @@ So Gatekeeper gets three levels of support instead of a game list:
 | Level | Games | What works |
 |---|---|---|
 | **Every game** | All 244 templates plus Minecraft and Rust | Status, start/stop/restart/kill, console relay and console commands, backups, schedules, alerts, banners. Nothing game-specific. |
-| **Player and chat aware** | Templates with join/leave regexes (164) and chat regexes (64) | Player join/leave events and the player tracker. Chat relay where a chat regex exists. This depends on AMP 3 exposing these as API events (Q-6). If it doesn't, Gatekeeper reads the same regexes from the template. |
+| **Player and chat aware** | Templates with join/leave regexes (162) and chat regexes (59) | Player join/leave events and the player tracker. Chat relay where a chat regex exists. This depends on AMP 3 exposing these as API events (Q-6). If it doesn't, Gatekeeper reads the same regexes from the template. |
 | **Game profile** | Games with a profile file in `games/profiles/*.toml` | Whitelist add/remove, sending chat from Discord into the game, kick/ban, avatar lookup. |
 
 A game profile is data, not code:
