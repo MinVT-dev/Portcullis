@@ -330,6 +330,59 @@ Abiotic Factor, Archean, ARK: Survival Ascended, ARK: Survival Ascended (Minimal
 
 Non-commercial licences matter if a community monetises a server: Farming Simulator 19, Farming Simulator 22, Farming Simulator 25, FiveM - Grand Theft Auto V Server, RAGE:MP - Grand Theft Auto V Server, RedM - Red Dead Redemption 2 Server, Stay In Tarkov, Tarkov (Fika Mod) (Legacy), Tarkov (Fika Mod) 4.0.0+, Tarkov (Fika Mod) 4.1.0+ are marked non-commercial use only in their templates.
 
+## Games we plan to add to Gatekeeper for AMP 3
+
+This is a proposal, not a decision. Min has not named games yet, so the shortlist is ranked on three things I could check or reasonably judge:
+
+1. **Template flags (checked).** Join/leave and chat patterns from the table above. Games with both can get player tracking and a chat relay from a data file with no code. The 55 games in the list above are the pool; games with join/leave only get player tracking and `/say` but no chat relay.
+2. **Popularity (my judgement, not measured).** I did not pull player counts or server-host rankings. Treat the tiers as "widely hosted on AMP and in the wider community" and correct me where your communities differ.
+3. **Whitelist and chat-in (not checked).** The templates carry no whitelist or say commands (`Console.UserActions` is empty for every game on this list), so whether Gatekeeper can whitelist a player or send chat into the game has to be confirmed per game on a real server. That is the main risk for every row below.
+
+Games already covered by V3 (Minecraft, Valheim, Terraria, Factorio, 7 Days to Die, Project Zomboid, Starbound, CS:GO) are not repeated here.
+
+### Tier 1: add first
+
+| Game | Template | Join/leave | Chat | How AMP talks to it | Why |
+|---|---|---|---|---|---|
+| Palworld | `palworld` | yes | yes | console (STDIO) | Very widely hosted; full player and chat flags. |
+| ARK: Survival Ascended | `ark-sa` | yes | yes | Source RCON | Large community; same profile can cover ARK: Survival Evolved (`ark-se`) and the Minimal variants. |
+| Rust | dedicated module | not checked | not checked | not checked | Very widely hosted. It is one of AMP's two dedicated modules, so its flags and commands must be read from AMP 3 itself. |
+| V Rising | `v-rising` | yes | yes | Source RCON | Popular, full flags, RCON is easy to drive. |
+| Conan Exiles Enhanced | `conan-exiles-enhanced` | yes | yes | Source RCON | Popular, full flags. The Legacy template shares the profile. |
+| DayZ (Stable) | `dayz-original` | yes | yes | BattlEye RCON | Popular; BattlEye RCON is a different protocol from Source RCON, so it needs its own client in the AMP layer or AMP-side commands. |
+
+### Tier 2: add next
+
+| Game | Template | Join/leave | Chat | How AMP talks to it | Why |
+|---|---|---|---|---|---|
+| Satisfactory | `satisfactory` | yes | no | console (STDIO) | Popular; player tracking only, no chat relay. |
+| Enshrouded | `enshrouded` | yes | no | console (STDIO) | Popular; player tracking only. |
+| Don't Starve Together | `dont-starve-together` | yes | yes | console (STDIO) | Steady community; full flags. |
+| Unturned | `unturned` | yes | yes | Telnet | Steady community; full flags. |
+| Space Engineers | `space-engineers-generic` | yes | yes | console (STDIO) | Large community; the Torch variant shares the profile. |
+| Hytale | `hytale` | yes | yes | console (STDIO) | New and likely to grow quickly; full flags. A good early-adopter pick for communities already running Minecraft with Gatekeeper. |
+| The Forest | `the-forest` | yes | yes | console (STDIO) | Full flags; older game, smaller hosting base. |
+| SCUM | `scum` | yes | yes | log file | Full flags, but a log file means no command channel, so no whitelist or chat-in. Player tracking and chat out only. |
+
+### Tier 3: when asked for
+
+| Game | Template | Join/leave | Chat | How AMP talks to it | Note |
+|---|---|---|---|---|---|
+| Vintage Story 1.18.8+ | `vintage-story-new` | yes | yes | console (STDIO) | Niche but loyal. Use the new template; the legacy one is separate. |
+| Necesse | `necesse` | yes | yes | console (STDIO) | Small. |
+| Abiotic Factor | `abiotic-factor` | yes | yes | console (STDIO) | New; interest may fade or grow. |
+| Pumpkin | `pumpkin` | yes | yes | console (STDIO) | A Minecraft server written in Rust. Likely reuses the Minecraft plugin approach, so the profile may be nearly free. |
+| BeamMP | `beammp` | yes | yes | console (STDIO) | Driving-game community; full flags. |
+| Luanti | `luanti` | yes | yes | console (STDIO) | Template only, not on the forum list yet. |
+| Sons Of The Forest | `sons-of-the-forest` | yes | no | console (STDIO) | Player tracking only. |
+
+### How to turn this into profiles
+
+- A profile is a TOML data file (see `docs/DESIGN.md`, section 4). For every game here the join, leave and chat patterns can be copied from the template, so the work per game is the whitelist, say and kick commands plus a test against a real server.
+- Games that share an engine or protocol share work: Source RCON (ARK, V Rising, Conan Exiles, Insurgency) is one client; STDIO games all use the AMP console; Telnet (Unturned, 7 Days to Die in V3) is a second.
+- Do the whitelist and chat-in check for the first two or three games from Tier 1 on the beta before committing to the rest. If AMP 3 exposes console input for every game, the rest follows quickly. If not, tiers shrink to what AMP's own commands can do.
+- Not on the list on purpose: Farming Simulator, FiveM, RAGE:MP, RedM and the Tarkov mods are marked non-commercial in their templates; Call of Duty and Titanfall 2 have no player flags; Risk of Rain 2 is deprecated.
+
 ## Gaps and caveats
 
 - The forum list shows notes such as "Linux support via Wine" or "Docker required on Windows". This scan did not capture those notes; the "container required" notes above come from the template metadata instead.
