@@ -315,7 +315,7 @@ Then:
 
 ## 10. Open questions
 
-These are what the API page needs to answer. Most are for the docs; a few (marked) are for Mike.
+These are what the API page needs to answer. Most are for the docs; a few (marked) are for Mike. What to capture from the beta, in priority order, is in `docs/BETA_CHECKLIST.md`.
 
 - **Q-1 Bot authentication.** The sign-in shown uses passkeys. How does a headless bot authenticate: API keys / personal access tokens, a service account, OAuth/OIDC client credentials, or username + password + TOTP like AMP 2? How long do tokens last and how are they refreshed? *(Ask Mike if the docs don't say.)*
 - **Q-2 Capabilities.** The full list of capabilities. Are they granted per shard, per role, or both? Can an account with the right capability grant capabilities to a role?
