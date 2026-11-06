@@ -12,12 +12,14 @@ This cloud environment probably cannot reach a local `http://localhost` or LAN a
 
 ## Getting the spec
 
-**Do not assume the `/api` page is the spec.** Min's AMP 2 panel shows what to expect: its `/api` page is a short guide (how calls are made, how to sign in, example request) and, when you are not logged in, lists only a handful of sign-in and setup calls such as `Login`, `GetAPISpec` and `GetAuthenticationRequirements`. The full list of calls only appears when logged in, or when the panel is set to allow API discovery without login (in AMP 2 the setting is `Security.AllowAPIDiscoveryWithoutLogin=True` in `AMPConfig.conf`; AMP 3's name for it is unknown). AMP 2 also exposes the spec as an API call (`Core/GetAPISpec`).
+**Do not assume the `/api` page is the spec.** Min says the AMP 3 `/api` page is built like the AMP 2 one, which is a guide. The AMP 2 page is a short how-to (how calls are made, how to sign in, an example) plus a handful of sign-in and setup calls when logged out. The full list only appears when logged in, or when AMP 2's discovery setting is on.
+
+Treat that only as a hint about the **page format**. AMP 3 is an entirely new system with a new design, so nothing about AMP 2's calls, names, sign-in method or request style should be assumed for AMP 3. Capture what the AMP 3 page says and do not fill gaps from AMP 2.
 
 So for AMP 3, in this order:
 
 1. **Look for a download or "open API document" button.** AMP 3 has a Scalar API browser (`/scalar/v1` on the panel, for example `http://localhost:7278/scalar/v1`). Scalar can usually export the underlying JSON.
-2. **If the page only shows a short list, log in first** and look again, or turn on the discovery-without-login setting on a throwaway test instance only.
+2. **If the page only shows a short list, log in first** and look again. If the guide mentions a setting that shows the full list without login, use it on a throwaway test instance only.
 3. **If there is no export,** find the address the page loads its spec from (browser network tab, look for a `.json` request). ASP.NET apps often serve it at `/openapi/v1.json`; that is a guess, not confirmed for AMP 3.
 4. **If none of that works,** save the guide page itself as text, then a screenshot of every call list you can reach. That is still useful, but the real spec is better.
 
@@ -30,11 +32,11 @@ Tick each one when done. Where it says "spec", the answer should be readable fro
 ### 1. The spec itself and the auth model (Q-1, Q-2, Q-3, Q-10)
 
 - [ ] The full OpenAPI JSON (see above), or the guide page text if there is no spec.
-- [ ] The guide page's description of how calls are made (HTTP verb, headers, body shape, how the session or token is sent). The AMP 2 guide says POST, JSON body and a Bearer session id; AMP 3 may differ.
+- [ ] The guide page's description of how calls are made (HTTP verb, headers, body shape, how the session or token is sent). Do not assume it matches AMP 2.
 - [ ] How a bot signs in without a person. Is there an API key or token, a service account, or OAuth client credentials? Or only passkey and username/password? Note where you create it in the panel (a screenshot of that page is ideal).
 - [ ] How long a token lasts and how it refreshes (or "none").
 - [ ] The list of capabilities (Q-2): the roles or permissions page, or the capability list in the spec.
-- [ ] Whether you can create an account or role with only chosen capabilities on chosen shards, and whether the API tells you what the signed-in account can do (the old `Core/CurrentSessionHasPermission` idea) (Q-3).
+- [ ] Whether you can create an account or role with only chosen capabilities on chosen shards, and whether the API tells you what the signed-in account can do (V3 used `Core/CurrentSessionHasPermission`; AMP 3 may differ) (Q-3).
 - [ ] Any statement on rate limits, API versioning, or "this will change during the beta" (Q-10). The release notes or forum post are enough.
 
 ### 2. Events, console and chat (Q-4, Q-6)
