@@ -16,3 +16,6 @@ build/
 dist/
 .pytest_cache/
 .ruff_cache/
+
+# The bot's database and its upgrade backups
+data/

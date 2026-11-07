@@ -1,12 +1,11 @@
 # Setting up Portcullis
 
-This guide covers what exists today. Portcullis is not a working Discord bot yet: there is no Discord code. What you can set up and run now is:
+This guide covers what exists today:
 
+- the **Discord bot**, with a first set of slash commands (server list and status, start/stop/restart) and a relay of live console lines, player joins and leaves, and state changes into Discord channels (section 8);
 - the AMP 3 client library, with its tests;
 - the **event recorder**, which logs in to your AMP 3 panel and saves live server events, so the bot's event handling can be built from real data;
 - the **spec-diff tool**, which tells you what changed in a new AMP build's API.
-
-The database layer exists as code and tests only. Nothing creates or uses a database file yet.
 
 Windows (PowerShell) comes first, because that is where the recorder runs. Linux and macOS commands follow each step where they differ.
 
@@ -68,7 +67,7 @@ Use a dedicated account for the bot, never your own admin account.
 
    Grant it on one test server first. Add more servers later.
 
-These are the only permissions the recorder needs. The bot's later features (start/stop, console commands, backups) will need more, and this guide will list them when that code exists.
+These are the only permissions the recorder needs. The bot also needs to start, stop and restart servers. For now it runs with an admin AMP account; a limited role with exactly the bot's permissions is planned, and this guide will list them once they are checked against a real panel.
 
 ## 6. Fill in `.env`
 
@@ -83,11 +82,13 @@ notepad .env
 |---|---|---|
 | `AMP_URL` | recorder | The panel address with its port, as your browser shows it, e.g. `http://192.168.1.10:8443`. Use `https://` if the panel is behind HTTPS. No path such as `/api`. |
 | `AMP_USERNAME` | recorder | The bot user from step 5, e.g. `portcullis`. |
-| `AMP_PASSWORD` | recorder | **Leave this empty.** The recorder asks for the password when it starts, and the typing doesn't show. |
-| `DISCORD_TOKEN` | the bot (not built yet) | Leave empty for now. |
-| `PORTCULLIS_OWNER_IDS` | the bot (not built yet) | Leave empty for now. |
-| `PORTCULLIS_DB` | the bot (not built yet) | Optional; the default will be `data/portcullis.db`. |
-| `PORTCULLIS_LOG_LEVEL` | the bot (not built yet) | Optional: `DEBUG`, `INFO`, `WARNING` or `ERROR`. |
+| `AMP_PASSWORD` | recorder, bot | For the recorder alone, **leave this empty**: it asks for the password when it starts, and the typing doesn't show. The bot can't ask, so to run the bot put the password here. |
+| `DISCORD_TOKEN` | bot | The bot token from section 8.1. |
+| `DISCORD_GUILD_ID` | bot | Your Discord server's id (section 8.2). The bot only works there. |
+| `PORTCULLIS_OWNER_IDS` | bot | Your own Discord user id. Owners can use every command. |
+| `PORTCULLIS_OPERATOR_ROLE_IDS` | bot | Ids of the Discord roles allowed to start, stop and restart servers, comma separated. |
+| `PORTCULLIS_DB` | bot | Optional; the default is `data/portcullis.db`. |
+| `PORTCULLIS_LOG_LEVEL` | recorder, bot | Optional: `DEBUG`, `INFO`, `WARNING` or `ERROR`. |
 
 Real environment variables override `.env` values.
 
@@ -140,7 +141,69 @@ What is removed before anything is written: the session token, every hub ticket,
 
 It isn't known yet whether AMP 3 counts the hub's negotiate request and its WebSocket connection as one use of a single-use ticket or two. With `--mode auto`, the recorder tries `direct`, then `negotiate`, then `negotiate-reuse`, and records which worked in `summary.txt`. The bot will use that one.
 
-## 8. Check a new AMP build's API (spec-diff)
+## 8. Run the Discord bot
+
+### 8.1 Create the Discord application
+
+1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and sign in. Click **New Application**, name it `Portcullis`, accept the terms and click **Create**.
+2. Optional: on **General Information**, upload `docs/branding/png/portcullis-icon.png` as the app icon.
+3. Open the **Bot** tab:
+   - Click **Reset Token**, confirm, and copy the token into `DISCORD_TOKEN` in `.env`. Discord shows it only once. Treat it like a password: never paste it into chat, an issue or a commit. If it leaks, reset it here and the old one stops working.
+   - Turn **Public Bot** off, so only you can add it to a server.
+   - Leave all three **Privileged Gateway Intents** off (Presence, Server Members, Message Content). Portcullis uses slash commands only and asks Discord for nothing else.
+4. Open the **Installation** tab and set **Install Link** to **None**. You'll use the URL from the next step instead.
+
+### 8.2 Invite the bot and collect ids
+
+1. On **General Information**, copy the **Application ID**.
+2. Open this address in a browser, with your application id in place of `APP_ID`:
+
+   ```
+   https://discord.com/oauth2/authorize?client_id=APP_ID&scope=bot+applications.commands&permissions=3072
+   ```
+
+   `permissions=3072` is **View Channels** plus **Send Messages**, and nothing else: no admin, no managing roles or messages. Pick your server and click **Authorize**. (The same URL can be built on the **OAuth2** tab: scopes `bot` and `applications.commands`, permissions View Channels and Send Messages.)
+3. In Discord, turn on **User Settings → Advanced → Developer Mode**. Then:
+   - right-click your server's icon and **Copy Server ID** into `DISCORD_GUILD_ID`;
+   - right-click your own name and **Copy User ID** into `PORTCULLIS_OWNER_IDS`;
+   - in **Server Settings → Roles**, right-click each role that may start and stop servers and **Copy Role ID** into `PORTCULLIS_OPERATOR_ROLE_IDS`, separated by commas.
+
+### 8.3 Start it
+
+The bot logs in to AMP, so run it on the PC that can reach the panel, like the recorder. `AMP_PASSWORD` must be filled in (section 6).
+
+```powershell
+.\.venv\Scripts\python.exe -m portcullis
+```
+
+Linux or macOS: `.venv/bin/python -m portcullis`.
+
+If a setting is missing it lists every problem and stops. Otherwise it logs in to AMP, then to Discord, registers its slash commands in your server (they appear at once; press Ctrl+R in Discord if not) and reads the server list from AMP every five minutes. Stop it with Ctrl+C. It creates `data\portcullis.db` on first start.
+
+### 8.4 Commands
+
+| Command | Who can use it | What it does |
+|---|---|---|
+| `/server list` | everyone | Every server with its state and player count. Only you see the reply. |
+| `/server status <server>` | everyone | One server: state, players and who is online, CPU and memory. |
+| `/server power <server> <start\|stop\|restart>` | owners and operator roles | Asks AMP to start, stop or restart. The reply is public, so the channel sees who did it. |
+| `/setup relay <server> <console\|events\|chat> [channel]` | owners and members with **Manage Server** | Posts that server's live console lines, events (joins, leaves, state changes) or chat in a channel. Leave out the channel to stop. |
+
+Every power action and relay change, including refused attempts, is written to the audit table in the database. Servers you hide are left out of lists for members (there is no command to hide one yet).
+
+Discord's **Server Settings → Integrations → Portcullis** can narrow further who sees each command. It can't widen the bot's own checks: a member without an operator role is still refused.
+
+### 8.5 Relays
+
+Run `/setup relay` once per server and kind. One channel can take several kinds, or several servers. Give the bot **View Channel** and **Send Messages** in that channel first; the command checks and tells you if it can't post there.
+
+- **Console** posts the game's own output in code blocks, a batch every couple of seconds. AMP's own `agent` and `system` lines are left out. If the game prints faster than Discord accepts, the oldest lines are skipped and the next message says how many.
+- **Events** posts players joining and leaving, and real state changes (Online, Offline, Busy...). Join and leave need AMP to track players for that game; Arma Reforger, for one, gives none.
+- **Chat** is **off for every game** until Portcullis knows how that game writes chat to its console. AMP 3 has no chat event, so chat is read from console lines with a per-game pattern taken from a real capture. Setting a chat channel for a game without a pattern is allowed, and the bot says nothing will appear yet.
+
+Mentions never ping: everything the bot posts has `@everyone`, `@here`, user and role mentions turned off, and player names and chat are escaped so they can't format text or hide links.
+
+## 9. Check a new AMP build's API (spec-diff)
 
 When AMP ships a new build, copy its `data/versions/<version>/webapi/webapi.json` off the AMP host and run:
 
@@ -150,7 +213,7 @@ When AMP ships a new build, copy its `data/versions/<version>/webapi/webapi.json
 
 It lists breaking, changed and added API operations against the spec Portcullis is built on. Exit code 1 means something breaking. Add `--markdown` for a table you can paste into an issue. Updating the pinned spec is covered in [DEVELOPING.md](DEVELOPING.md#when-amp-ships-a-new-build).
 
-## 9. Where things live
+## 10. Where things live
 
 | Path | What it is |
 |---|---|
@@ -158,20 +221,22 @@ It lists breaking, changed and added API operations against the spec Portcullis 
 | `captures\` | Recorder output. Git ignores it. |
 | `portcullis\amp\` | The AMP 3 client: login and renewal, API calls, the live event hub. |
 | `portcullis\amp\spec\` | The pinned AMP 3 API spec the client is generated from. |
-| `portcullis\core\` | The bot's own types, independent of AMP. |
-| `portcullis\db\` | The database code and its migrations. Not used by anything yet; the bot will keep its file at `PORTCULLIS_DB` (default `data\portcullis.db`) and save a `.bak` copy before each schema upgrade. |
+| `portcullis\core\` | The bot's own types and the event relay, independent of AMP and Discord. |
+| `portcullis\bot\` | The Discord side: slash commands and the client. It never talks to AMP directly. |
+| `portcullis\db\` | The database code and its migrations. The bot keeps its file at `PORTCULLIS_DB` (default `data\portcullis.db`) and saves a `.bak` copy before each schema upgrade. |
+| `data\` | The bot's database. Git ignores it. |
 | `tools\` | The recorder, spec-diff and the client generator. |
 | `docs\` | The design ([DESIGN.md](DESIGN.md)), developer notes ([DEVELOPING.md](DEVELOPING.md)) and API notes. |
 
-## 10. Known gaps
+## 11. Known gaps
 
-- **No Discord bot yet.** `DISCORD_TOKEN` and `PORTCULLIS_OWNER_IDS` are read and checked, but nothing uses them.
+- **The bot is a first slice.** It has four commands. Backups, whitelist, linking, console commands from Discord and the `/setup` panel from [DESIGN.md](DESIGN.md) are still to come, and it hasn't run against a real Discord server and AMP panel together yet.
 - **Untested against a real AMP 3.** Everything has been tested against a fake AMP built from the API docs. Not yet checked against a real panel: whether login and the live hub work as the docs say, which connection mode works, whether joining a shard's events succeeds, what the event payloads really look like, and whether the generated models accept real responses. The recorder exists to answer these questions.
 - **Event parsing is provisional.** Until a capture exists, player join, leave and console events are parsed from guessed shapes.
 - **One AMP preview build.** Portcullis is built against AMP 3.0.0.6, which expires on 7 Dec 2026. A newer build may change the API; run spec-diff on it first.
 - **Licence.** The pinned spec and generated client contain CubeCoders' text. That's fine while the repo is private. See [DEVELOPING.md](DEVELOPING.md#licence-note) before it goes public.
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 | What you see | Likely cause and fix |
 |---|---|
@@ -186,5 +251,10 @@ It lists breaking, changed and added API operations against the spec Portcullis 
 | Repeated 401s while recording | The session expired and renewal failed. The client logs in again by itself; if it keeps happening, check whether the user's password changed or the user was disabled. |
 | `Stopped: gave up after 3 identical join failures` | The hub connection works but AMP refuses `JoinShard`. Try `--shard <id>` with one running server the bot has `view` and `console.read` on. If it still fails, send `lifecycle.jsonl` and `panel_hub_calls.txt`. |
 | `Hub task stopped: ...` | The live connection gave up. `lifecycle.jsonl` has the reason; send that line. |
+| `DISCORD_TOKEN is missing` or `DISCORD_GUILD_ID is missing` | Fill them in from section 8. |
+| `Discord refused the bot token` | The token was reset or mistyped. Reset it on the Bot tab and paste the new one. |
+| The slash commands don't appear | Check the bot is in the server set in `DISCORD_GUILD_ID` (the log warns if not), then press Ctrl+R in Discord. Commands only exist in that server. |
+| `Portcullis only works in the Discord server it was set up for` | The command was used in another server. Use it in the one from `DISCORD_GUILD_ID`. |
+| Nothing appears in a relay channel | Check the bot can see and post in it, that the server is running, and that something is happening (console lines, a player joining). For chat, see section 8.5. Warnings in the bot's log say if a post failed. |
 | PowerShell: "running scripts is disabled" | Only happens if you use `Activate.ps1`. Use `.\.venv\Scripts\python.exe` as shown, or see step 3. |
 | `py` not found | Python isn't installed, or wasn't added to PATH. Reinstall it with "Add python.exe to PATH" ticked. |
