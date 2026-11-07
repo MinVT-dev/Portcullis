@@ -26,6 +26,8 @@ dev = [
     "black==26.10.1",
     "isort==8.0.1",
     "pip-audit>=2.7",
+    # tools/build_game_assets.py reads image sizes; the bot itself does not need it.
+    "pillow>=10",
 ]
 
 [tool.setuptools.packages.find]
@@ -34,6 +36,7 @@ include = ["portcullis*"]
 [tool.setuptools.package-data]
 "portcullis.amp" = ["spec/*"]
 "portcullis.db" = ["migrations/*.sql"]
+"portcullis.assets" = ["games.json", "fallback/*.png"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
