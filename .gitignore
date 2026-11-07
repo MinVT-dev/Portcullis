@@ -6,6 +6,9 @@
 # Raw recorder output. Captures stay on your own machine.
 captures/
 
+# Game art downloaded by tools/fetch_game_assets.py. It belongs to the publishers.
+game-art/
+
 # Python
 __pycache__/
 *.py[cod]
