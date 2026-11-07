@@ -42,6 +42,13 @@ New evidence from the beta VM changes what to look for first. The machine listen
 - [ ] The NATS server version (`nats-server --version`), if available, and whether port 4222 only listens on the machine itself or on the network too.
 - [ ] Whatever the beta says 2222 is for. If nothing, say so; that is a question for Mike.
 
+New since the first screenshots: the panel's own pages show NATS as part of AMP 3 ("NATS Connection: Connected", a **Message Bus** card with `nats-server` v2.15.2 and JetStream: 16 streams, 35 consumers). These are worth capturing, as screenshots with the identifiers covered:
+
+- [ ] Any page that lists the JetStream **streams and consumers** by name, or a documentation page for the message bus. Stream and subject names are not secrets; credentials are.
+- [ ] Whether the panel or docs say who the bus is for: AMP's own components only, or also add-ons and integrations.
+- [ ] Any setting for the bus (a listen address, an enable toggle, access or user settings), including whether it is limited to the machine itself.
+- [ ] Update and release-channel notes that mention the message bus or the API changing between releases.
+
 Please do **not** connect a NATS client to 4222, subscribe to subjects, or publish anything. A wildcard subscription would show all traffic, including secrets, and could change how the system behaves. If NATS is meant for clients, the subjects and the sign-in method should be documented; ask Mike for that and for read access to the docs rather than probing it.
 
 ### 1. The spec itself and the auth model (Q-1, Q-2, Q-3, Q-10)
@@ -84,6 +91,7 @@ This decides most of the design, so it is worth the most care.
 ### 6. Running Gatekeeper inside AMP (Q-9)
 
 - [ ] Create an instance from the **Python App Runner** template (git repository, `requirements.txt`, entry script, `.env`). Does it start, does it install requirements, does it survive a restart?
+- [ ] The beta reports Podman 5.4.2 as its container runtime. Note whether the instance runs in a Podman container, and whether it can reach the panel, the message bus and the internet from inside it.
 - [ ] Note the Python version it provides. Gatekeeper wants 3.11 or newer.
 - [ ] Can the app instance reach the panel API from inside AMP, and at what address?
 
@@ -111,6 +119,8 @@ Do not paste, attach or screenshot any of these. If they appear in a capture, re
 - AMP licence keys.
 - Game server passwords, RCON passwords and Steam credentials.
 - Webhook signing secrets and Discord bot tokens.
+- Licence details: the licence name, expiry, key and server allowance. Cover or crop the Licensing card in system-page screenshots.
+- The NATS server name and process ids shown on the Message Bus card (not secrets, but they identify your install; cover them).
 - NATS credentials: user names and passwords, tokens, NKeys, JWTs, `.creds` files, and the contents of the `nats-server` config file (it usually holds them).
 - Tailscale addresses (`100.x.x.x`), node names and auth keys. Port numbers and process names are fine.
 - Public IP addresses of your real servers, and player names you do not have permission to share (use a test account).
