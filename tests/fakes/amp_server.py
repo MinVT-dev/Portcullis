@@ -23,7 +23,6 @@ USERNAME = "portcullis"
 PASSWORD = "correct-horse-battery"
 SHARD_ID = "7d4b6a52-9a7e-4e0e-9a38-1d1f0d3c2b11"
 TENANT = "_root"  # the tenant id a real single-tenant AMP 3 reports
-SPIRE_ID = "5f0c2a8e-1b7d-4c3e-9f21-6a4d8b0e7c13"
 
 
 class Clock:
@@ -68,7 +67,6 @@ class FakeAmp:
     refused_tickets: int = 0
     muted: list[web.WebSocketResponse] = field(default_factory=list)  # half-open sockets: never answer
     join_error: str | None = None  # when set, JoinShard with the right arguments fails with this error
-    join_scope: str = TENANT  # the first JoinShard argument this fake accepts (TENANT or SPIRE_ID)
     join_attempts: list[list[Any]] = field(default_factory=list)  # every JoinShard argument list received
     panel_script: str = "o=>o.invoke(`JoinShard`,e,t)"  # served as the panel's JavaScript
     _seq: itertools.count = field(default_factory=lambda: itertools.count(1))
@@ -147,7 +145,7 @@ class FakeAmp:
         self.calls.append("shards")
         if self._bearer(request) is None:
             return web.Response(status=401, headers={"WWW-Authenticate": "Bearer"})
-        return web.json_response([{"id": SHARD_ID, "tenantId": TENANT, "spireId": SPIRE_ID, "name": "Survival",
+        return web.json_response([{"id": SHARD_ID, "tenantId": TENANT, "name": "Survival",
                                    "unknownFutureField": 1}])
 
     async def console(self, request: web.Request) -> web.Response:
@@ -177,7 +175,7 @@ class FakeAmp:
             return web.Response(status=401)
         if request.match_info["id"] != SHARD_ID:
             return web.json_response({"title": "Not Found", "status": 404}, status=404)
-        return web.json_response({"id": SHARD_ID, "tenantId": TENANT, "spireId": SPIRE_ID, "name": "survival",
+        return web.json_response({"id": SHARD_ID, "tenantId": TENANT, "name": "survival",
                                   "displayName": "Survival",
                                   "templateSlug": "minecraft", "suspended": False, "tags": ["smp"]})
 
@@ -263,11 +261,12 @@ class FakeAmp:
                     reply: dict[str, Any] = {"type": 3, "invocationId": data["invocationId"]}
                     # Real AMP 3 runs without SignalR's detailed errors, so a wrong argument count, a
                     # wrong type and an exception inside the method all come back as this one message.
-                    if self.join_error is not None or args != [self.join_scope, SHARD_ID]:
+                    if self.join_error is not None or args != [TENANT, SHARD_ID]:
                         reply["error"] = (self.join_error
                                           or "Failed to invoke 'JoinShard' due to an error on the server.")
                     else:
                         self.joined.append(args[1])
+                        reply["result"] = {"feeds": ["core", "console", "snapshots", "schedule"], "error": None}
                     await ws.send_str(json.dumps(reply) + RS)
                 elif data.get("type") == 1 and data.get("target") == "LeaveShard":
                     self.left.append(data["arguments"][-1])

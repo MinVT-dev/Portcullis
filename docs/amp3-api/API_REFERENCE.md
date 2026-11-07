@@ -54,7 +54,7 @@ Content-Type: application/json
 ```
 → `202`. The command is published to the shard over the message bus **[S]**. A `{}` body gets 400 `Command` required **[V]**.
 
-Live events: `POST /api/auth/hub-token` returns a single-use ticket. Then connect SignalR to `/hubs/shard?access_token=<ticket>` and call `JoinShard(scope, shardId)` (two arguments). See section 8.
+Live events: `POST /api/auth/hub-token` returns a single-use ticket. Then connect SignalR to `/hubs/shard?access_token=<ticket>` and call `JoinShard(tenantId, shardId)` (tenant `_root` on a single install). See section 8.
 
 ## 2. Base URL and transport
 
@@ -241,11 +241,12 @@ All 71 nodes **[V]**:
 
 | Hub | Negotiate | Client → server **[B]** | Server → client events **[B]** |
 |---|---|---|---|
-| `/hubs/shard` | **[V]** 200 with a fresh ticket. Transports: WebSockets, ServerSentEvents, LongPolling | `JoinShard(scope, shardId)`, `LeaveShard(scope, shardId)` (two arguments in the panel's code; `scope` is the tenant or spire id) | `ConsoleLine`, `Metrics`, `UserJoined`, `UserLeft`, `UserRoster`, `ShardStateChanged`, `Lifecycle`, `ScheduleRun`, `Snapshot`, `Migration` |
+| `/hubs/shard` | **[V]** 200 with a fresh ticket. Transports: WebSockets, ServerSentEvents, LongPolling | **[V]** `JoinShard(tenantId, shardId)`, `LeaveShard(tenantId, shardId)`. The tenant is `_root` on a single install. Join returns `{feeds: [core, console, snapshots, schedule], error}` | `ConsoleLine`, `Metrics`, `UserJoined`, `UserLeft`, `UserRoster`, `ShardStateChanged`, `Lifecycle`, `ScheduleRun`, `Snapshot`, `Migration` |
 | `/hubs/spire` | **[V]** 200 with a fresh ticket | `JoinSpire`, `LeaveSpire`, `JoinNetwork`, `LeaveNetwork` | `SpirePresence`, `SpireState`, `NetworkStatus` |
 | `/hubs/tasks` | **[V]** 200 with a fresh ticket | none | `TaskUpsert` |
 
-- Event payloads were **not** captured live. The REST twins show the shapes:
+- **Live event shapes [V]** (AMP 3.0.0.6): `Metrics` is `[shardId, sample]` every ~3 s. `UserRoster` is `[shardId, [users]]` every ~10 s. `ShardStateChanged` is `[tenantId, shardId, ShardState]` every ~9 s, even when nothing changed. A one-argument `JoinShard(shardId)` fails with SignalR's generic "error on the server", because AMP runs without detailed errors.
+- `ConsoleLine`, `UserJoined` and `UserLeft` have not been captured yet. The REST twins show their likely shapes:
   - `ConsoleLine` ≈ [ConsoleLineDto](#schema-consolelinedto): `{streamId, text, timestamp, seq, kind, state, code, params, level, origin}`. `seq` is a per-shard sequence that merges history with the live feed.
   - `Metrics` ≈ [ShardMetricsSample](#schema-shardmetricssample).
   - `ShardStateChanged` ≈ [ShardState](#schema-shardstate).

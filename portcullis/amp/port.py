@@ -15,7 +15,7 @@ from typing import Any
 
 from portcullis.amp import models as m
 from portcullis.amp.client import AmpClient
-from portcullis.amp.errors import AmpError, MissingCapability
+from portcullis.amp.errors import MissingCapability
 from portcullis.amp.events import parse_hub_event, state_from, to_int
 from portcullis.amp.signalr import HubConnection, HubEvent, Mode
 from portcullis.core.types import (
@@ -30,6 +30,8 @@ from portcullis.core.types import (
 
 log = logging.getLogger(__name__)
 
+DEFAULT_TENANT = "_root"  # the only tenant on a single-install AMP 3; used if a shard reports none
+
 
 def _float(value: Any) -> float | None:
     try:
@@ -39,14 +41,13 @@ def _float(value: Any) -> float | None:
 
 
 class ShardEvents:
-    """One ``/hubs/shard`` connection shared by every subscriber.
+    """Live events for each subscribed shard, over one ``/hubs/shard`` connection per shard.
 
-    Joins a shard when its first subscriber arrives, leaves when the last one goes, and joins all
-    of them again after every reconnect (group membership does not survive a new connection).
-
-    The panel calls ``JoinShard(scope, shardId)`` with two arguments. The second is the shard id; the
-    first is the shard's tenant id or its spire id (not yet confirmed which), so both are tried and
-    the one that works is remembered.
+    One connection per shard because AMP's ``ConsoleLine`` carries no shard id, and its ``seq`` is
+    shared by every shard: on a connection that has joined several shards, console lines can't be
+    told apart (seen live on AMP 3.0.0.6). Each connection joins with
+    ``JoinShard(tenantId, shardId)``, as the panel does, and joins again after every reconnect.
+    The connection opens with the first subscriber and closes after the last one leaves.
     """
 
     def __init__(self, client: AmpClient, *, mode: Mode = "direct", queue_size: int = 1000) -> None:
@@ -54,61 +55,57 @@ class ShardEvents:
         self._mode = mode
         self._queue_size = queue_size
         self._subs: dict[str, set[asyncio.Queue[ServerEvent]]] = {}
-        self.conn: HubConnection | None = None
-        self._task: asyncio.Task[None] | None = None
+        self._conns: dict[str, tuple[HubConnection, asyncio.Task[None]]] = {}
         self.dropped = 0  # events lost because a subscriber fell behind
-        self._scopes: dict[str, list[str]] = {}  # shard id -> candidate first arguments, best first
-        self.scope_kind: str | None = None  # "tenant" or "spire", once a join has succeeded
+        self._tenants: dict[str, str] = {}  # shard id -> tenant id
 
-    async def _candidates(self, sid: str) -> list[tuple[str, str]]:
-        shard = await self._client.shards.get_shards_by_id(sid)
-        found = [("tenant", shard.tenant_id), ("spire", str(shard.spire_id) if shard.spire_id else None)]
-        candidates = [(kind, value) for kind, value in found if value]
-        if self.scope_kind is not None:
-            candidates.sort(key=lambda c: c[0] != self.scope_kind)
-        return candidates
+    @property
+    def connections(self) -> dict[str, HubConnection]:
+        return {sid: conn for sid, (conn, _) in self._conns.items()}
 
-    async def _join(self, conn: HubConnection, sid: str) -> None:
-        last: Exception | None = None
-        for kind, scope in await self._candidates(sid):
-            try:
-                await conn.invoke("JoinShard", scope, sid)
-            except AmpError as exc:
-                last = exc
-                continue
-            self.scope_kind = kind
-            self._scopes[sid] = [scope]
+    async def _tenant(self, sid: str) -> str:
+        if sid not in self._tenants:
+            shard = await self._client.shards.get_shards_by_id(sid)
+            self._tenants[sid] = shard.tenant_id or DEFAULT_TENANT
+        return self._tenants[sid]
+
+    def _open(self, sid: str) -> None:
+        async def join(conn: HubConnection) -> None:
+            await conn.invoke("JoinShard", await self._tenant(sid), sid)
+
+        async def handle(event: HubEvent) -> None:
+            parsed = parse_hub_event(event, (sid,))
+            if parsed is None or parsed.server.lower() != sid:
+                return
+            for queue in self._subs.get(sid, ()):
+                try:
+                    queue.put_nowait(parsed)
+                except asyncio.QueueFull:
+                    self.dropped += 1
+
+        conn = self._client.hub("shard", mode=self._mode, on_connected=join)
+        self._conns[sid] = (conn, asyncio.create_task(conn.run(handle), name=f"amp-shard-hub-{sid[:8]}"))
+
+    async def _close(self, sid: str) -> None:
+        entry = self._conns.pop(sid, None)
+        if entry is None:
             return
-        raise last or AmpError(f"shard {sid} has no tenant or spire id to join with")
-
-    async def _join_all(self, conn: HubConnection) -> None:
-        for sid in list(self._subs):
-            await self._join(conn, sid)
-
-    async def _handle(self, event: HubEvent) -> None:
-        parsed = parse_hub_event(event, self._subs.keys())
-        if parsed is None:
-            return
-        for queue in self._subs.get(parsed.server.lower(), ()):
-            try:
-                queue.put_nowait(parsed)
-            except asyncio.QueueFull:
-                self.dropped += 1
-
-    def _ensure_running(self) -> None:
-        if self._task is None or self._task.done():
-            self.conn = self._client.hub("shard", mode=self._mode, on_connected=self._join_all)
-            self._task = asyncio.create_task(self.conn.run(self._handle), name="amp-shard-hub")
+        conn, task = entry
+        tenant = self._tenants.get(sid)
+        if tenant is not None and conn.connected:
+            with contextlib.suppress(Exception):
+                await conn.send("LeaveShard", tenant, sid)
+        await conn.close()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
 
     async def subscribe(self, server: ServerId) -> AsyncIterator[ServerEvent]:
         sid = server.lower()
         queue: asyncio.Queue[ServerEvent] = asyncio.Queue(self._queue_size)
-        first = sid not in self._subs
         self._subs.setdefault(sid, set()).add(queue)
-        self._ensure_running()
-        if first and self.conn is not None and self.conn.connected:
-            with contextlib.suppress(AmpError):
-                await self._join(self.conn, sid)
+        if sid not in self._conns or self._conns[sid][1].done():
+            self._open(sid)
         try:
             while True:
                 yield await queue.get()
@@ -118,18 +115,11 @@ class ShardEvents:
                 subs.discard(queue)
                 if not subs:
                     del self._subs[sid]
-                    scope = self._scopes.pop(sid, [None])[0]
-                    if scope is not None and self.conn is not None and self.conn.connected:
-                        with contextlib.suppress(Exception):
-                            await self.conn.send("LeaveShard", scope, sid)
+                    await self._close(sid)
 
     async def close(self) -> None:
-        if self.conn is not None:
-            await self.conn.close()
-        if self._task is not None:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await self._task
+        for sid in list(self._conns):
+            await self._close(sid)
 
 
 class AmpServerPort:
@@ -200,14 +190,16 @@ class AmpServerPort:
         for node in graph.nodes or []:
             if node.id is None:
                 continue
-            out.append(Backup(
-                id=str(node.id),
-                name=node.name,
-                created_at=node.created_at,
-                size_mb=to_int(node.size_mb),
-                status=str(node.status.root) if node.status is not None else None,
-                sticky=bool(node.sticky),
-            ))
+            out.append(
+                Backup(
+                    id=str(node.id),
+                    name=node.name,
+                    created_at=node.created_at,
+                    size_mb=to_int(node.size_mb),
+                    status=str(node.status.root) if node.status is not None else None,
+                    sticky=bool(node.sticky),
+                )
+            )
         oldest = datetime.min.replace(tzinfo=UTC)
         out.sort(key=lambda b: b.created_at or oldest, reverse=True)
         return out

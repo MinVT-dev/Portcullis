@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.fakes.amp_server import PASSWORD, SHARD_ID, SPIRE_ID, TENANT, USERNAME, FakeAmp, wait_for
+from tests.fakes.amp_server import PASSWORD, SHARD_ID, TENANT, USERNAME, FakeAmp, wait_for
 from tools import record_events
 
 
@@ -69,27 +69,36 @@ async def test_recorder_gives_up_when_join_always_fails(fake: FakeAmp, base_url:
     capture = next(tmp_path.iterdir())
     records = lifecycle_of(capture)
     kinds = [r["event"] for r in records]
-    # Both scopes are tried on each of the 3 connects before giving up.
-    assert kinds.count("join-failed") == 6 and kinds.count("gave-up") == 1
-    failed = [r for r in records if r["event"] == "join-failed"][:2]
-    assert [r["arguments"] for r in failed] == [[TENANT, SHARD_ID], [SPIRE_ID, SHARD_ID]]
+    assert kinds.count("join-failed") == 3 and kinds.count("gave-up") == 1
+    failed = [r for r in records if r["event"] == "join-failed"][:1]
+    assert failed[0]["arguments"] == [TENANT, SHARD_ID]
     assert failed[0]["state"] == "online" and "error on the server" in failed[0]["error"]
 
     panel = (capture / "panel_hub_calls.txt").read_text()
     assert "invoke(`JoinShard`,e,t)" in panel
 
 
-async def test_recorder_falls_back_to_spire_scope(fake: FakeAmp, base_url: str, tmp_path: Path,
-                                                  monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AMP_PASSWORD", PASSWORD)
-    fake.join_scope = SPIRE_ID
-    task = asyncio.create_task(record_events.run(recorder_args(base_url, tmp_path, duration=2.0)))
-    await wait_for(lambda: fake.joined == [SHARD_ID])
-    assert await task == 0
-    capture = next(tmp_path.iterdir())
-    joined = [r for r in lifecycle_of(capture) if r["event"] == "joined"]
-    assert joined[0]["scope"] == "spire"
-    assert "join_scope: spire" in (capture / "summary.txt").read_text()
+def test_noisy_events_are_echoed_only_when_they_change(tmp_path: Path) -> None:
+    from portcullis.amp.signalr import HubEvent
+
+    rec = record_events.Recorder(tmp_path, record_events.CaptureRedactor(scrub_ips=True), echo=True)
+    state = {"status": 25, "isRunning": True, "revision": 1}
+    seen = [
+        rec._worth_echoing(HubEvent("shard", "Metrics", [SHARD_ID, {"cpuPercent": 3}])),
+        rec._worth_echoing(HubEvent("shard", "ShardStateChanged", [TENANT, SHARD_ID, state])),
+        rec._worth_echoing(HubEvent("shard", "ShardStateChanged", [TENANT, SHARD_ID, {**state, "revision": 2}])),
+        rec._worth_echoing(HubEvent("shard", "ShardStateChanged", [TENANT, SHARD_ID, {**state, "isRunning": False}])),
+        rec._worth_echoing(HubEvent("shard", "UserRoster", [SHARD_ID, []])),
+        rec._worth_echoing(HubEvent("shard", "UserRoster", [SHARD_ID, []])),
+        rec._worth_echoing(HubEvent("shard", "UserRoster", [SHARD_ID, [{"name": "Steve"}]])),
+        rec._worth_echoing(HubEvent("shard", "ConsoleLine", [SHARD_ID, {"text": "hi"}])),
+    ]
+    assert seen == [False, True, False, True, True, False, True, True]
+
+
+def test_versions_are_not_mistaken_for_ip_addresses() -> None:
+    r = record_events.CaptureRedactor(scrub_ips=True)
+    assert r.text("agent 3.0.0.6+f3d1a77cea from 192.168.1.20") == "agent 3.0.0.6+f3d1a77cea from <ip>"
 
 
 async def test_recorder_rejects_unknown_shard(fake: FakeAmp, base_url: str, tmp_path: Path,

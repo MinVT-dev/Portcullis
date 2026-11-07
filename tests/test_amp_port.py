@@ -14,8 +14,8 @@ from portcullis.amp.auth import Credentials
 from portcullis.amp.client import AmpClient
 from portcullis.amp.port import AmpServerPort
 from portcullis.core.port import AmpPort
-from portcullis.core.types import ConsoleLine, PlayerJoined, PowerAction, ServerId, ServerState
-from tests.fakes.amp_server import PASSWORD, SHARD_ID, SPIRE_ID, TENANT, USERNAME, FakeAmp, wait_for
+from portcullis.core.types import ConsoleLine, PlayerJoined, PowerAction, ServerId, ServerState, StateChanged
+from tests.fakes.amp_server import PASSWORD, SHARD_ID, TENANT, USERNAME, FakeAmp, wait_for
 
 SID = ServerId(SHARD_ID)
 
@@ -99,8 +99,7 @@ async def test_events_share_one_connection_and_rejoin(port: AmpServerPort, fake:
     await wait_for(lambda: fake.left == [SHARD_ID])
 
 
-async def test_events_join_with_spire_scope_when_tenant_is_refused(port: AmpServerPort, fake: FakeAmp) -> None:
-    fake.join_scope = SPIRE_ID
+async def test_events_join_with_tenant_and_parse_live_shapes(port: AmpServerPort, fake: FakeAmp) -> None:
     got: list = []
 
     async def consume() -> None:
@@ -109,10 +108,13 @@ async def test_events_join_with_spire_scope_when_tenant_is_refused(port: AmpServ
 
     task = asyncio.create_task(consume())
     await wait_for(lambda: fake.joined == [SHARD_ID])
-    assert fake.join_attempts[:2] == [[TENANT, SHARD_ID], [SPIRE_ID, SHARD_ID]]
-    assert port.hub.scope_kind == "spire"
-    await fake.broadcast("ConsoleLine", {"shardId": SHARD_ID, "text": "hello", "seq": 1})
+    assert fake.join_attempts == [[TENANT, SHARD_ID]]
+    # Shape seen live on AMP 3.0.0.6: [tenantId, shardId, ShardState].
+    await fake.broadcast("ShardStateChanged", TENANT, SHARD_ID,
+                         {"shardId": SHARD_ID, "tenantId": TENANT, "status": 25, "isRunning": True,
+                          "isStopped": False, "isBusy": False})
     await wait_for(lambda: len(got) == 1)
+    assert isinstance(got[0], StateChanged) and got[0].state is ServerState.RUNNING and got[0].raw_status == 25
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
     await wait_for(lambda: fake.left == [SHARD_ID])
