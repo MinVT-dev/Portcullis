@@ -31,6 +31,8 @@ Method names come from the HTTP method and path, because the spec has no operati
 
 ## Setup
 
+For a step-by-step guide, including the AMP bot user and troubleshooting, see [SETUP.md](SETUP.md).
+
 Python 3.11 or newer.
 
 Windows (PowerShell), from the repo folder:
