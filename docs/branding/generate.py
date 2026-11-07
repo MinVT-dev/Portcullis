@@ -2,6 +2,7 @@
 
 Usage: python3 gen_v2.py OUT_DIR FONT_DIR
 """
+
 import math
 import pathlib
 import sys
@@ -45,13 +46,13 @@ def pts(points):
 def offset(poly, t):
     """Offset an open polyline inward (towards the arch's inside) by t, with mitred corners."""
     lines = []
-    for (x0, y0), (x1, y1) in zip(poly, poly[1:]):
+    for (x0, y0), (x1, y1) in zip(poly, poly[1:], strict=False):
         dx, dy = x1 - x0, y1 - y0
         n = math.hypot(dx, dy)
         nx, ny = -dy / n, dx / n  # left-hand normal: points into the arch for this path direction
         lines.append(((x0 + nx * t, y0 + ny * t), (dx, dy)))
     out = [(poly[0][0] + lines[0][0][0] - poly[0][0], poly[0][1])]
-    for (p0, d0), (p1, d1) in zip(lines, lines[1:]):
+    for (p0, d0), (p1, d1) in zip(lines, lines[1:], strict=False):
         den = d0[0] * d1[1] - d0[1] * d1[0]
         u = ((p1[0] - p0[0]) * d1[1] - (p1[1] - p0[1]) * d1[0]) / den
         out.append((p0[0] + d0[0] * u, p0[1] + d0[1] * u))
@@ -60,10 +61,10 @@ def offset(poly, t):
     return out
 
 
-REGION = offset(FRAME, W / 2 + G)          # where the gate may draw
-BEAM = offset(FRAME, W / 2 + G + W / 2)    # centre line of the gate's top beam
-GX0, GX1 = REGION[0][0], REGION[-1][0]     # 17.5 .. 46.5
-GATE_BARS = (GX0, 32 - W / 2, GX1 - W)     # bars at both edges and the centre
+REGION = offset(FRAME, W / 2 + G)  # where the gate may draw
+BEAM = offset(FRAME, W / 2 + G + W / 2)  # centre line of the gate's top beam
+GX0, GX1 = REGION[0][0], REGION[-1][0]  # 17.5 .. 46.5
+GATE_BARS = (GX0, 32 - W / 2, GX1 - W)  # bars at both edges and the centre
 
 
 def mark(p, fg=WHITE, lowered=False, light=None):
@@ -71,9 +72,7 @@ def mark(p, fg=WHITE, lowered=False, light=None):
     d = 9.0 if lowered else 0.0  # lowered: bars reach the ground
     beam_pts = [(BEAM[1][0], BEAM[1][1] + 6)] + BEAM[1:-1] + [(BEAM[-2][0], BEAM[-2][1] + 6)]
     beam = f'<polyline points="{pts(beam_pts)}" fill="none" stroke="{fg}" stroke-width="{W}" stroke-linejoin="miter"/>'
-    bars = "".join(
-        f'<path d="M{x} 0 H{x + W} V{44 + d} L{x + W / 2} {49 + d} L{x} {44 + d} Z"/>' for x in GATE_BARS
-    )
+    bars = "".join(f'<path d="M{x} 0 H{x + W} V{44 + d} L{x + W / 2} {49 + d} L{x} {44 + d} Z"/>' for x in GATE_BARS)
     rail = f'<rect x="{GX0}" y="{33 + d}" width="{GX1 - GX0}" height="{W}"/>'
     glow = ""
     if light and not lowered:
@@ -85,7 +84,8 @@ def mark(p, fg=WHITE, lowered=False, light=None):
         )
     ground = ""
     if light and lowered:
-        ground = f'<rect x="{FRAME[0][0] - W / 2}" y="{BASE + 1.5}" width="{FRAME[-1][0] - FRAME[0][0] + W}" height="2.5" fill="{light}"/>'
+        sill_x, sill_w = FRAME[0][0] - W / 2, FRAME[-1][0] - FRAME[0][0] + W
+        ground = f'<rect x="{sill_x}" y="{BASE + 1.5}" width="{sill_w}" height="2.5" fill="{light}"/>'
     return (
         f'<defs><clipPath id="{p}c"><polygon points="{pts(REGION)}"/></clipPath></defs>'
         f"{glow}"
@@ -143,7 +143,9 @@ def lockup(p, fg, sub, x, y, mark_size, text_size, tagline=None, tag_size=None):
     # Exo 2 cap height is ~0.70 em. Centre the caps on the mark's visual body.
     base = y + mark_size * (BASE / 64)
     tx = x + mark_size * 1.0
-    word, ww = text_path("exo2.woff2", "Portcullis", text_size, tx, base - mark_size * 0.10, tracking=text_size * 0.01, fill=fg)
+    word, ww = text_path(
+        "exo2.woff2", "Portcullis", text_size, tx, base - mark_size * 0.10, tracking=text_size * 0.01, fill=fg
+    )
     out = m + word
     width = tx - x + ww
     if tagline:
@@ -162,9 +164,7 @@ def iso_grid(w, h, step, opacity):
         x0 = i * dx
         lines.append(f"M{x0:.1f} 0 L{x0 + h / TAN30:.1f} {h}")
         lines.append(f"M{x0:.1f} 0 L{x0 - h / TAN30:.1f} {h}")
-    return (
-        f'<path d="{" ".join(lines)}" stroke="{LINE}" stroke-opacity="{opacity}" stroke-width="1" fill="none"/>'
-    )
+    return f'<path d="{" ".join(lines)}" stroke="{LINE}" stroke-opacity="{opacity}" stroke-width="1" fill="none"/>'
 
 
 def pills(labels, x, y, size):
@@ -187,7 +187,8 @@ def backdrop(w, h, p, glow_x, glow_y):
         f'<stop offset="0" stop-color="{CYAN}" stop-opacity="0.20"/>'
         f'<stop offset="1" stop-color="{CYAN}" stop-opacity="0"/></radialGradient>'
         f'<linearGradient id="{p}fade" x1="0" y1="0" x2="1" y2="0">'
-        f'<stop offset="0" stop-color="{NAVY}" stop-opacity="1"/><stop offset="0.55" stop-color="{NAVY}" stop-opacity="0.6"/>'
+        f'<stop offset="0" stop-color="{NAVY}" stop-opacity="1"/>'
+        f'<stop offset="0.55" stop-color="{NAVY}" stop-opacity="0.6"/>'
         f'<stop offset="1" stop-color="{NAVY}" stop-opacity="0"/></linearGradient></defs>'
         f'<rect width="{w}" height="{h}" fill="{NAVY}"/>'
         + iso_grid(w, h, 36, 0.07)
@@ -205,7 +206,9 @@ files["portcullis-mark.svg"] = svg(64, 64, "Portcullis mark", mark("m"))
 files["portcullis-mark-dark.svg"] = svg(64, 64, "Portcullis mark (for light backgrounds)", mark("md", fg=NAVY))
 files["portcullis-icon.svg"] = svg(512, 512, "Portcullis icon", icon("i"))
 files["portcullis-status-online.svg"] = svg(512, 512, "Portcullis: server online", icon("on", light=GREEN))
-files["portcullis-status-offline.svg"] = svg(512, 512, "Portcullis: server offline", icon("off", lowered=True, light=RED))
+files["portcullis-status-offline.svg"] = svg(
+    512, 512, "Portcullis: server offline", icon("off", lowered=True, light=RED)
+)
 
 lk, lw = lockup("l", WHITE, GREY, 0, 0, 128, 92)
 files["portcullis-logo.svg"] = svg(int(lw) + 4, 132, "Portcullis logo", lk)
