@@ -17,6 +17,7 @@ from portcullis.amp.errors import AuthFailed
 from portcullis.amp.port import AmpServerPort
 from portcullis.bot import Access, PortcullisBot
 from portcullis.config import ConfigError, Settings, load, setup_logging
+from portcullis.core.games import game_hooks
 from portcullis.db.database import Database
 
 log = logging.getLogger("portcullis")
@@ -35,6 +36,7 @@ async def run(settings: Settings) -> None:
                 db=db,
                 access=Access(frozenset(settings.owner_ids), frozenset(settings.operator_role_ids)),
                 guild_id=settings.guild_id,
+                hooks=game_hooks,
             )
             try:
                 await bot.start(settings.discord_token)

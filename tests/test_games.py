@@ -69,3 +69,17 @@ def test_live_user_joined_shape() -> None:
 def test_deduper_drops_only_one_copy() -> None:
     d = LineDeduper()
     assert [d.is_duplicate(line("tick", s)) for s in (1, 2, 3, 4)] == [False, True, False, True]
+
+
+def test_unturned_relay_hooks() -> None:
+    from portcullis.core.games import game_hooks
+
+    hooks = game_hooks("unturned")
+    assert hooks.chat is not None and hooks.drop is not None
+    assert hooks.chat(line('[World] Alice [Alice]: "hi"')) == ("Alice", "hi")
+    assert hooks.chat(line('[World] Alice [Alice]: "/help"')) is None
+    assert [hooks.drop(line("x", s)) for s in (1, 2)] == [False, True]
+    # Each server gets its own deduper.
+    assert game_hooks("unturned").drop(line("x", 2)) is False
+    other = game_hooks("minecraft")
+    assert other.chat is None and other.drop is None

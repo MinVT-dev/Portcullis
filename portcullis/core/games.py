@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from portcullis.core.relay import GameHooks
 from portcullis.core.types import ConsoleLine, ServerId
 
 
@@ -101,3 +102,21 @@ class LineDeduper:
         if duplicate:
             del self._last[key]  # one copy per line: a third identical line is real output
         return duplicate
+
+
+def game_hooks(game: str | None) -> GameHooks:
+    """Relay hooks for a server running ``game`` (its AMP template or name).
+
+    The relay calls this once per followed server, so each server gets its own deduper.
+    """
+    profile = profile_for(game)
+    chat = None
+    if profile.chat is not None:
+        def chat(line: ConsoleLine) -> tuple[str, str] | None:
+            message = profile.parse_chat(line)
+            if message is None or message.is_command:
+                return None
+            return message.player, message.text
+
+    drop = LineDeduper().is_duplicate if profile.duplicate_lines else None
+    return GameHooks(chat=chat, drop=drop)
