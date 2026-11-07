@@ -61,6 +61,8 @@ class FakeAmp:
     sockets: list[web.WebSocketResponse] = field(default_factory=list)
     joined: list[str] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
+    left: list[str] = field(default_factory=list)
+    roster_forbidden: bool = False
     refused_tickets: int = 0
     muted: list[web.WebSocketResponse] = field(default_factory=list)  # half-open sockets: never answer
     _seq: itertools.count = field(default_factory=lambda: itertools.count(1))
@@ -160,6 +162,59 @@ class FakeAmp:
         self.calls.append("always-401")
         return web.Response(status=401)
 
+    def _authed(self, request: web.Request) -> bool:
+        return self._bearer(request) is not None
+
+    async def shard(self, request: web.Request) -> web.Response:
+        if not self._authed(request):
+            return web.Response(status=401)
+        if request.match_info["id"] != SHARD_ID:
+            return web.json_response({"title": "Not Found", "status": 404}, status=404)
+        return web.json_response({"id": SHARD_ID, "name": "survival", "displayName": "Survival",
+                                  "templateSlug": "minecraft", "suspended": False, "tags": ["smp"]})
+
+    async def state(self, request: web.Request) -> web.Response:
+        if not self._authed(request):
+            return web.Response(status=401)
+        return web.json_response({"shardId": SHARD_ID, "status": 20, "isRunning": True, "isStopped": False,
+                                  "isBusy": False, "statusMessage": "Running",
+                                  "metrics": {"cpuUsagePercent": "12.5", "memoryUsageMB": 2048,
+                                              "memoryLimitMB": 4096}})
+
+    async def users(self, request: web.Request) -> web.Response:
+        if not self._authed(request):
+            return web.Response(status=401)
+        if self.roster_forbidden:
+            return web.json_response({"title": "Forbidden", "status": 403}, status=403)
+        return web.json_response([{"name": "Steve", "id": "uuid-steve", "sessionId": "s1",
+                                   "endpoint": None, "idKind": "steam",
+                                   "joinedAt": "2026-11-07T12:00:00Z"}])
+
+    async def history(self, request: web.Request) -> web.Response:
+        if not self._authed(request):
+            return web.Response(status=401)
+        limit = int(request.query.get("limit", "300"))
+        lines = [{"streamId": "stdout", "text": f"line {i}", "timestamp": "2026-11-07T12:00:00Z", "seq": i}
+                 for i in range(1, 6)][-limit:]
+        return web.json_response({"lines": lines, "hasMore": False})
+
+    async def power(self, request: web.Request) -> web.Response:
+        if not self._authed(request):
+            return web.Response(status=401)
+        self.calls.append("power:" + request.match_info["action"])
+        return web.Response(status=202)
+
+    async def snapshots(self, request: web.Request) -> web.Response:
+        if not self._authed(request):
+            return web.Response(status=401)
+        nodes = [
+            {"id": "11111111-1111-1111-1111-111111111111", "name": "old", "status": 2, "sizeMb": "10",
+             "createdAt": "2026-11-01T00:00:00Z"},
+            {"id": "22222222-2222-2222-2222-222222222222", "name": "new", "status": 2, "sizeMb": 12,
+             "createdAt": "2026-11-06T00:00:00Z", "sticky": True},
+        ]
+        return web.json_response({"shardId": SHARD_ID, "nodes": nodes})
+
     async def negotiate(self, request: web.Request) -> web.Response:
         self.calls.append("negotiate")
         if request.headers.get("Authorization"):
@@ -197,6 +252,8 @@ class FakeAmp:
                 if data.get("type") == 1 and data.get("target") == "JoinShard":
                     self.joined.append(data["arguments"][0])
                     await ws.send_str(json.dumps({"type": 3, "invocationId": data["invocationId"]}) + RS)
+                elif data.get("type") == 1 and data.get("target") == "LeaveShard":
+                    self.left.append(data["arguments"][0])
                 elif data.get("type") == 6:
                     await ws.send_str(json.dumps({"type": 6}) + RS)
         if ws in self.sockets:
@@ -230,6 +287,12 @@ class FakeAmp:
         app.router.add_post("/api/Shards/{id}/console", self.console)
         app.router.add_get("/api/Shards/{id}/schedules", self.forbidden)
         app.router.add_get("/api/always-401", self.always_401)
+        app.router.add_get("/api/Shards/{id}", self.shard)
+        app.router.add_get("/api/Shards/{id}/state", self.state)
+        app.router.add_get("/api/Shards/{id}/users", self.users)
+        app.router.add_get("/api/Shards/{id}/console/history", self.history)
+        app.router.add_post("/api/Shards/{id}/{action:start|stop|restart|sleep|wake|update}", self.power)
+        app.router.add_get("/api/shards/{id}/snapshots", self.snapshots)
         app.router.add_post("/hubs/shard/negotiate", self.negotiate)
         app.router.add_get("/hubs/shard", self.hub)
         return app
