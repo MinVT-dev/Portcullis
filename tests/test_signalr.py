@@ -12,7 +12,7 @@ import pytest
 
 from portcullis.amp.auth import TokenManager
 from portcullis.amp.signalr import HubConnection, HubEvent, HubGaveUp, Mode, decode_frame, encode
-from tests.fakes.amp_server import SHARD_ID, FakeAmp, wait_for
+from tests.fakes.amp_server import SHARD_ID, TENANT, FakeAmp, wait_for
 
 
 class Harness:
@@ -36,7 +36,7 @@ async def make_hub(base_url: str, session: aiohttp.ClientSession,
 
     def build(mode: Mode = "direct", **kw) -> Harness:
         async def join(c: HubConnection) -> None:
-            await c.invoke("JoinShard", SHARD_ID)
+            await c.invoke("JoinShard", TENANT, SHARD_ID)
 
         h: Harness
         conn = HubConnection(base_url, "shard", session, tokens.hub_ticket, mode=mode, on_connected=join,
@@ -143,7 +143,7 @@ def test_frame_codec_roundtrip() -> None:
 async def test_events_iterator(base_url: str, session: aiohttp.ClientSession, tokens: TokenManager,
                                fake: FakeAmp) -> None:
     async def join(c: HubConnection) -> None:
-        await c.invoke("JoinShard", SHARD_ID)
+        await c.invoke("JoinShard", TENANT, SHARD_ID)
 
     conn = HubConnection(base_url, "shard", session, tokens.hub_ticket, on_connected=join)
 
