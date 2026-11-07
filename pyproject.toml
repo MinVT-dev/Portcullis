@@ -13,6 +13,7 @@ dependencies = [
     "aiohttp>=3.10,<4",
     "pydantic>=2.6,<3",
     "aiosqlite>=0.20,<1",
+    "discord.py>=2.5,<3",
 ]
 
 [project.optional-dependencies]
