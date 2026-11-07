@@ -2,37 +2,50 @@
 
 **Decision (Min, 2026-11-07):** the AMP 3 edition of the bot is called **Portcullis**. Gatekeeper V2 and V3 keep their names.
 
-![Banner, Discord banner, logo, icon and offline status at 128, 64, 32 and 16 px](preview.png)
+![Banner, Discord banner, icons at 128 to 16 px, and the mark and logo on dark and light](preview.png)
+
+## Idea
+
+The mark is a gatehouse arch with its portcullis hanging inside it.
+
+- **Fits next to CubeCoders, without copying them.** It borrows their visual language: deep navy, flat near-white shapes, one heavy stroke weight, hard mitred corners, and hexagon geometry. The arch's shoulders are the top half of a flat-topped hexagon at 60°, and the banner background is a faint isometric grid. It uses no cube, no hexagon badge, and no part of the CubeCoders or AMP logos. The wordmark is a different typeface from theirs.
+- **Built on a grid.** It sits on a 64-unit grid. Every member (frame, beam, bars, rail) is 5 units thick, and there is a 3-unit gap between the frame and the gate, so the two still read apart at 32 px.
+- **Status is built in.** With the gate raised, light shows underneath: cyan on the brand icon, green for online. With the gate down, the bars reach the ground and a red sill shows: offline.
 
 ## Files
 
-| File | Size | Use it for |
-|---|---|---|
-| [portcullis-logo.svg](portcullis-logo.svg) | 512×512 | Main mark: README, docs, the 512 px Discord app icon. Five bars. |
-| [portcullis-icon.svg](portcullis-icon.svg) | 512×512 | Small-size cut with three thicker bars. Use it at 64 px and below (bot avatar in member lists, favicons), and as the **online** status image. |
-| [portcullis-status-offline.svg](portcullis-status-offline.svg) | 512×512 | **Offline** status: the gate is down and the light turns red. Embed thumbnails and status messages. |
-| [portcullis-banner.svg](portcullis-banner.svg) | 1280×640 | GitHub social preview, release posts, website header. |
-| [portcullis-discord-banner.svg](portcullis-discord-banner.svg) | 680×240 | The bot's Discord profile banner. The left third stays empty because Discord puts the avatar there. |
-| [preview.png](preview.png) | | Contact sheet of all of the above. |
+SVG is the source. Upload-ready PNGs are in [`png/`](png/).
 
-Discord and GitHub need PNG uploads, so export the SVGs at 2× (for example `rsvg-convert -w 1024 portcullis-logo.svg -o logo.png`, or open the file in a browser and save it).
+| File | PNG | Use it for |
+|---|---|---|
+| [portcullis-icon.svg](portcullis-icon.svg) | 1024×1024 | Discord app icon and bot avatar. It's full-bleed and stays inside Discord's circle crop. |
+| [portcullis-status-online.svg](portcullis-status-online.svg) | 256×256 | Online status in embeds and thumbnails. |
+| [portcullis-status-offline.svg](portcullis-status-offline.svg) | 256×256 | Offline status. |
+| [portcullis-banner.svg](portcullis-banner.svg) | 1280×640 | GitHub social preview, release posts. |
+| [portcullis-discord-banner.svg](portcullis-discord-banner.svg) | 1360×480 | The bot's Discord profile banner (680×240 at 2×). The left third stays plain, because the avatar sits there. |
+| [portcullis-logo.svg](portcullis-logo.svg) / [-dark](portcullis-logo-dark.svg) | 1200 wide | The mark and wordmark together, for dark and light backgrounds. |
+| [portcullis-mark.svg](portcullis-mark.svg) / [-dark](portcullis-mark-dark.svg) | 512×512 | The mark on its own, with a transparent background. |
+
+[`generate.py`](generate.py) rebuilds every SVG: `python3 generate.py OUT_DIR FONT_DIR` (it needs `fonttools` and `brotli`). FONT_DIR holds Exo 2 Bold and Roboto Regular from Google Fonts as `exo2.woff2` and `roboto.woff2`. All text is converted to outlines, so the SVGs look the same everywhere and don't need the fonts installed.
 
 ## Palette
 
 | Role | Hex |
 |---|---|
-| Background (top to bottom) | `#2A3240` → `#141921` |
-| Banner background | `#1B212B` → `#0E1218` |
-| Iron (bars) | `#A7B0BF` |
-| Frame and sill | `#C9D1DD` |
-| Online / brand accent | `#3DDC84` |
-| Offline / error | `#F0524F` |
-| Warning (embeds only) | `#F5A524` |
-| Text on dark | `#E6EBF2`, secondary `#9AA6B8` |
+| Navy (background) | `#121A30`, lifted `#1A2442` |
+| Mark and text | `#E9EFF8` |
+| Secondary text | `#A6B2C9` |
+| Lines and pill borders | `#8CAADC` at low opacity |
+| Brand accent | `#4AD6FF` (cyan) |
+| Online / success | `#4ADE80` |
+| Offline / error | `#FF5A5F` |
 
-Embed colours: green for online and success, red for offline and errors, amber for warnings. The banners use a system sans stack (Segoe UI, Inter, Helvetica Neue, Arial). Turn the text into outlines before final export if the font has to match exactly everywhere.
+## Type
 
-**Tagline:** "Your game servers, in Discord." Keep "AMP" out of the name and the logo; it's CubeCoders' trademark. Whether "Portcullis for AMP 3" is OK as a descriptive subtitle is a question for Mike.
+- **Wordmark:** Exo 2 Bold (SIL Open Font License).
+- **Text and taglines:** Roboto Regular, which is also what CubeCoders' site uses for body text.
+
+**Tagline:** "Your game servers, in Discord." Keep "AMP" and CubeCoders' logos out of all Portcullis artwork, so nothing suggests it's an official CubeCoders product. Whether "Portcullis for AMP 3" is OK as a descriptive subtitle is a question for Mike.
 
 ## Still to check before going public
 
