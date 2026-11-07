@@ -100,9 +100,11 @@ Real environment variables override `.env` values.
 What happens:
 
 1. It asks for the bot user's password.
-2. It prints `Writing to captures\<time>` and the shards the bot can see, as `Name (id)`.
-3. It tries up to three ways of connecting to the live event hub and keeps the first that works (see "Connection mode" below).
-4. It prints `Recording. ...`, and each event as it arrives.
+2. It prints `Writing to captures\<time>` and the shards it will record, each as `Name (id): state`.
+3. It reads the panel's own JavaScript and saves every place it calls `JoinShard` to `panel_hub_calls.txt`, so the real call can be compared with ours. Skip this with `--no-inspect`.
+4. It tries up to three ways of connecting to the live event hub and keeps the first that works (see "Connection mode" below).
+5. It joins each shard. A shard that refuses is logged and skipped; the rest are still recorded. If every shard refuses, it tries a few other argument shapes once (their errors show what AMP expects), and after 3 identical failures it stops with exit code 3 instead of retrying forever.
+6. It prints `Recording. ...`, and each event as it arrives.
 
 While it records, do the things you want captured: join the game, chat, run a console command from the panel, leave. If you can, restart the server once, or unplug the PC's network for a few seconds, to test reconnecting. It stops after `--duration` seconds, or when you press Ctrl+C.
 
@@ -110,7 +112,9 @@ Useful options:
 
 | Option | What it does |
 |---|---|
-| `--shard <id>` | Record only this shard. Repeat for more. Default: every shard the bot can see. |
+| `--shard <id>` | Record only this shard. Repeat for more. Default: every shard the bot can see. Pick a **running** server. |
+| `--join-attempts <n>` | Give up after this many identical join failures. Default 3. |
+| `--no-inspect` | Don't read the panel's JavaScript. |
 | `--duration <seconds>` | Stop after this long. Default: until Ctrl+C. |
 | `--mode auto\|direct\|negotiate\|negotiate-reuse` | Force one connection mode. Default `auto`. |
 | `--extra-hub tasks` / `--extra-hub spire` | Also record the tasks or spire hub. |
@@ -126,7 +130,8 @@ Each run makes a new folder, `captures\<UTC time>\`. Git ignores `captures\`.
 |---|---|
 | `summary.txt` | Read this first: event counts by type, the connection mode that worked, connects, hub tickets used, logins and renewals. |
 | `events.jsonl` | One line per hub event, with its raw payload. |
-| `lifecycle.jsonl` | Connects, disconnects, reconnects, which modes failed and why. |
+| `lifecycle.jsonl` | Connects, disconnects, reconnects, which modes failed and why, and every `JoinShard` call with its arguments and the server's full error. |
+| `panel_hub_calls.txt` | Snippets of the panel's own JavaScript around `JoinShard`/`LeaveShard`. CubeCoders' code: fine to send to me, don't commit it. |
 | `snapshot.json` | The REST view at the start (health, the bot's permissions, and each shard's state, users and recent console), to compare with the events. |
 
 What is removed before anything is written: the session token, every hub ticket, the password, SignalR connection ids, anything shaped like a JWT, and by default the panel address and every IPv4 address. **Player names are kept.** Read `events.jsonl` before sharing it, and never commit a capture.
@@ -179,6 +184,7 @@ It lists breaking, changed and added API operations against the spec Portcullis 
 | `MissingCapability` (403) in `snapshot.json` | The role lacks that permission, usually `analytics.users` for the player list. Optional for recording. |
 | `No connection mode worked` | All three ways of connecting to the event hub failed. Open `lifecycle.jsonl` in that capture folder: each `probe-failed` line says why. Send me those lines (they hold no secrets). |
 | Repeated 401s while recording | The session expired and renewal failed. The client logs in again by itself; if it keeps happening, check whether the user's password changed or the user was disabled. |
+| `Stopped: gave up after 3 identical join failures` | The hub connection works but AMP refuses `JoinShard`. Try `--shard <id>` with one running server the bot has `view` and `console.read` on. If it still fails, send `lifecycle.jsonl` and `panel_hub_calls.txt`. |
 | `Hub task stopped: ...` | The live connection gave up. `lifecycle.jsonl` has the reason; send that line. |
 | PowerShell: "running scripts is disabled" | Only happens if you use `Activate.ps1`. Use `.\.venv\Scripts\python.exe` as shown, or see step 3. |
 | `py` not found | Python isn't installed, or wasn't added to PATH. Reinstall it with "Add python.exe to PATH" ticked. |

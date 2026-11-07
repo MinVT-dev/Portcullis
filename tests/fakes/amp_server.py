@@ -65,6 +65,9 @@ class FakeAmp:
     roster_forbidden: bool = False
     refused_tickets: int = 0
     muted: list[web.WebSocketResponse] = field(default_factory=list)  # half-open sockets: never answer
+    join_error: str | None = None  # when set, JoinShard with the right arguments fails with this error
+    join_attempts: list[list[Any]] = field(default_factory=list)  # every JoinShard argument list received
+    panel_script: str = "connection.invoke('JoinShard', shardId)"  # served as the panel's JavaScript
     _seq: itertools.count = field(default_factory=lambda: itertools.count(1))
 
     # ------------------------------------------------------------------ helpers
@@ -250,8 +253,23 @@ class FakeAmp:
                 if ws in self.muted:
                     continue
                 if data.get("type") == 1 and data.get("target") == "JoinShard":
-                    self.joined.append(data["arguments"][0])
-                    await ws.send_str(json.dumps({"type": 3, "invocationId": data["invocationId"]}) + RS)
+                    args = data.get("arguments") or []
+                    self.join_attempts.append(args)
+                    reply: dict[str, Any] = {"type": 3, "invocationId": data["invocationId"]}
+                    # The wording ASP.NET Core SignalR uses for arity, binding and hub-method failures.
+                    if len(args) != 1:
+                        reply["error"] = (f"Failed to invoke 'JoinShard' due to an error on the server. "
+                                          f"InvalidDataException: Invocation provides {len(args)} argument(s) "
+                                          f"but target expects 1.")
+                    elif not isinstance(args[0], str):
+                        reply["error"] = ("Failed to invoke 'JoinShard' due to an error on the server. "
+                                          "InvalidDataException: Error binding arguments.")
+                    elif self.join_error is not None or args[0] != SHARD_ID:
+                        reply["error"] = (self.join_error
+                                          or "Failed to invoke 'JoinShard' due to an error on the server.")
+                    else:
+                        self.joined.append(args[0])
+                    await ws.send_str(json.dumps(reply) + RS)
                 elif data.get("type") == 1 and data.get("target") == "LeaveShard":
                     self.left.append(data["arguments"][0])
                 elif data.get("type") == 6:
@@ -261,6 +279,17 @@ class FakeAmp:
         return ws
 
     # ------------------------------------------------------------------ test controls
+
+    async def panel_index(self, request: web.Request) -> web.Response:
+        return web.Response(text='<html><script type="module" src="/assets/index-abc.js"></script></html>',
+                            content_type="text/html")
+
+    async def panel_asset(self, request: web.Request) -> web.Response:
+        if request.match_info["name"] == "index-abc.js":
+            return web.Response(text='import("./hub-def.js");', content_type="application/javascript")
+        if request.match_info["name"] == "hub-def.js":
+            return web.Response(text=self.panel_script, content_type="application/javascript")
+        return web.Response(status=404)
 
     async def broadcast(self, target: str, *args: Any) -> None:
         for ws in list(self.sockets):
@@ -295,6 +324,8 @@ class FakeAmp:
         app.router.add_get("/api/shards/{id}/snapshots", self.snapshots)
         app.router.add_post("/hubs/shard/negotiate", self.negotiate)
         app.router.add_get("/hubs/shard", self.hub)
+        app.router.add_get("/", self.panel_index)
+        app.router.add_get("/assets/{name}", self.panel_asset)
         return app
 
 

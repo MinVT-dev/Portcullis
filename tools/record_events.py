@@ -47,8 +47,9 @@ sys.path.insert(0, str(ROOT))
 
 from portcullis.amp import AmpClient, Credentials  # noqa: E402
 from portcullis.amp.errors import AmpError, AuthFailed, LoginNotSupported  # noqa: E402
+from portcullis.amp.events import state_from  # noqa: E402
 from portcullis.amp.redact import RedactingFilter, Redactor  # noqa: E402
-from portcullis.amp.signalr import MODES, HubConnection, HubEvent  # noqa: E402
+from portcullis.amp.signalr import MODES, HubConnection, HubError, HubEvent, HubGaveUp  # noqa: E402
 from portcullis.config import load_env_file  # noqa: E402
 
 log = logging.getLogger("recorder")
@@ -105,6 +106,9 @@ class Recorder:
             json.dumps(self.redactor.data(data), indent=2, ensure_ascii=False, default=str), encoding="utf-8"
         )
 
+    def write_text(self, name: str, text: str) -> None:
+        (self.out_dir / name).write_text(self.redactor.text(text), encoding="utf-8")
+
     def close(self, extra: dict[str, Any]) -> None:
         lines = [f"{name}: {count}" for name, count in sorted(self.counts.items())] or ["no events received"]
         lines += [""] + [f"{k}: {v}" for k, v in extra.items()]
@@ -141,6 +145,84 @@ async def snapshot(amp: AmpClient, shard_ids: list[str]) -> dict[str, Any]:
             ),
         }
     return data
+
+
+# Other ways to call JoinShard, tried once when the plain call fails, so the server's error messages
+# show which argument shape it expects. SignalR names arity and type mismatches in its errors.
+JOIN_VARIANTS: tuple[tuple[str, Any], ...] = (
+    ("uppercase id", lambda sid, name: [sid.upper()]),
+    ("object {shardId}", lambda sid, name: [{"shardId": sid}]),
+    ("shard name", lambda sid, name: [name]),
+    ("no arguments", lambda sid, name: []),
+    ("two arguments", lambda sid, name: [sid, None]),
+)
+
+
+def shard_state_label(snap: dict[str, Any], sid: str) -> str:
+    state = (snap.get("shards", {}).get(sid) or {}).get("state")
+    if not isinstance(state, dict) or "error" in state:
+        return "state unknown"
+    return state_from(state)[0].label.lower()
+
+
+async def try_join_variants(conn: HubConnection, sid: str, name: str, recorder: Recorder) -> None:
+    for label, build in JOIN_VARIANTS:
+        args = build(sid, name)
+        try:
+            result = await conn.invoke("JoinShard", *args)
+        except HubError as exc:
+            recorder.on_lifecycle("shard", "join-variant-failed", {"variant": label, "arguments": args,
+                                                                   "error": str(exc)})
+        else:
+            recorder.on_lifecycle("shard", "join-variant-ok", {"variant": label, "arguments": args,
+                                                               "result": result})
+            with contextlib.suppress(HubError):
+                await conn.send("LeaveShard", *args)
+
+
+PANEL_SCRIPT = re.compile(r"""(?:src|href)=["']([^"']+\.js)["']""")
+CHUNK_REF = re.compile(r"""["'`]((?:\.{0,2}/)?(?:[\w.-]+/)*[\w.-]+\.js)["'`]""")
+
+
+async def inspect_panel(amp: AmpClient, recorder: Recorder, limit: int = 300) -> int:
+    """Find how the panel's own JavaScript calls the shard hub, and save those snippets.
+
+    Only reads the panel's public script files. Returns how many snippets were found.
+    """
+    from urllib.parse import urljoin
+
+    base = amp.base_url + "/"
+    seen: set[str] = set()
+    queue: list[str] = []
+    snippets: list[str] = []
+    try:
+        async with amp.session.get(base) as resp:
+            html = await resp.text()
+    except Exception as exc:  # noqa: BLE001 - diagnostics only
+        recorder.on_lifecycle("panel", "inspect-failed", {"error": str(exc)})
+        return 0
+    queue += [urljoin(base, m) for m in PANEL_SCRIPT.findall(html)]
+    while queue and len(seen) < limit:
+        url = queue.pop(0)
+        if url in seen or not url.startswith(amp.base_url):
+            continue
+        seen.add(url)
+        try:
+            async with amp.session.get(url) as resp:
+                if resp.status != 200:
+                    continue
+                js = await resp.text()
+        except Exception:  # noqa: BLE001 - diagnostics only
+            continue
+        queue += [urljoin(url, m) for m in CHUNK_REF.findall(js)]
+        for target in ("JoinShard", "LeaveShard"):
+            start = 0
+            while (i := js.find(target, start)) != -1:
+                snippets.append(f"--- {target} in {url.rsplit('/', 1)[-1]} at {i}\n{js[max(0, i - 400):i + 300]}\n")
+                start = i + len(target)
+    recorder.write_text("panel_hub_calls.txt", "\n".join(snippets) or f"No JoinShard found in {len(seen)} scripts.\n")
+    recorder.on_lifecycle("panel", "inspected", {"scripts": len(seen), "snippets": len(snippets)})
+    return len(snippets)
 
 
 async def pick_mode(amp: AmpClient, wanted: str, recorder: Recorder) -> str:
@@ -182,6 +264,7 @@ async def run(args: argparse.Namespace) -> int:
     print(f"Writing to {out_dir}")
 
     connections: list[HubConnection] = []
+    exit_code = 0
     amp = AmpClient(url, Credentials(username, password), redactor=redactor)
     extra: dict[str, Any] = {}
     try:
@@ -190,37 +273,73 @@ async def run(args: argparse.Namespace) -> int:
         except (AuthFailed, LoginNotSupported) as exc:
             print(f"Login failed: {exc}")
             return 1
-        shard_ids = args.shard
-        if not shard_ids:
-            shards = await amp.shards.get_shards()
-            shard_ids = [str(s.id) for s in shards if s.id]
-            names = {str(s.id): s.name for s in shards}
-            print("Shards: " + ", ".join(f"{names[i]} ({i})" for i in shard_ids))
+        shards = await amp.shards.get_shards()
+        names = {str(s.id): s.name for s in shards if s.id}
+        shard_ids = [s.lower() for s in args.shard] or list(names)
+        unknown = [s for s in shard_ids if s not in names]
+        if unknown:
+            print(f"The bot account can't see shard {', '.join(unknown)}. Check the id and the bot's role.")
+            return 1
         if not shard_ids:
             print("The bot account can't see any shards. Check its role in the panel.")
             return 1
-        recorder.write_json("snapshot.json", await snapshot(amp, shard_ids))
+        snap = await snapshot(amp, shard_ids)
+        recorder.write_json("snapshot.json", snap)
+        print("Shards:")
+        for sid in shard_ids:
+            print(f"  {names[sid]} ({sid}): {shard_state_label(snap, sid)}")
+
+        if not args.no_inspect:
+            found = await inspect_panel(amp, recorder)
+            print(f"Panel scripts: {found} JoinShard/LeaveShard call(s) saved to panel_hub_calls.txt")
 
         mode = await pick_mode(amp, args.mode, recorder)
         extra["mode"] = mode
+        variants_tried = False
 
         async def join(conn: HubConnection) -> None:
+            nonlocal variants_tried
+            failed: dict[str, str] = {}
             for sid in shard_ids:
-                result = await conn.invoke("JoinShard", sid)
+                recorder.on_lifecycle("shard", "join", {"shard": sid, "name": names[sid], "arguments": [sid]})
+                try:
+                    result = await conn.invoke("JoinShard", sid)
+                except HubError as exc:
+                    failed[sid] = str(exc)
+                    recorder.on_lifecycle("shard", "join-failed", {
+                        "shard": sid, "name": names[sid], "state": shard_state_label(snap, sid),
+                        "arguments": [sid], "error": str(exc)})
+                    continue
                 recorder.on_lifecycle("shard", "joined", {"shard": sid, "result": result})
+            if failed and not variants_tried:
+                variants_tried = True
+                sid = next(iter(failed))
+                await try_join_variants(conn, sid, names[sid], recorder)
+            if len(failed) == len(shard_ids):
+                raise HubError("no shard could be joined: " + "; ".join(
+                    f"{names[s]}: {e}" for s, e in failed.items()))
 
         hubs = ["shard", *args.extra_hub]
         tasks = []
         for name in hubs:
             conn = amp.hub(name, mode=mode, on_connected=join if name == "shard" else None,  # type: ignore[arg-type]
+                           join_attempts=args.join_attempts,
                            on_lifecycle=lambda kind, d, n=name: recorder.on_lifecycle(n, kind, d))
             connections.append(conn)
             tasks.append(asyncio.create_task(conn.run(recorder.on_event), name=f"hub-{name}"))
         print("Recording. Join the game, chat, run a console command and leave. Ctrl+C to stop.")
         done, _ = await asyncio.wait(tasks, timeout=args.duration, return_when=asyncio.FIRST_EXCEPTION)
         for task in done:
-            if task.exception():
-                print(f"Hub task stopped: {task.exception()}")
+            exc = task.exception()
+            if isinstance(exc, HubGaveUp):
+                print(f"Stopped: {exc}")
+                print("The hub connection works, but AMP refused JoinShard every time. "
+                      "lifecycle.jsonl has the exact calls and errors, and panel_hub_calls.txt shows how "
+                      "the panel itself calls it. Send those two files.")
+                exit_code = 3
+            elif exc:
+                print(f"Hub task stopped: {exc}")
+                exit_code = 1
     finally:
         for conn in connections:
             await conn.close()
@@ -234,7 +353,7 @@ async def run(args: argparse.Namespace) -> int:
         with contextlib.suppress(Exception):
             await amp.close()
         print(f"Saved. Summary in {out_dir / 'summary.txt'}")
-    return 0
+    return exit_code
 
 
 def main() -> int:
@@ -251,6 +370,10 @@ def main() -> int:
     parser.add_argument("--env-file", type=Path, default=ROOT / ".env")
     parser.add_argument("--keep-host", action="store_true", help="don't replace the panel address")
     parser.add_argument("--keep-ips", action="store_true", help="don't replace IPv4 addresses")
+    parser.add_argument("--join-attempts", type=int, default=3,
+                        help="give up after this many identical JoinShard failures (default 3)")
+    parser.add_argument("--no-inspect", action="store_true",
+                        help="don't look for JoinShard calls in the panel's own scripts")
     parser.add_argument("--quiet", action="store_true", help="don't print events as they arrive")
     parser.add_argument("--verbose", action="store_true", help="debug logging (still redacted)")
     args = parser.parse_args()
