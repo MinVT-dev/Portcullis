@@ -8,7 +8,7 @@ Method: everything was read-only and against this one throwaway VM. Sources were
 
 Companion files in this folder:
 - `API_REFERENCE.md` documents every operation (263) in full: parameters, bodies, responses, permission and live result.
-- `openapi-3.0.0.6.json` is the raw spec.
+- `portcullis/amp/spec/webapi-3.0.0.6.json` is the raw spec (moved there so the client is generated from the pinned copy).
 
 ## 0. Headline: there is a full OpenAPI spec
 

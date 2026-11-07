@@ -1,0 +1,18 @@
+# Secrets: never commit these
+.env
+.env.*
+!.env.example
+
+# Raw recorder output. Captures stay on your own machine.
+captures/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
