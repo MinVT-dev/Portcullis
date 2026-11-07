@@ -1,6 +1,6 @@
 # What AMP 2 can run
 
-A list of every game and service a user can run on AMP 2, with the player and chat flags Gatekeeper cares about. It exists so we know what the AMP 3 edition has to cope with. CubeCoders has said AMP 3 uses all existing AMP 2 templates, so this list is expected to carry over, but that is not confirmed until the AMP 3 beta is out.
+A list of every game and service a user can run on AMP 2, with the player and chat flags Portcullis cares about. It exists so we know what the AMP 3 edition has to cope with. CubeCoders has said AMP 3 uses all existing AMP 2 templates, so this list is expected to carry over, but that is not confirmed until the AMP 3 beta is out.
 
 **As of 2026-10-24.** Counted from the public `CubeCoders/AMPTemplates` repository at commit `aa71623` (2026-10-15), plus the forum list "Supported Applications Compatibility" (discourse.cubecoders.com/t/supported-applications-compatibility/1828). Both are CubeCoders' own sources.
 
@@ -31,7 +31,7 @@ Operating systems (games only): Both 146, Both (Linux via Wine) 52, Both (Linux 
 
 ARM support (games only, from the template): ? 140, No 59, Native 15, Emulated 11.
 
-Only one template, Kaboom!, defines moderation actions (kick, ban, ban IP, smite). Every other game needs its own kick and ban commands if Gatekeeper wants to offer them.
+Only one template, Kaboom!, defines moderation actions (kick, ban, ban IP, smite). Every other game needs its own kick and ban commands if Portcullis wants to offer them.
 
 ## How to read the flags
 
@@ -304,7 +304,7 @@ These are not games. They run on the same Generic module.
 | TeamSpeak 6 | `teamspeak6` | Voice server | Both | yes | ? | TeamSpeak 6 Server |
 | TeaSpeak | `teaspeak` | Voice server | Linux only | no | ? | TeaSpeak Server |
 
-## What this means for Gatekeeper
+## What this means for Portcullis
 
 Gatekeeper V3 has code for nine games. This is what their templates say about players and chat, so we know what a game profile in the AMP 3 edition can lean on (see `docs/DESIGN.md`, section 4).
 
@@ -330,15 +330,15 @@ Abiotic Factor, Archean, ARK: Survival Ascended, ARK: Survival Ascended (Minimal
 
 Non-commercial licences matter if a community monetises a server: Farming Simulator 19, Farming Simulator 22, Farming Simulator 25, FiveM - Grand Theft Auto V Server, RAGE:MP - Grand Theft Auto V Server, RedM - Red Dead Redemption 2 Server, Stay In Tarkov, Tarkov (Fika Mod) (Legacy), Tarkov (Fika Mod) 4.0.0+, Tarkov (Fika Mod) 4.1.0+ are marked non-commercial use only in their templates.
 
-## Games we plan to add to Gatekeeper for AMP 3
+## Games we plan to add to Portcullis for AMP 3
 
-**Decision (Min, 2026-10-24):** every game Gatekeeper can actively support gets the same treatment as the current nine: its own banner, images and styling. Every other game stays generic, with status and the other shared features, as it does today.
+**Decision (Min, 2026-10-24):** every game Portcullis can actively support gets the same treatment as the current nine: its own banner, images and styling. Every other game stays generic, with status and the other shared features, as it does today.
 
-**What "actively support" means here.** The template defines both a join and a leave pattern, so Gatekeeper can track who is online without game-specific code. That is 159 of the 225 games on the Generic module. Of those, 12 templates are already covered by the V3 games, which leaves **146 games to add**: 47 that also have a chat pattern (player tracking and chat relay) and 99 with join/leave only (player tracking, no chat relay). Minecraft Java Edition and Rust are on dedicated AMP modules and are not counted; their flags have to be read from AMP 3.
+**What "actively support" means here.** The template defines both a join and a leave pattern, so Portcullis can track who is online without game-specific code. That is 159 of the 225 games on the Generic module. Of those, 12 templates are already covered by the V3 games, which leaves **146 games to add**: 47 that also have a chat pattern (player tracking and chat relay) and 99 with join/leave only (player tracking, no chat relay). Minecraft Java Edition and Rust are on dedicated AMP modules and are not counted; their flags have to be read from AMP 3.
 
 What is checked and what is not:
 - **Checked:** the join/leave and chat patterns above, read from each template.
-- **Not checked:** whitelist and chat-in. No template defines user actions (`Console.UserActions` is empty on every game I looked at), so whether Gatekeeper can whitelist a player or send chat into a game has to be tested on a real server. Games where that fails keep the banner and player tracking but lose the whitelist and say commands.
+- **Not checked:** whitelist and chat-in. No template defines user actions (`Console.UserActions` is empty on every game I looked at), so whether Portcullis can whitelist a player or send chat into a game has to be tested on a real server. Games where that fails keep the banner and player tracking but lose the whitelist and say commands.
 - **Decided (Min, 2026-10-24):** join/leave is the cut-off. It matches the support level of the current nine, so chat relay is not required.
 
 ### What each supported game needs

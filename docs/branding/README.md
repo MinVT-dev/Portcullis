@@ -40,21 +40,10 @@ Embed colours: green for online and success, red for offline and errors, amber f
 - **Discord app directory:** search for an existing app called Portcullis. Not done yet.
 - Known other uses, none of them a Discord bot or game-server tool: Docker's Go secret-redaction library `docker/portcullis`, the PyPI package `portcullis` (an AI-agent policy layer), a bioinformatics tool, a 0★ Discord gateway proxy repo `ShadyDonkey/portcullis`, and Portcullis Games on Steam. The `portcullis` name is taken on both npm and PyPI, so a published package would need another name, such as `portcullis-bot`.
 
-## Where the old name appears
+## Rename status
 
-The repo still says "Gatekeeper" in 60 places. Most of them are history: V2 and V3 really are called Gatekeeper and should stay that way. These are the places to change:
-
-**Outside the repo (Min decides):**
-- **GitHub repo name** `MinVT-dev/gatekeeper-AMP-3`. GitHub redirects the old URL and old clones keep working. Suggested new name: `portcullis`.
-- **Discord application and bot username** in the Developer Portal. Upload the logo as the app icon and the Discord banner as the profile banner there.
-- **AMP 3 role and bot user** that the bot signs in as. Name them `Portcullis` from the start.
-
-**In the repo** (one small docs PR once the repo name is settled):
-- `README.md:1`, the title "Gatekeeper for AMP 3".
-- `docs/DESIGN.md:1`, the title, plus product mentions throughout (about 25 lines). The ones that matter most are the package layout `gatekeeper/` (line 173) and `gatekeeper.amp` (line 201), the "Apps → Gatekeeper user" context menu (lines 156 and 438), and the error text at line 215. Line 224 describes V2/V3's "Gatekeeper" role and stays as history. Decision D-2 (line 336), about the name, can now be closed as Portcullis.
-- `docs/BETA_CHECKLIST.md`: lines 69, 72 and 119, including the `gatekeeper/amp/` path.
-- `docs/AMP2_SUPPORTED.md`: lines 3, 307, 333, 335 and 337. Lines 48, 298 and 309 are V2/V3 history and stay.
-- `docs/amp3-api/README.md:3` and `docs/amp3-api/API_SURFACE.md` (lines 42, 49, 59, 112 and 132).
-- Code: name the Python package `portcullis` from the first commit, so it never has to be renamed.
-
-Leave references to Gatekeeper V2, `GatekeeperV2`, `GatekeeperV3-Beta` and the `gatekeeperv2` AMP template as they are.
+- **Done:** the GitHub repo is now [`MinVT-dev/portcullis`](https://github.com/MinVT-dev/portcullis) (renamed by Min, 2026-11-07). The old `gatekeeper-AMP-3` URL redirects.
+- **Done in this PR:** every mention of the new bot in the docs now says Portcullis. That covers titles, the package layout `portcullis/`, the "Apps → Portcullis user" context menu, the suggested AMP role, and decision D-2 (closed).
+- **Kept on purpose:** Gatekeeper V2, Gatekeeper V3, `GatekeeperV2`, `GatekeeperV3-Beta`, the `gatekeeperv2` AMP template, and lines that describe what V2/V3 did. Those are history.
+- **Still to do outside the repo:** the Discord application name, the bot username, the icon and the profile banner in the Developer Portal, and the AMP 3 role and bot user (name both `Portcullis`).
+- **Code:** the Python package is `portcullis` from the first commit.

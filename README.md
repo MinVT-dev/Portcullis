@@ -1,4 +1,4 @@
-# Gatekeeper for AMP 3
+# Portcullis
 
 A Discord bot for CubeCoders AMP 3, the successor to [Gatekeeper V2](https://github.com/k8thekat/GatekeeperV2) and Gatekeeper V3.
 
