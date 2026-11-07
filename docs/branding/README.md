@@ -51,7 +51,7 @@ The repo still says "Gatekeeper" in 60 places. Most of them are history: V2 and 
 
 **In the repo** (one small docs PR once the repo name is settled):
 - `README.md:1`, the title "Gatekeeper for AMP 3".
-- `docs/DESIGN.md:1`, the title, plus product mentions throughout (about 25 lines). The ones that matter most are the package layout `gatekeeper/` (line 173) and `gatekeeper.amp` (line 201), the "Apps → Gatekeeper user" context menu (lines 156 and 438), the error text at line 215, and the "Gatekeeper role" at line 224. Decision D-2 (line 336), about the name, can now be closed as Portcullis.
+- `docs/DESIGN.md:1`, the title, plus product mentions throughout (about 25 lines). The ones that matter most are the package layout `gatekeeper/` (line 173) and `gatekeeper.amp` (line 201), the "Apps → Gatekeeper user" context menu (lines 156 and 438), and the error text at line 215. Line 224 describes V2/V3's "Gatekeeper" role and stays as history. Decision D-2 (line 336), about the name, can now be closed as Portcullis.
 - `docs/BETA_CHECKLIST.md`: lines 69, 72 and 119, including the `gatekeeper/amp/` path.
 - `docs/AMP2_SUPPORTED.md`: lines 3, 307, 333, 335 and 337. Lines 48, 298 and 309 are V2/V3 history and stay.
 - `docs/amp3-api/README.md:3` and `docs/amp3-api/API_SURFACE.md` (lines 42, 49, 59, 112 and 132).
