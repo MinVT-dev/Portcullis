@@ -53,6 +53,7 @@ From Mike's messages and the API browser screenshot (2026-10-07):
 - The beta will include an API browser. It is **Scalar over an OpenAPI document**, served by AMP itself (screenshot: `localhost:7278/scalar/v1`).
 - Paths are REST under `/api/`, e.g. `GET /api/shards/{shardId}/schedules/catalog`. `shardId` is a UUID.
 - Sidebar sections: initial setup (internet reachability probe, create first admin, **passkey** sign-in begin/finish), System & Health, My Account, Users & Access, Audit Log, **Shards**, Files & Backups, **Scheduling**, **Spires & Datastores**, Networking, and a "Generate MCP" link.
+- **Observed on Min's beta VM (2026-11-07), not documentation.** The machine listens on four AMP-related ports: `webapi` on **HTTP 8443**, a second `webapi` on **2222** (not HTTP, as far as the network view can tell), `nats-server` on **4222**, and `sshd` on 22. Min also reports that `/api` does not exist on the beta. Two things in this contradict the picture above: the Scalar address in the screenshot used port 7278, not 8443, and a NATS server plus a non-HTTP API port point to a message-based transport next to, or instead of, REST. Do not design around either reading until the beta says which is true (Q-13, Q-14).
 - Scheduling is a full API: catalog of triggers and tasks (with emitted signals), list/create/get/replace/delete schedules, enable/disable, trigger an immediate run, run history, preview next fire times.
 - Access is **capability based per shard**: "Requires the shard's `ScheduleRead` capability", and `403` means the caller lacks that capability on the shard. `404` means no such shard.
 
@@ -307,8 +308,8 @@ Then:
 
 - **A-1** A "shard" is the AMP 3 equivalent of an AMP 2 instance: one game server.
 - **A-2** "Spires" are hosts (AMP 2's targets) and "Datastores" are storage locations. Gatekeeper only needs to read them.
-- **A-3** The OpenAPI JSON is reachable next to the Scalar page (ASP.NET's default would be `/openapi/v1.json`).
-- **A-4** Everything Gatekeeper needs per server lives under `/api/shards/{shardId}/...`, including power actions, console and players.
+- **A-3** The OpenAPI JSON is reachable next to the Scalar page (ASP.NET's default would be `/openapi/v1.json`). *Unconfirmed: Min reports no `/api` page on the beta and the beta listens on 8443, not 7278 (Q-13).*
+- **A-4** Everything Gatekeeper needs per server lives under `/api/shards/{shardId}/...`, including power actions, console and players. *Unconfirmed: a NATS server on the beta VM may carry console and events instead (Q-14).*
 - **A-5** JSON bodies, UUID ids, standard HTTP status codes (`401`, `403` with the capability name, `404`), as in the screenshot.
 - **A-6** One AMP 3 panel per Gatekeeper install, same as V3. Multi-panel support is not planned.
 - **A-7** A shard exposes which template or module it runs, so Gatekeeper can pick a game profile.
@@ -320,7 +321,7 @@ These are what the API page needs to answer. Most are for the docs; a few (marke
 - **Q-1 Bot authentication.** The sign-in shown uses passkeys. How does a headless bot authenticate: API keys / personal access tokens, a service account, OAuth/OIDC client credentials, or username + password + TOTP like AMP 2? How long do tokens last and how are they refreshed? *(Ask Mike if the docs don't say.)*
 - **Q-2 Capabilities.** The full list of capabilities. Are they granted per shard, per role, or both? Can an account with the right capability grant capabilities to a role?
 - **Q-3 Least privilege.** Can the bot account get only what it needs on chosen shards, and can the bot read its own effective capabilities (V3 used `Core/CurrentSessionHasPermission`)?
-- **Q-4 Console and events.** Is there a WebSocket/SSE stream for console output, chat, player join/leave and state changes? What do AMP 3 webhooks cover, and how are they signed? Or is it polling again?
+- **Q-4 Console and events.** Is there a WebSocket/SSE stream for console output, chat, player join/leave and state changes? What do AMP 3 webhooks cover, and how are they signed? Or is it polling again? On the beta VM a `nats-server` is running (Q-14).
 - **Q-5 Power and status.** Endpoints for start/stop/restart/kill, live state, metrics (CPU, RAM, player count, TPS) and the online player list.
 - **Q-6 Game identity and player events.** How does a shard say which template it runs? Does AMP 3 turn the template's join/leave/chat regexes into API events or a player list, or does Gatekeeper have to apply them to the console itself? Are any game actions (whitelist, kick, ban) API endpoints?
 - **Q-7 Scheduling catalog.** Which triggers and tasks exist, and is there a webhook task? Does "emits signals" mean there is an event feed?
@@ -329,6 +330,8 @@ These are what the API page needs to answer. Most are for the docs; a few (marke
 - **Q-10 Rate limits and stability.** Are there documented rate limits? Will the API be versioned or change freely during the beta?
 - **Q-11 Audit log.** Can the bot write entries to AMP's audit log, so actions taken from Discord show up in AMP with the Discord user named?
 - **Q-12 "Generate MCP".** What does it produce? Not needed for Gatekeeper, but it may be a quick way to explore the API.
+- **Q-13 Where is the HTTP API?** The beta VM serves `webapi` over HTTP on 8443, and Min says `/api` does not exist. Is the Scalar/OpenAPI browser (seen on 7278 in the October screenshot) still there, on which port and path, and is the REST shape in section 3 still right? *(Read-only: open the beta's web address in a browser and note what loads.)*
+- **Q-14 What do the other ports serve?** `webapi` on 2222 (not HTTP) and `nats-server` on 4222. Is NATS an internal bus between the panel and its game hosts, or something a client such as Gatekeeper is meant to use? If it is for clients: what subjects exist for console, chat and player events, how does a client authenticate, and is it documented? If it is internal, it may only be reachable from the machine itself and we should not build on it. What is 2222 (a gRPC or custom RPC port)? *(Ask Mike.)*
 
 ## 11. Decisions we need from the team
 
