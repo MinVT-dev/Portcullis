@@ -333,7 +333,7 @@ These are what the API page needs to answer. Most are for the docs; a few (marke
 ## 11. Decisions we need from the team
 
 - **D-1 AMP 3 only, or AMP 2 and 3 in one bot?** Recommendation: **AMP 3 only.** V3 stays the AMP 2 bot. CubeCoders keeps developing AMP 2 alongside AMP 3, so V3 users are not stranded. The `AmpPort` design leaves the door open if this changes.
-- **D-2 Name and versioning.** Decided (Min, 2026-11-07): the AMP 3 edition is called **Portcullis**. The repo, Python package and Docker image use `portcullis`. Brand assets are in `docs/branding/`.
+- **D-2 Name and versioning.** Decided (Min, 2026-11-07): the AMP 3 edition is called **Portcullis**. The repo is `MinVT-dev/Portcullis`; the Python package and Docker image use `portcullis`. Brand assets are in `docs/branding/`.
 - **D-3 Licence.** This repo is **AGPL-3.0**; V2/V3 files carry **GPL-3.0-or-later** headers (copyright Katelynn Cadwallader). Porting that code into an AGPL project is allowed (GPLv3 section 13), but the original copyright notices must stay on ported files, and k8t should agree the new edition is AGPL. If AGPL wasn't a deliberate choice, now is the cheapest time to switch to GPL-3.0-or-later to match.
 - **D-4 Python floor.** V3 targets 3.11 and 3.12. Keep 3.11 as the floor unless the AMP 3 container image dictates otherwise.
 - **D-5 Command set.** Agree on section 5 before Phase 0 task 0.7. Commands are the hardest thing to change after release.

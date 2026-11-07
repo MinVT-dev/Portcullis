@@ -42,7 +42,7 @@ Embed colours: green for online and success, red for offline and errors, amber f
 
 ## Rename status
 
-- **Done:** the GitHub repo is now [`MinVT-dev/portcullis`](https://github.com/MinVT-dev/portcullis) (renamed by Min, 2026-11-07). The old `gatekeeper-AMP-3` URL redirects.
+- **Done:** the GitHub repo is now [`MinVT-dev/Portcullis`](https://github.com/MinVT-dev/Portcullis) (renamed by Min, 2026-11-07). The old `gatekeeper-AMP-3` URL redirects.
 - **Done in this PR:** every mention of the new bot in the docs now says Portcullis. That covers titles, the package layout `portcullis/`, the "Apps → Portcullis user" context menu, the suggested AMP role, and decision D-2 (closed).
 - **Kept on purpose:** Gatekeeper V2, Gatekeeper V3, `GatekeeperV2`, `GatekeeperV3-Beta`, the `gatekeeperv2` AMP template, and lines that describe what V2/V3 did. Those are history.
 - **Still to do outside the repo:** the Discord application name, the bot username, the icon and the profile banner in the Developer Portal, and the AMP 3 role and bot user (name both `Portcullis`).
