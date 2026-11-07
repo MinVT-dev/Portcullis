@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-label="Gatekeeper banner mock-up">
+  <defs>
+    <linearGradient id="b-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101B33"/><stop offset="1" stop-color="#070C18"/>
+    </linearGradient>
+    <radialGradient id="b-halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#2DD4BF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#2DD4BF" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="b-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0 H0 V40" fill="none" stroke="#FFFFFF" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="640" fill="url(#b-bg)"/>
+  <rect width="1280" height="640" fill="url(#b-grid)"/>
+  <circle cx="300" cy="320" r="300" fill="url(#b-halo)"/>
+  <g transform="translate(110 130) scale(0.74)">
+  <defs>
+    <linearGradient id="b-m-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#14213D"/><stop offset="1" stop-color="#0A1020"/>
+    </linearGradient>
+    <linearGradient id="b-m-shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1E3A5F"/><stop offset="1" stop-color="#122640"/>
+    </linearGradient>
+    <radialGradient id="b-m-key" cx="0.5" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#7CF5E4"/><stop offset="1" stop-color="#14B8A6"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#b-m-bg)"/>
+  <path d="M256 72 L412 128 V252 C412 350 344 418 256 448 C168 418 100 350 100 252 V128 Z"
+        fill="url(#b-m-shield)" stroke="#2DD4BF" stroke-width="18" stroke-linejoin="round"/>
+  <circle cx="256" cy="226" r="46" fill="url(#b-m-key)"/>
+  <path d="M232 250 L216 352 H296 L280 250 Z" fill="url(#b-m-key)"/>
+</g>
+  <text x="560" y="300" font-size="112" font-weight="700" letter-spacing="-2" fill="#E8F1FF" font-family="'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif">Gatekeeper</text>
+  <rect x="564" y="330" width="96" height="6" rx="3" fill="#2DD4BF"/>
+  <text x="560" y="398" font-size="38" fill="#93A6C4" font-family="'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif">Your game servers, in Discord.</text>
+  <g transform="translate(560 452)"><rect width="178" height="44" rx="22" fill="none" stroke="#2DD4BF" stroke-opacity="0.6" stroke-width="2"/><text x="89.0" y="29" text-anchor="middle" font-size="20" fill="#93A6C4" font-family="'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif">Server status</text></g><g transform="translate(750 452)"><rect width="190" height="44" rx="22" fill="none" stroke="#2DD4BF" stroke-opacity="0.6" stroke-width="2"/><text x="95.0" y="29" text-anchor="middle" font-size="20" fill="#93A6C4" font-family="'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif">Joins &amp; leaves</text></g><g transform="translate(952 452)"><rect width="154" height="44" rx="22" fill="none" stroke="#2DD4BF" stroke-opacity="0.6" stroke-width="2"/><text x="77.0" y="29" text-anchor="middle" font-size="20" fill="#93A6C4" font-family="'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif">Chat bridge</text></g><g transform="translate(1118 452)"><rect width="106" height="44" rx="22" fill="none" stroke="#2DD4BF" stroke-opacity="0.6" stroke-width="2"/><text x="53.0" y="29" text-anchor="middle" font-size="20" fill="#93A6C4" font-family="'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif">Backups</text></g>
+</svg>

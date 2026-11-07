@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Drawbridge logo mock-up">
+  <defs>
+    <linearGradient id="m-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16303F"/><stop offset="1" stop-color="#0B1A23"/>
+    </linearGradient>
+    <linearGradient id="m-light" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FDE68A"/><stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#m-bg)"/>
+  <path d="M112 392 V140 H152 V112 H192 V140 H236 V112 H276 V140 H320 V112 H360 V140 H400 V392 Z" fill="#5B6B78"/>
+  <path d="M176 392 V272 A80 80 0 0 1 336 272 V392 Z" fill="url(#m-light)"/>
+  <path d="M176 392 L336 392 L392 470 L120 470 Z" fill="#B7793F"/>
+  <g stroke="#7A4E25" stroke-width="5"><line x1="161.6" y1="412" x2="350.4" y2="412"/><line x1="147.2" y1="432" x2="364.8" y2="432"/><line x1="132.8" y1="452" x2="379.2" y2="452"/></g>
+  <g stroke="#D7DEE4" stroke-width="8" stroke-linecap="round" stroke-dasharray="2 14">
+    <line x1="150" y1="210" x2="124" y2="462"/>
+    <line x1="362" y1="210" x2="388" y2="462"/>
+  </g>
+</svg>
