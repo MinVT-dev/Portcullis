@@ -1,6 +1,6 @@
 # Developing Portcullis
 
-So far: the AMP 3 client layer (`portcullis/amp/`), the core types and `AmpPort` interface (`portcullis/core/`), settings loading, and three tools. There is no Discord code yet.
+So far: the AMP 3 client layer (`portcullis/amp/`), the core types and `AmpPort` interface (`portcullis/core/`), the database (`portcullis/db/`), settings loading, and three tools. There is no Discord code yet.
 
 ## Layout
 
@@ -17,6 +17,7 @@ So far: the AMP 3 client layer (`portcullis/amp/`), the core types and `AmpPort`
 | `portcullis/amp/port.py` | `AmpServerPort`: the real `AmpPort`. Maps AMP models to core types and shares one shard-hub connection between all event subscribers. |
 | `portcullis/amp/events.py` | Turns hub events into core events. **Provisional:** the payload shapes are guesses until a capture exists. |
 | `portcullis/core/types.py`, `port.py` | AMP-agnostic types (`ServerInfo`, `ServerStatus`, `PowerAction`, events) and the `AmpPort` interface the rest of the bot uses. |
+| `portcullis/db/` | SQLite through aiosqlite. Numbered migrations in `db/migrations/` (each one atomic, with a `.bak` copy saved before an upgrade) and repositories for servers, settings, users and links, and audit. |
 | `portcullis/config.py` | Reads `.env` and the environment, reports every problem at once without echoing secrets, and sets up redacted logging. |
 | `tests/fakes/amp.py` | `FakeAmpPort`: an in-memory `AmpPort` for building and testing core and command code without AMP. |
 | `tools/generate_client.py` | Regenerates `models.py` and `api/` from the pinned spec. `--check` fails when they are stale. |
@@ -68,6 +69,10 @@ The SignalR event payloads (`UserJoined`, `UserLeft`, `ConsoleLine` and the rest
 What the recorder removes: the session token, every hub ticket, the password, SignalR connection ids, and anything shaped like a JWT. By default it also replaces the panel address and every IPv4 address, because join events may carry player IPs. Player names are kept. Look through `events.jsonl` before sharing it, and never commit a capture: we'll turn the parts we need into small hand-checked fixtures.
 
 **Connection mode.** It isn't known yet whether AMP counts the SignalR negotiate request and the WebSocket upgrade as one use of a ticket or two. With `--mode auto` (the default), the recorder tries three ways in turn (`direct`, `negotiate`, `negotiate-reuse`) and keeps the first that connects. `lifecycle.jsonl` and `summary.txt` record which one worked; the bot will use that one.
+
+## Database changes
+
+Add a new file `portcullis/db/migrations/NNNN_what_it_does.sql` with the next number, and never edit a migration that has already merged. Each file runs in one transaction together with its `schema_version` row. If it fails, nothing is applied. Before upgrading an existing database, Portcullis saves `<db>.v<old version>.bak` next to it. A database from a newer Portcullis is refused rather than guessed at.
 
 ## When AMP ships a new build
 
