@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="240" viewBox="0 0 680 240" role="img" aria-label="Portcullis Discord profile banner">
+<title>Portcullis Discord profile banner</title>
+  <defs>
+    <linearGradient id="b-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1B212B"/><stop offset="1" stop-color="#0E1218"/>
+    </linearGradient>
+    <radialGradient id="b-halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#3DDC84" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#3DDC84" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="b-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0 H0 V40" fill="none" stroke="#FFFFFF" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="680" height="240" fill="url(#b-bg)"/>
+  <rect width="680" height="240" fill="url(#b-grid)"/>
+  <circle cx="560" cy="120" r="160" fill="url(#b-halo)"/>
+  <g transform="translate(512 43) scale(0.3)">
+  <defs>
+    <linearGradient id="d-m-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2A3240"/><stop offset="1" stop-color="#141921"/>
+    </linearGradient>
+    <linearGradient id="d-m-glow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3DDC84" stop-opacity="0"/>
+      <stop offset="1" stop-color="#3DDC84" stop-opacity="0.95"/>
+    </linearGradient>
+    <clipPath id="d-m-arch"><path d="M136 440 V236 A120 120 0 0 1 376 236 V440 Z"/></clipPath>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#d-m-bg)"/>
+  <path d="M136 440 V236 A120 120 0 0 1 376 236 V440 Z" fill="#0B0F14"/>
+  <rect x="136" y="330" width="240" height="110" fill="url(#d-m-glow)" clip-path="url(#d-m-arch)"/>
+  <g fill="#A7B0BF" clip-path="url(#d-m-arch)"><rect x="151" y="96" width="18" height="250" rx="3"/><path d="M151 346 L160.0 378 L169 346 Z"/><rect x="199" y="96" width="18" height="250" rx="3"/><path d="M199 346 L208.0 378 L217 346 Z"/><rect x="247" y="96" width="18" height="250" rx="3"/><path d="M247 346 L256.0 378 L265 346 Z"/><rect x="295" y="96" width="18" height="250" rx="3"/><path d="M295 346 L304.0 378 L313 346 Z"/><rect x="343" y="96" width="18" height="250" rx="3"/><path d="M343 346 L352.0 378 L361 346 Z"/><rect x="136" y="186" width="240" height="14" rx="3"/><rect x="136" y="262" width="240" height="14" rx="3"/></g>
+  <path d="M136 440 V236 A120 120 0 0 1 376 236 V440" fill="none" stroke="#C9D1DD" stroke-width="20" stroke-linejoin="round"/>
+  <rect x="104" y="436" width="304" height="16" rx="8" fill="#C9D1DD"/>
+</g>
+  <text x="220" y="116" font-size="46" font-weight="700" letter-spacing="-1" fill="#E6EBF2" font-family="'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif">Portcullis</text>
+  <rect x="223" y="130" width="52" height="4" rx="2" fill="#3DDC84"/>
+  <text x="220" y="164" font-size="18" fill="#9AA6B8" font-family="'Segoe UI', 'Inter', 'Helvetica Neue', Arial, sans-serif">Your game servers, in Discord.</text>
+</svg>

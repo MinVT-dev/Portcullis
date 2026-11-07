@@ -1,62 +1,60 @@
-# Name and branding ideas
+# Portcullis brand
 
-Status: **proposal only.** Nothing has been renamed. Min and k8t pick.
+**Decision (Min, 2026-11-07):** the AMP 3 edition of the bot is called **Portcullis**. Gatekeeper V2 and V3 keep their names.
 
-![Preview of the three banner and logo mock-ups](preview.png)
+![Banner, Discord banner, logo, icon and offline status at 128, 64, 32 and 16 px](preview.png)
 
-## Do we need a new name?
+## Files
 
-You only have to rename if one of these is true:
-
-- **Findability matters.** We want the bot listed publicly, on Top.gg or in search, and found by people who never used V2 or V3. "Gatekeeper" is crowded: GitHub has about 45 Discord-bot repos with that word, plus OPA Gatekeeper and Apple's macOS Gatekeeper.
-- **We want a clean break.** V2 and V3 users won't confuse the AMP 3 edition with the old ones.
-
-If the bot spreads mostly by word of mouth in the CubeCoders community, "Gatekeeper" already has recognition there that a new name would have to earn from scratch. Keeping the name is a real option, and a refreshed logo may be enough.
-
-## Shortlist
-
-Checked on 2026-11-07 against GitHub repo search, npm, PyPI and a general web search (which also covers Top.gg and Discord bot lists). This was **not** a trademark search, and I could not search Discord's own app directory.
-
-| Name | Verdict | What the checks found |
+| File | Size | Use it for |
 |---|---|---|
-| **Portcullis** | **Recommended if renaming** | No Discord bot or game-server tool found under this name. Other uses: Docker's small Go secret-redaction library (16★), an AI-agent package on PyPI, a bioinformatics tool, a 0★ Discord gateway proxy repo, and "Portcullis Games" on Steam. npm and PyPI names are taken. The downside is spelling: people will type "portcullus". |
-| **Gatekeeper** (keep) | Strong option | Keeps V2/V3 recognition. Very crowded and hard to find in search. |
-| **Drawbridge** | Possible | Fits the "bridge between game and Discord" idea. But there is a popular "Drawbridge" design tool for Claude Code and Cursor (969★), a Drawbridge Archipelago-to-Discord relay setting in the bridgeipelago bot, and a Death Stranding Discord server called Drawbridge. |
-| **Herald** | Weak | Fits join/leave announcements. About 35 Discord-bot repos already use it. |
-| ~~Gatehouse~~ | Avoid | **GatehouseMC** is a Minecraft mod with a Discord bot, which is our exact niche. |
-| ~~Castellan~~ | Avoid | **Castellan Bot** is a hosted Discord bot for Conqueror's Blade. |
+| [portcullis-logo.svg](portcullis-logo.svg) | 512×512 | Main mark: README, docs, the 512 px Discord app icon. Five bars. |
+| [portcullis-icon.svg](portcullis-icon.svg) | 512×512 | Small-size cut with three thicker bars. Use it at 64 px and below (bot avatar in member lists, favicons), and as the **online** status image. |
+| [portcullis-status-offline.svg](portcullis-status-offline.svg) | 512×512 | **Offline** status: the gate is down and the light turns red. Embed thumbnails and status messages. |
+| [portcullis-banner.svg](portcullis-banner.svg) | 1280×640 | GitHub social preview, release posts, website header. |
+| [portcullis-discord-banner.svg](portcullis-discord-banner.svg) | 680×240 | The bot's Discord profile banner. The left third stays empty because Discord puts the avatar there. |
+| [preview.png](preview.png) | | Contact sheet of all of the above. |
 
-Also rejected: **Warden** (a Valheim server manager uses it), **Turnstile** (Cloudflare), **Barbican** (OpenStack's secrets service), **Postern** (a well-known Android proxy app), **Keepwatch** (a monitoring and alerting product).
+Discord and GitHub need PNG uploads, so export the SVGs at 2× (for example `rsvg-convert -w 1024 portcullis-logo.svg -o logo.png`, or open the file in a browser and save it).
 
-**Keep "AMP" out of the name.** It's CubeCoders' trademark. Whether a subtitle like "for AMP 3" is OK is a question for Mike.
+## Palette
 
-## Concepts
+| Role | Hex |
+|---|---|
+| Background (top to bottom) | `#2A3240` → `#141921` |
+| Banner background | `#1B212B` → `#0E1218` |
+| Iron (bars) | `#A7B0BF` |
+| Frame and sill | `#C9D1DD` |
+| Online / brand accent | `#3DDC84` |
+| Offline / error | `#F0524F` |
+| Warning (embeds only) | `#F5A524` |
+| Text on dark | `#E6EBF2`, secondary `#9AA6B8` |
 
-All three use the same layout: a rounded-square mark that still reads as a Discord avatar, and a 1280×640 banner (GitHub social-preview size, croppable to Discord's 680×240 profile banner) with the name, a tagline and four feature pills. The colors are a starting point.
+Embed colours: green for online and success, red for offline and errors, amber for warnings. The banners use a system sans stack (Segoe UI, Inter, Helvetica Neue, Arial). Turn the text into outlines before final export if the font has to match exactly everywhere.
 
-### Portcullis ([logo](portcullis-logo.svg), [banner](portcullis-banner.svg))
+**Tagline:** "Your game servers, in Discord." Keep "AMP" out of the name and the logo; it's CubeCoders' trademark. Whether "Portcullis for AMP 3" is OK as a descriptive subtitle is a question for Mike.
 
-- **Motif:** an iron portcullis half raised inside an arch, with green light coming through underneath. Raised gate means "server up", which gives an easy status variant: drop the gate and turn the light red when offline.
-- **Palette:** iron slate `#1B212B`, steel `#A7B0BF`, signal green `#3DDC84`. Amber `#F5A524` for warnings.
-- **Style:** flat, geometric, dark. Friendly to embeds.
-- **Weak point:** at 32 px the bars blur into a grid. A final avatar version should use 3 bars, not 5.
+## Still to check before going public
 
-### Gatekeeper refresh ([logo](gatekeeper-logo.svg), [banner](gatekeeper-banner.svg))
+- **Trademark search** (EUIPO and USPTO) for "Portcullis" in software classes 9 and 42. Not done yet.
+- **Discord app directory:** search for an existing app called Portcullis. Not done yet.
+- Known other uses, none of them a Discord bot or game-server tool: Docker's Go secret-redaction library `docker/portcullis`, the PyPI package `portcullis` (an AI-agent policy layer), a bioinformatics tool, a 0★ Discord gateway proxy repo `ShadyDonkey/portcullis`, and Portcullis Games on Steam. The `portcullis` name is taken on both npm and PyPI, so a published package would need another name, such as `portcullis-bot`.
 
-- **Motif:** a shield with a glowing keyhole, meaning access control and protection. It stays the most readable at small sizes.
-- **Palette:** deep navy `#101B33`, shield blue `#1E3A5F`, teal `#2DD4BF`.
-- **Style:** clean and modern. Close to a security product look, which suits whitelist and ban features but says less about games.
+## Where the old name appears
 
-### Drawbridge ([logo](drawbridge-logo.svg), [banner](drawbridge-banner.svg))
+The repo still says "Gatekeeper" in 60 places. Most of them are history: V2 and V3 really are called Gatekeeper and should stay that way. These are the places to change:
 
-- **Motif:** a castle gate with its bridge lowered and a warm lit doorway, meaning "come in" and "a bridge into your server".
-- **Palette:** moat blue `#12283A`, stone `#5B6B78`, timber `#B7793F`, lantern amber `#F5B83D`.
-- **Style:** warmer and more playful, closest to the game-server feel.
+**Outside the repo (Min decides):**
+- **GitHub repo name** `MinVT-dev/gatekeeper-AMP-3`. GitHub redirects the old URL and old clones keep working. Suggested new name: `portcullis`.
+- **Discord application and bot username** in the Developer Portal. Upload the logo as the app icon and the Discord banner as the profile banner there.
+- **AMP 3 role and bot user** that the bot signs in as. Name them `Portcullis` from the start.
 
-## Next steps once a name is picked
+**In the repo** (one small docs PR once the repo name is settled):
+- `README.md:1`, the title "Gatekeeper for AMP 3".
+- `docs/DESIGN.md:1`, the title, plus product mentions throughout (about 25 lines). The ones that matter most are the package layout `gatekeeper/` (line 173) and `gatekeeper.amp` (line 201), the "Apps → Gatekeeper user" context menu (lines 156 and 438), the error text at line 215, and the "Gatekeeper role" at line 224. Decision D-2 (line 336), about the name, can now be closed as Portcullis.
+- `docs/BETA_CHECKLIST.md`: lines 69, 72 and 119, including the `gatekeeper/amp/` path.
+- `docs/AMP2_SUPPORTED.md`: lines 3, 307, 333, 335 and 337. Lines 48, 298 and 309 are V2/V3 history and stay.
+- `docs/amp3-api/README.md:3` and `docs/amp3-api/API_SURFACE.md` (lines 42, 49, 59, 112 and 132).
+- Code: name the Python package `portcullis` from the first commit, so it never has to be renamed.
 
-1. Run a quick trademark check (EUIPO and USPTO) and search Discord's app directory for the chosen name.
-2. Tidy the mark for 32 px and 16 px, and make online and offline variants for status embeds.
-3. Rename the repo (GitHub redirects the old URL), the bot's display name and the README. Slash commands don't change.
-
-The SVGs here are hand-written mock-ups, not final artwork.
+Leave references to Gatekeeper V2, `GatekeeperV2`, `GatekeeperV3-Beta` and the `gatekeeperv2` AMP template as they are.
