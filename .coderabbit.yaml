@@ -1,0 +1,9 @@
+# Keep automated review on hand-written code. The vendored AMP spec (1.2 MB) and the code
+# generated from it are reviewed by diffing (tools/spec_diff.py, generate_client --check), not by eye.
+reviews:
+  path_filters:
+    - "!portcullis/amp/spec/**"
+    - "!portcullis/amp/models.py"
+    - "!portcullis/amp/api/*.py"
+    - "!docs/amp3-api/API_REFERENCE.md"
+    - "!docs/branding/*.png"
