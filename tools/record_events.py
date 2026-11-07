@@ -89,26 +89,25 @@ class Recorder:
         fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
         fh.flush()
 
-    async def on_event(self, event: HubEvent) -> None:
+    async def on_event(self, event: HubEvent, shard: str | None = None, label: str | None = None) -> None:
+        """Save one event. ``shard`` is the shard this connection joined (AMP's ConsoleLine has no id)."""
         self.counts[f"{event.hub}:{event.target}"] += 1
-        record = {
-            "t": event.received_at.isoformat(),
-            "hub": event.hub,
-            "target": event.target,
-            "arguments": self.redactor.data(event.arguments),
-        }
+        record: dict[str, Any] = {"t": event.received_at.isoformat(), "hub": event.hub}
+        if shard is not None:
+            record["shard"] = shard
+        record |= {"target": event.target, "arguments": self.redactor.data(event.arguments)}
         self._line(self._events, record)
-        if self.echo and self._worth_echoing(event):
+        if self.echo and self._worth_echoing(event, shard):
             preview = json.dumps(record["arguments"], ensure_ascii=False, default=str)
-            print(f"{record['t'][11:19]} {event.hub}:{event.target} {preview[:160]}")
+            print(f"{record['t'][11:19]} {label or event.hub}:{event.target} {preview[:160]}")
 
-    def _worth_echoing(self, event: HubEvent) -> bool:
+    def _worth_echoing(self, event: HubEvent, shard: str | None = None) -> bool:
         if event.target not in NOISY:
             return True
         if event.target == "Metrics":
             return False
         # Roster and state repeat on a timer; show them only when they differ from the last one.
-        sid = next((a for a in event.arguments if isinstance(a, str) and a != "_root"), "")
+        sid = shard or next((a for a in event.arguments if isinstance(a, str) and a != "_root"), "")
         payload = event.arguments[-1] if event.arguments else None
         if event.target == "ShardStateChanged" and isinstance(payload, dict):
             payload = {k: payload.get(k) for k in ("status", "isRunning", "isStopped", "isBusy", "lastErrorCode")}
@@ -213,7 +212,7 @@ async def inspect_panel(amp: AmpClient, recorder: Recorder, limit: int = 300) ->
         for target in ("JoinShard", "LeaveShard"):
             start = 0
             while (i := js.find(target, start)) != -1:
-                snippets.append(f"--- {target} in {url.rsplit('/', 1)[-1]} at {i}\n{js[max(0, i - 400):i + 300]}\n")
+                snippets.append(f"--- {target} in {url.rsplit('/', 1)[-1]} at {i}\n{js[max(0, i - 400) : i + 300]}\n")
                 start = i + len(target)
     recorder.write_text("panel_hub_calls.txt", "\n".join(snippets) or f"No JoinShard found in {len(seen)} scripts.\n")
     recorder.on_lifecycle("panel", "inspected", {"scripts": len(seen), "snippets": len(snippets)})
@@ -249,8 +248,10 @@ async def run(args: argparse.Namespace) -> int:
         host = urlsplit(url).netloc
         redactor.add(host)
         redactor.add(urlsplit(url).hostname)
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING,
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     for handler in logging.getLogger().handlers:
         handler.addFilter(RedactingFilter(redactor))
 
@@ -258,7 +259,7 @@ async def run(args: argparse.Namespace) -> int:
     recorder = Recorder(out_dir, redactor, echo=not args.quiet)
     print(f"Writing to {out_dir}")
 
-    connections: list[HubConnection] = []
+    connections: list[tuple[str, HubConnection]] = []
     exit_code = 0
     amp = AmpClient(url, Credentials(username, password), redactor=redactor)
     extra: dict[str, Any] = {}
@@ -293,54 +294,79 @@ async def run(args: argparse.Namespace) -> int:
         mode = await pick_mode(amp, args.mode, recorder)
         extra["mode"] = mode
 
-        async def join(conn: HubConnection) -> None:
-            failed: dict[str, str] = {}
-            for sid in shard_ids:
+        # One connection per shard: AMP's ConsoleLine has no shard id, so lines from several shards
+        # on one connection can't be told apart.
+        def joiner(sid: str) -> Any:
+            async def join(conn: HubConnection) -> None:
                 call = [tenants[sid], sid]
                 recorder.on_lifecycle("shard", "join", {"shard": sid, "name": names[sid], "arguments": call})
                 try:
                     result = await conn.invoke("JoinShard", *call)
                 except HubError as exc:
-                    failed[sid] = str(exc)
-                    recorder.on_lifecycle("shard", "join-failed", {
-                        "shard": sid, "name": names[sid], "state": shard_state_label(snap, sid),
-                        "arguments": call, "error": str(exc)})
-                    continue
+                    recorder.on_lifecycle(
+                        "shard",
+                        "join-failed",
+                        {
+                            "shard": sid,
+                            "name": names[sid],
+                            "state": shard_state_label(snap, sid),
+                            "arguments": call,
+                            "error": str(exc),
+                        },
+                    )
+                    raise
                 recorder.on_lifecycle("shard", "joined", {"shard": sid, "result": result})
-            if len(failed) == len(shard_ids):
-                raise HubError("no shard could be joined: " + "; ".join(
-                    f"{names[s]}: {e}" for s, e in failed.items()))
 
-        hubs = ["shard", *args.extra_hub]
+            return join
+
+        def handler(sid: str | None, label: str) -> Any:
+            async def handle(event: HubEvent) -> None:
+                await recorder.on_event(event, sid, label)
+
+            return handle
+
+        targets: list[tuple[str, str | None, str]] = [("shard", sid, names[sid]) for sid in shard_ids]
+        targets += [(hub, None, hub) for hub in args.extra_hub]
         tasks = []
-        for name in hubs:
-            conn = amp.hub(name, mode=mode, on_connected=join if name == "shard" else None,  # type: ignore[arg-type]
-                           join_attempts=args.join_attempts,
-                           on_lifecycle=lambda kind, d, n=name: recorder.on_lifecycle(n, kind, d))
-            connections.append(conn)
-            tasks.append(asyncio.create_task(conn.run(recorder.on_event), name=f"hub-{name}"))
+        for hub, sid, label in targets:
+            conn = amp.hub(
+                hub,
+                mode=mode,
+                on_connected=joiner(sid) if sid else None,  # type: ignore[arg-type]
+                join_attempts=args.join_attempts,
+                on_lifecycle=lambda kind, d, n=label: recorder.on_lifecycle(n, kind, d),
+            )
+            connections.append((label, conn))
+            tasks.append(asyncio.create_task(conn.run(handler(sid, label)), name=f"hub-{label}"))
         print("Recording. Join the game, chat, run a console command and leave. Ctrl+C to stop.")
-        done, _ = await asyncio.wait(tasks, timeout=args.duration, return_when=asyncio.FIRST_EXCEPTION)
+        done, _ = await asyncio.wait(tasks, timeout=args.duration)
+        gave_up = 0
         for task in done:
             exc = task.exception()
             if isinstance(exc, HubGaveUp):
-                print(f"Stopped: {exc}")
-                print("The hub connection works, but AMP refused JoinShard every time. "
-                      "lifecycle.jsonl has the exact calls and errors, and panel_hub_calls.txt shows how "
-                      "the panel itself calls it. Send those two files.")
-                exit_code = 3
+                gave_up += 1
+                print(f"{task.get_name()[4:]}: stopped: {exc}")
             elif exc:
-                print(f"Hub task stopped: {exc}")
+                print(f"{task.get_name()[4:]}: hub task stopped: {exc}")
                 exit_code = 1
+        if shard_ids and gave_up >= len(shard_ids):
+            print(
+                "The hub connection works, but AMP refused JoinShard every time. "
+                "lifecycle.jsonl has the exact calls and errors, and panel_hub_calls.txt shows how "
+                "the panel itself calls it. Send those two files."
+            )
+            exit_code = 3
     finally:
-        for conn in connections:
+        for _, conn in connections:
             await conn.close()
-        extra.update({
-            "connects": {c.hub: c.connects for c in connections},
-            "tickets_used": {c.hub: c.tickets_used for c in connections},
-            "logins": amp.auth.logins,
-            "renewals": amp.auth.renewals,
-        })
+        extra.update(
+            {
+                "connects": {label: c.connects for label, c in connections},
+                "tickets_used": {label: c.tickets_used for label, c in connections},
+                "logins": amp.auth.logins,
+                "renewals": amp.auth.renewals,
+            }
+        )
         recorder.close(extra)
         with contextlib.suppress(Exception):
             await amp.close()
@@ -353,19 +379,30 @@ def main() -> int:
     parser.add_argument("--url", help="panel URL, e.g. http://192.168.1.10:8443 (default: AMP_URL)")
     parser.add_argument("--username", help="bot account (default: AMP_USERNAME)")
     parser.add_argument("--shard", action="append", default=[], help="shard id to join (repeatable; default all)")
-    parser.add_argument("--extra-hub", action="append", default=[], choices=["tasks", "spire"],
-                        help="also record this hub (no join call is made)")
-    parser.add_argument("--mode", default="auto", choices=["auto", *MODES],
-                        help="how to spend hub tickets; auto tries each and keeps the first that works")
+    parser.add_argument(
+        "--extra-hub",
+        action="append",
+        default=[],
+        choices=["tasks", "spire"],
+        help="also record this hub (no join call is made)",
+    )
+    parser.add_argument(
+        "--mode",
+        default="auto",
+        choices=["auto", *MODES],
+        help="how to spend hub tickets; auto tries each and keeps the first that works",
+    )
     parser.add_argument("--duration", type=float, default=None, help="seconds to record (default: until Ctrl+C)")
     parser.add_argument("--out", type=Path, default=ROOT / "captures")
     parser.add_argument("--env-file", type=Path, default=ROOT / ".env")
     parser.add_argument("--keep-host", action="store_true", help="don't replace the panel address")
     parser.add_argument("--keep-ips", action="store_true", help="don't replace IPv4 addresses")
-    parser.add_argument("--join-attempts", type=int, default=3,
-                        help="give up after this many identical JoinShard failures (default 3)")
-    parser.add_argument("--no-inspect", action="store_true",
-                        help="don't look for JoinShard calls in the panel's own scripts")
+    parser.add_argument(
+        "--join-attempts", type=int, default=3, help="give up after this many identical JoinShard failures (default 3)"
+    )
+    parser.add_argument(
+        "--no-inspect", action="store_true", help="don't look for JoinShard calls in the panel's own scripts"
+    )
     parser.add_argument("--quiet", action="store_true", help="don't print events as they arrive")
     parser.add_argument("--verbose", action="store_true", help="debug logging (still redacted)")
     args = parser.parse_args()

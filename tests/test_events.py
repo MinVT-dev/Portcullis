@@ -55,3 +55,14 @@ def test_state_mapping() -> None:
     assert state_from({"isStopped": True, "lastErrorCode": "app.crashed"})[0] is ServerState.FAILED
     assert state_from({"isRunning": True}, suspended=True)[0] is ServerState.SUSPENDED
     assert state_from({"status": 99}) == (ServerState.UNKNOWN, 99)
+
+
+def test_live_console_line_shape_takes_shard_from_connection() -> None:
+    line = {"streamId": "agent", "text": "[agent:stdout] ready", "timestamp": "2026-11-07T16:02:30Z",
+            "seq": 2431, "kind": "line", "state": None, "level": None, "origin": None}
+    e = parse_hub_event(ev("ConsoleLine", line), [SID])
+    assert isinstance(e, ConsoleLine) and e.server == SID and e.stream == "agent" and e.seq == 2431
+    marker = parse_hub_event(ev("ConsoleLine", {"streamId": "system", "kind": "marker", "text": "Starting"}), [SID])
+    assert isinstance(marker, ConsoleLine) and marker.kind == "marker" and marker.stream == "system"
+    plain = parse_hub_event(ev("ConsoleLine", {"text": "x"}), [SID])
+    assert isinstance(plain, ConsoleLine) and plain.stream == "main"

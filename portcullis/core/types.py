@@ -103,7 +103,8 @@ class ServerEvent:
 class ConsoleLine(ServerEvent):
     text: str
     seq: int | None = None
-    kind: str = "line"  # line, marker, notice, error, info
+    kind: str = "line"  # "line", or "marker" for a lifecycle note such as a restart
+    stream: str = "main"  # "main" is the game's own output; AMP also sends "agent" and "system"
 
 
 @dataclass(frozen=True)

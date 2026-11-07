@@ -6,10 +6,15 @@ Argument shapes seen live on AMP 3.0.0.6 (recorder capture, 2026-11-07):
 * ``Metrics``: ``[shardId, sample]``, every ~3 s
 * ``UserRoster``: ``[shardId, [users]]``, every ~10 s
 * ``ShardStateChanged``: ``[tenantId, shardId, ShardState]``, every ~9 s even when nothing changed
+* ``ConsoleLine``: ``[line]``, with NO shard id, and ``seq`` counts across all shards, so the
+  shard comes from the connection (one connection per shard). ``streamId`` is ``main`` (the
+  game), ``agent`` (AMP's shard agent) or ``system`` (``kind: marker`` lifecycle notes carrying a
+  ``state``). Player chat has not been captured yet.
+* ``Lifecycle``: ``[event]`` with ``shardId``, a numeric ``state`` and a ``message``.
 
-``ConsoleLine``, ``UserJoined`` and ``UserLeft`` are still guesses from the REST twins
-(ConsoleLineDto, ConnectedUser). The parser stays lenient: camelCase or PascalCase keys, optional
-leading tenant and shard id arguments, and ``OtherEvent`` rather than an exception.
+``UserJoined`` and ``UserLeft`` have not been seen yet; ``UserRoster`` may be the only source.
+The parser stays lenient: camelCase or PascalCase keys, optional leading tenant and shard id
+arguments, and ``OtherEvent`` rather than an exception.
 """
 
 from __future__ import annotations
@@ -83,8 +88,11 @@ def player_from(data: Any) -> Player | None:
     if not isinstance(name, str) or not name:
         return None
     joined = field_of(data, "joinedAt")
-    return Player(name=name, id=(str(field_of(data, "id")) if field_of(data, "id") is not None else None),
-                  joined_at=parse_instant(joined) if isinstance(joined, str) else None)
+    return Player(
+        name=name,
+        id=(str(field_of(data, "id")) if field_of(data, "id") is not None else None),
+        joined_at=parse_instant(joined) if isinstance(joined, str) else None,
+    )
 
 
 def split_arguments(event: HubEvent, joined: Collection[str]) -> tuple[str | None, Any]:
@@ -119,8 +127,14 @@ def parse_hub_event(event: HubEvent, joined: Collection[str]) -> ServerEvent | N
         if isinstance(text, str):
             stamp = field_of(payload, "timestamp")
             when = parse_instant(stamp) if isinstance(stamp, str) else None
-            return ConsoleLine(server=server, at=when or at, text=text, seq=to_int(field_of(payload, "seq")),
-                               kind=str(field_of(payload, "kind") or "line"))
+            return ConsoleLine(
+                server=server,
+                at=when or at,
+                text=text,
+                seq=to_int(field_of(payload, "seq")),
+                kind=str(field_of(payload, "kind") or "line"),
+                stream=str(field_of(payload, "streamId") or "main"),
+            )
     elif event.target in ("UserJoined", "UserLeft"):
         player = player_from(payload)
         if player is not None:
