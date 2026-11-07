@@ -3,7 +3,7 @@
 Status: **draft**, written before the AMP 3 API is available.
 Everything that depends on the API is marked as an assumption (A-n) or an open question (Q-n) and must be checked against the real API browser once the beta is running.
 
-Contents: 1 Goal · 2 Lessons from V2/V3 · 3 What we know about AMP 3 · 4 Supported games · 5 Command design · 6 Architecture · 7 Accessibility · 8 Delivery plan · 9 Assumptions · 10 Open questions · 11 Decisions · 12 Risks · Appendix A: V3 command map · Appendix B: full candidate command list
+Contents: 1 Goal · 2 Lessons from V2/V3 · 3 What we know about AMP 3 · 4 Supported games · 5 Command design · 6 Architecture · 7 Accessibility · 8 Delivery plan · 9 Assumptions · 10 Open questions · 11 Decisions · 12 Risks · 13 Plan check against the real API · Appendix A: V3 command map · Appendix B: full candidate command list
 
 ---
 
@@ -310,7 +310,7 @@ Then:
 
 - **A-1** A "shard" is the AMP 3 equivalent of an AMP 2 instance: one game server.
 - **A-2** "Spires" are hosts (AMP 2's targets) and "Datastores" are storage locations. Gatekeeper only needs to read them.
-- **A-3** The OpenAPI JSON is reachable next to the Scalar page (ASP.NET's default would be `/openapi/v1.json`). *Unconfirmed: Min reports no `/api` page on the beta and the beta listens on 8443, not 7278 (Q-13).*
+- **A-3** *(Broke, see section 13.)* The OpenAPI JSON is reachable next to the Scalar page (ASP.NET's default would be `/openapi/v1.json`). *Unconfirmed: Min reports no `/api` page on the beta and the beta listens on 8443, not 7278 (Q-13).*
 - **A-4** Everything Gatekeeper needs per server lives under `/api/shards/{shardId}/...`, including power actions, console and players. *Unconfirmed: a NATS server on the beta VM may carry console and events instead (Q-14).*
 - **A-5** JSON bodies, UUID ids, standard HTTP status codes (`401`, `403` with the capability name, `404`), as in the screenshot.
 - **A-6** One AMP 3 panel per Gatekeeper install, same as V3. Multi-panel support is not planned.
@@ -353,6 +353,60 @@ These are what the API page needs to answer. Most are for the docs; a few (marke
 - **Game profiles drift from the templates.** If a template changes a whitelist command, the profile breaks without anyone noticing. A weekly CI job can compare profiles with `CubeCoders/AMPTemplates`.
 
 ---
+
+## 13. Plan check against the real API (2026-11-07)
+
+Checked against `docs/amp3-api/` (the AMP 3.0.0 preview build `3.0.0.6`, probed on a test VM). Markers below follow that folder: verified on the VM, stated in the shipped spec, or inferred. Sections 3, 9 and 10 above still show the older assumptions; this section is the current view and wins where they differ.
+
+**Verdict.** Gatekeeper can be built as planned. The shape holds: a typed REST client generated from the spec, a small command set, game profiles as data, AMP's own scheduler and backups. Four things change and two assumptions broke. Nothing found so far blocks the project.
+
+### Works as planned
+
+- **A generated, typed client.** The OpenAPI 3.1.1 spec exists (219 paths, 263 operations, 389 types). It is not served over HTTP, so we ship the file and generate from it (A-3 changes, below).
+- **Server control.** Start, stop, restart, sleep, wake, suspend and update are routes; state and metrics are readable. I did not see a separate kill route, although a `power.kill` permission exists, so check how kill is done before promising a Kill command.
+- **Players.** `GET /api/Shards/{id}/users` returns the connected-user roster, and AMP applies the template's join and leave patterns itself and emits `UserJoined` and `UserLeft` events. Gatekeeper no longer needs to parse joins and leaves.
+- **Console input.** `POST /api/Shards/{id}/console` sends a command (needs `console.send`, returns 202). This is the only way to send chat, whitelist or kick, as the plan already assumed for whitelist commands.
+- **Backups and schedules.** Snapshots (create, list, delete, restore) and schedules (create, list, run, history) are real routes. The schedule catalog has `player.joined`, `player.left`, `backup.create`, `app.consoleSend` and a `flow.webhook` task, so "use AMP's scheduler, don't duplicate it" holds.
+- **Permissions.** `GET /api/me/permissions` returns the account's grants, so the bot can check what it may do (Q-3). There are 71 permission nodes, and a small role covers what Gatekeeper needs: `view`, `power.start|stop|restart`, `console.read`, `console.send`, `analytics.read|users`, `schedule.read`.
+- **Game profiles as data.** The template's console spec is readable through `GET /api/Templates/{slug}`, including the join, leave and chat patterns, so game profiles can still be data files that add only what AMP does not give.
+
+### What changes
+
+1. **Sign-in.** There is no API key and no service account. The bot logs in as an ordinary user with a limited role (`POST /api/Auth/login`), gets a token valid for about 8 hours, and must renew it (`/api/Auth/renew`) or log in again. The bot's account should not need 2FA or a passkey, which is an assumption to check. Credentials live in the bot's environment file and are never logged.
+2. **Realtime is SignalR, not a raw stream and not NATS.** Three hubs (`/hubs/shard`, `/hubs/spire`, `/hubs/tasks`). Each connection needs a fresh single-use hub token (valid about 90 seconds, accepted only as a query parameter, and the main token is refused). Every reconnect needs a new one. The reconnect loop is the fiddliest part of the client and needs its own tests.
+3. **Chat is not an event.** The shard hub has `ConsoleLine` but no chat event. Gatekeeper applies the template's chat pattern to console lines. The patterns come from AMP, so this is the plan's intended approach, but the parsing stays on our side.
+4. **Whitelist, kick, ban and say are console commands.** AMP 3's template console spec has no list of user actions, and no route exists for them. The per-game profile must hold the command text for each, as planned in section 4, and the 146 supported games still each need that data tested on a real server.
+
+### Assumptions that broke or resolved
+
+| Item | Result |
+|---|---|
+| A-3 spec reachable next to Scalar | **Broke.** No Scalar and no served spec. The spec is a file on disk in the AMP install, and a copy is in `docs/amp3-api/`. |
+| A-4 everything under `/api/shards/{id}` | **Mostly holds.** Not chat, and not whitelist, kick or ban. |
+| Q-1 bot authentication | **Resolved:** a normal user, username and password, 8 hour token. No API key. |
+| Q-3 least privilege | **Resolved:** 71 permission nodes, readable at `/api/me/permissions`. |
+| Q-4 events | **Resolved in part:** SignalR hubs with `UserJoined`, `UserLeft`, `UserRoster`, `ConsoleLine`, `ShardStateChanged`. Payload shapes are not yet captured from a live connection. |
+| Q-5 power and status | **Resolved,** except how kill works. |
+| Q-6 game identity and player events | **Resolved in part:** player events come from AMP; whitelist, kick and ban do not exist as routes. |
+| Q-7 scheduling catalog | **Resolved:** catalog, including an outbound `flow.webhook` task. |
+| Q-8 backups | **Resolved:** snapshot routes. |
+| Q-9 running inside AMP | **Open.** Shards run in rootless Podman containers. The Python App Runner is untested. |
+| Q-10 rate limits and stability | **Open.** None documented; the preview build will change. |
+| Q-11 audit log | **Open.** Console input is audited by AMP (secrets redacted); whether the bot can add its own entries is unknown. |
+| Q-13 where is the HTTP API | **Resolved:** the panel and REST API are on 8443, with SignalR under `/hubs`. |
+| Q-14 NATS and 2222 | **Resolved:** 2222 is the built-in SFTP; NATS is AMP's own bus and needs AMP's credentials. Gatekeeper should not use it. |
+
+### Top risks
+
+1. **Preview expiry and API churn.** The build expires on 7 December 2026 (31 days from the check) and the API may change between previews. Mitigation: pin the spec in the repo, regenerate the client and diff the spec on every new build, and keep contract tests that fail when a route or field we use changes. Keep Gatekeeper V3 running on AMP 2 meanwhile.
+2. **The bot needs a user account, token renewal and one-use hub tokens.** An expired token or a failed reconnect silently stops events. Mitigation: a connection manager that renews early, fetches a fresh hub token for each connect, and exposes its health in `/status`.
+3. **Unverified event payloads.** Event names come from the panel's JavaScript, not from live traffic or the spec. Mitigation: record real payloads first (see below) and build the typed models from those.
+4. **Console commands are game-specific and unverified.** Whitelist, kick and chat-in depend on each game's own commands and on AMP's template. Mitigation: ship profiles per batch and mark a feature unavailable for a game until it passes a real-server test.
+5. **Spec licence.** The spec and its quoted descriptions are CubeCoders' material, not AGPL. The repo is private, so this is fine now. Remove the files or ask permission before making the repo public.
+
+### Recommended first coding task
+
+A **realtime recorder spike**, before any Discord code. A small script that logs in with a dedicated bot user, fetches a hub token, connects to `/hubs/shard`, joins a shard, and writes every event it receives to a file, with secrets removed. It reconnects with a fresh hub token each time. Run it on the test VM while a player joins, leaves and chats in one game. This de-risks risks 2 and 3 at once, gives real fixtures for the typed models and tests, and shows whether a Python SignalR client library is enough or we need a thin client of our own. In parallel, generate the REST client from the spec into `amp/`. Both are small and neither depends on Discord.
 
 ## Appendix A: V3 command map
 
