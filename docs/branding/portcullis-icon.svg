@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Portcullis icon (small sizes, also the online status)">
+<title>Portcullis icon (small sizes, also the online status)</title>
+  <defs>
+    <linearGradient id="i-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2A3240"/><stop offset="1" stop-color="#141921"/>
+    </linearGradient>
+    <linearGradient id="i-glow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3DDC84" stop-opacity="0"/>
+      <stop offset="1" stop-color="#3DDC84" stop-opacity="0.95"/>
+    </linearGradient>
+    <clipPath id="i-arch"><path d="M136 440 V236 A120 120 0 0 1 376 236 V440 Z"/></clipPath>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#i-bg)"/>
+  <path d="M136 440 V236 A120 120 0 0 1 376 236 V440 Z" fill="#0B0F14"/>
+  <rect x="136" y="330" width="240" height="110" fill="url(#i-glow)" clip-path="url(#i-arch)"/>
+  <g fill="#A7B0BF" clip-path="url(#i-arch)"><rect x="166" y="96" width="30" height="250" rx="3"/><path d="M166 346 L181.0 378 L196 346 Z"/><rect x="241" y="96" width="30" height="250" rx="3"/><path d="M241 346 L256.0 378 L271 346 Z"/><rect x="316" y="96" width="30" height="250" rx="3"/><path d="M316 346 L331.0 378 L346 346 Z"/><rect x="136" y="214" width="240" height="22" rx="3"/></g>
+  <path d="M136 440 V236 A120 120 0 0 1 376 236 V440" fill="none" stroke="#C9D1DD" stroke-width="28" stroke-linejoin="round"/>
+  <rect x="104" y="436" width="304" height="22" rx="8" fill="#C9D1DD"/>
+</svg>

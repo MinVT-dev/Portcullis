@@ -1,6 +1,6 @@
 # AMP 3 API documentation
 
-These docs map the AMP 3 API that Gatekeeper will talk to. They cover the 3.0.0 preview (`amp3-host 3.0.0.6+f3d1a77cea`) and were checked on a throwaway test VM on 7 Nov 2026.
+These docs map the AMP 3 API that Portcullis will talk to. They cover the 3.0.0 preview (`amp3-host 3.0.0.6+f3d1a77cea`) and were checked on a throwaway test VM on 7 Nov 2026.
 
 | File | What it is |
 |---|---|

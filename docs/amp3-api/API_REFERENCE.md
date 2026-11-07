@@ -35,7 +35,7 @@ This file is generated from CubeCoders' own OpenAPI spec, which ships on disk wi
 POST /api/Auth/login
 Content-Type: application/json
 
-{"username":"gatekeeper","password":"…","rememberMe":false}
+{"username":"portcullis","password":"…","rememberMe":false}
 ```
 → `200 {"token":"<JWT>","expiration":"<UTC time about 8 h from now>"}` **[V]**
 
@@ -91,7 +91,7 @@ Seen on `/api` responses **[V]**:
 | `WWW-Authenticate` | `Bearer` (on 401 only) |
 | `Transfer-Encoding` | `chunked` (large JSON) |
 
-There are **no rate-limit headers** (`X-RateLimit-*`, `Retry-After`) on normal calls **[V]**. The spec mentions rate limiting only for `POST /api/csp-report` **[S]**. Gatekeeper should still throttle itself.
+There are **no rate-limit headers** (`X-RateLimit-*`, `Retry-After`) on normal calls **[V]**. The spec mentions rate limiting only for `POST /api/csp-report` **[S]**. Portcullis should still throttle itself.
 
 ## 5. Authentication
 
@@ -232,7 +232,7 @@ All 71 nodes **[V]**:
 | `webhooks.internal` | Platform | yes |  |  |
 | `credentials.manage` | Platform | yes |  |  |
 
-**Suggested Gatekeeper role [I]:**
+**Suggested Portcullis role [I]:**
 - Shard: `view`, `power.start`, `power.stop`, `power.restart`, `console.read`, `console.send`, `analytics.read`, `analytics.users`, `schedule.read`.
 - Add `schedule.write` only if the bot sets up its own webhooks (section 9).
 - Avoid every node marked dangerous.
@@ -259,7 +259,7 @@ All 71 nodes **[V]**:
 ## 9. Schedules, triggers and webhooks
 
 - **[V]** `GET /api/shards/{shardId}/schedules/catalog` lists everything a schedule can react to and do. Schedules are created with `POST /api/shards/{shardId}/schedules` ([ScheduleBody](#schema-schedulebody)). A schedule needs a trigger: cron, interval or event.
-- **Webhooks in AMP 3 are a schedule task (`flow.webhook`), not a subscription API.** For example: trigger `player.joined` → task `flow.webhook {url, body}`, with template variables like `{{User}}`. This is how Gatekeeper can get push events without holding a SignalR connection **[I]**.
+- **Webhooks in AMP 3 are a schedule task (`flow.webhook`), not a subscription API.** For example: trigger `player.joined` → task `flow.webhook {url, body}`, with template variables like `{{User}}`. This is how Portcullis can get push events without holding a SignalR connection **[I]**.
 
 **Event triggers [V]:**
 
@@ -291,7 +291,7 @@ All 71 nodes **[V]**:
 
 ### 10.1 NATS message bus (internal) [V]
 - `nats-server` 2.15.2 listens on **4222**. It uses TLS with AMP's own CA ("AMP Bus CA") and operator JWT auth, with JetStream on and a 1 MB max payload. There is no HTTP monitoring port.
-- AMP uses it between the panel, the hosts and the shard agents. Gatekeeper **shouldn't** connect: it would need AMP's own bus credentials, and REST plus SignalR cover everything.
+- AMP uses it between the panel, the hosts and the shard agents. Portcullis **shouldn't** connect: it would need AMP's own bus credentials, and REST plus SignalR cover everything.
 - Streams: `console` (`amp.tn.*.sr.*.ev.con.main|update|agent`, `…ev.life`, 14 days), `jobs` (`amp.tn.*.job.>`), `audit` (1 year), `analytics` (2 years), `analytics-rollup`, `analytics-addresses` (90 days), `analytics-flows` (6 hours), `log`, and KV buckets `KV_amp`, `KV_amp_geo`, `KV_identity`, `KV_amp_sr_<shardId>`. There are 12 streams and 27 consumers once one shard exists.
 - **[S]** Other subjects: `amp.tn.{tenant}.sr.{shardId}.ev.con.input` (console input), `…ev.metrics`, `amp.tn.{t}.sched.{id}[.status]`, `amp.tn.{t}.usr.{user}…` and `amp.tn.{t}.sp.{spire}…`. `tn` = tenant, `sr` = shard, `sp` = spire.
 - Bus stats for admins: `GET /api/Support/message-bus-stats`. Join info for adding hosts: `GET /api/System/bus`.

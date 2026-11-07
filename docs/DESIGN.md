@@ -1,4 +1,4 @@
-# Gatekeeper for AMP 3: plan and design
+# Portcullis: plan and design
 
 Status: **draft**, written before the AMP 3 API is available.
 Everything that depends on the API is marked as an assumption (A-n) or an open question (Q-n) and must be checked against the real API browser once the beta is running.
@@ -59,7 +59,7 @@ From Mike's messages and the API browser screenshot (2026-10-07):
 From CubeCoders' public posts ("Announcing - AMP 3", 2026-08-29, and "Licencing changes in AMP 3", 2026-09-21, both on discourse.cubecoders.com):
 
 - **AMP 3 uses all existing AMP 2 templates**, so the game list carries over (section 4).
-- AMP 3 can read in existing AMP 2 instance data. **Users and roles are not imported**, because they "work differently in AMP 3". The Gatekeeper bot account therefore has to be set up again on AMP 3.
+- AMP 3 can read in existing AMP 2 instance data. **Users and roles are not imported**, because they "work differently in AMP 3". The Portcullis bot account therefore has to be set up again on AMP 3.
 - The old controller/target hierarchy is gone, and the panel no longer needs filesystem access to instances. This matches "Spires" in the API.
 - **Webhooks become available on all licence tiers.** If they cover server events, they are a candidate for console/player events instead of polling (Q-4).
 - OIDC single sign-on moves to all tiers. A bot still needs a non-interactive login (Q-1).
@@ -71,7 +71,7 @@ Re-scan on 2026-10-24 (public forum, CubeCoders GitHub organisation, `cubecoders
 - **No public API documentation yet.** No forum post, GitHub issue or CubeCoders repository mentions the AMP 3 API, API keys, OpenAPI or webhook details. The CubeCoders GitHub organisation has no AMP 3 or SDK repository. Everything in the list above about the API still comes from the screenshot.
 - **No new games.** The `AMPTemplates` commits since 2026-10-05 are fixes and updates (a DayZ DLC, new console regexes after a game update, OpenStarbound download fix, Python 3.15). No game was added, so the 244-template figure in section 4 still stands (recounted on 2026-10-24).
 - **"AMP 3 AI usage disclosure" (2026-08-31).** Says AMP 3's accessibility attributes were first drafted with AI and then tested by hand, and that AMP 2's Generic module code was ported to the AMP 3 platform. This supports the claim that templates carry over, and says nothing about the API.
-- **A Python template exists.** `AMPTemplates` has a "Python App Runner" template that downloads an app from a git repo, GitHub release or PyPI, installs `requirements.txt`, and runs a script or module, with environment variables read from a `.env` file. That is a ready-made way to run Gatekeeper inside AMP (Q-9), assuming the template works unchanged in AMP 3.
+- **A Python template exists.** `AMPTemplates` has a "Python App Runner" template that downloads an app from a git repo, GitHub release or PyPI, installs `requirements.txt`, and runs a script or module, with environment variables read from a `.env` file. That is a ready-made way to run Portcullis inside AMP (Q-9), assuming the template works unchanged in AMP 3.
 
 That is enough to fix the architecture; it is not enough to write the client.
 
@@ -86,23 +86,23 @@ The sources:
 
 What the templates already tell AMP, counted from that repo:
 
-| Template field | Templates that set it | What it means for Gatekeeper |
+| Template field | Templates that set it | What it means for Portcullis |
 |---|---|---|
 | `Console.UserJoinRegex` / `UserLeaveRegex` | 162 of 244 | AMP itself can see joins and leaves for these games. |
 | `Console.UserChatRegex` | 59 of 244 | AMP can pick out in-game chat for these games. |
 | `Console.UserActions` (kick/ban commands) | 1 of 244 | Almost no template describes moderation commands. |
-| `App.AdminMethod` | 156 STDIO, 48 Source RCON, the rest Quake/Telnet/GoldSrc/BattlEye RCON or log tailing | How AMP talks to the server. Not Gatekeeper's problem. |
+| `App.AdminMethod` | 156 STDIO, 48 Source RCON, the rest Quake/Telnet/GoldSrc/BattlEye RCON or log tailing | How AMP talks to the server. Not Portcullis's problem. |
 
 ### What this means for the design
 
 V2/V3 hard-code nine game modules (Generic, Minecraft, Valheim, Terraria, Factorio, 7 Days to Die, Project Zomboid, Starbound, CS:GO). Each one re-implements chat parsing and whitelist commands. With 244 templates that does not scale, and most of it duplicates what the templates already describe.
 
-So Gatekeeper gets three levels of support instead of a game list:
+So Portcullis gets three levels of support instead of a game list:
 
 | Level | Games | What works |
 |---|---|---|
 | **Every game** | All 244 templates plus Minecraft and Rust | Status, start/stop/restart/kill, console relay and console commands, backups, schedules, alerts, banners. Nothing game-specific. |
-| **Player and chat aware** | Templates with join/leave regexes (162) and chat regexes (59) | Player join/leave events and the player tracker. Chat relay where a chat regex exists. This depends on AMP 3 exposing these as API events (Q-6). If it doesn't, Gatekeeper reads the same regexes from the template. |
+| **Player and chat aware** | Templates with join/leave regexes (162) and chat regexes (59) | Player join/leave events and the player tracker. Chat relay where a chat regex exists. This depends on AMP 3 exposing these as API events (Q-6). If it doesn't, Portcullis reads the same regexes from the template. |
 | **Game profile** | Games with a profile file in `games/profiles/*.toml` | Whitelist add/remove, sending chat from Discord into the game, kick/ban, avatar lookup. |
 
 A game profile is data, not code:
@@ -153,7 +153,7 @@ V3 has **117 slash commands** (not counting the cog template) under 23 top-level
 | `/schedule create` · `/schedule list` | admins | `schedule create/list/delete/pause/resume/run`. These front AMP 3's own scheduler (section 6). |
 | `/alert create` · `/alert list` | admins | `alert create/list/delete/mute`. `alert channel` moves into `/setup`. |
 | `/audit [filters]` | admins | `audit log/search/stats/export`. `audit channel` moves into `/setup`; export is a button. |
-| `/user <member>` + right-click **Apps → Gatekeeper user** | moderators | `user info/add/update`, `role` |
+| `/user <member>` + right-click **Apps → Portcullis user** | moderators | `user info/add/update`, `role` |
 | `/setup [server]` | admins | the 51 setters: `bot donator/moderator/permissions/settings/message_timeout`, `server settings`, `server console/chat/event`, `server regex`, `regex_pattern`, `banner`, `banner_settings`, `bannergroup`, the `whitelist` settings and `whitelist_reply` |
 | `/admin diagnostics` · `/admin export` · `/admin import <file>` | admins | `diagnostics`, `config export/import`, `dbserver cleanup`. Import stays a slash command because panels can't take a file upload. |
 | `/help` | everyone | `help`, `about` |
@@ -170,7 +170,7 @@ V3 has **117 slash commands** (not counting the cog template) under 23 top-level
 ## 6. Architecture
 
 ```
-gatekeeper/
+portcullis/
   amp/            # The ONLY code that knows AMP URLs, auth, or wire formats
     transport.py  #   aiohttp session, auth, retries, timeouts, rate limit, redacted logging
     api/          #   one module per API tag: shards, scheduling, files, users, system, ...
@@ -198,7 +198,7 @@ tests/
 
 Rules that keep the AMP 3 unknowns contained:
 
-1. **Discord code never imports `gatekeeper.amp`.** It calls `core` services. When the API changes during the beta, only `amp/` changes.
+1. **Discord code never imports `portcullis.amp`.** It calls `core` services. When the API changes during the beta, only `amp/` changes.
 2. **`core` depends on a small interface (`AmpPort`), not on the HTTP client.** Something like:
    ```python
    class AmpPort(Protocol):
@@ -212,7 +212,7 @@ Rules that keep the AMP 3 unknowns contained:
    ```
    The real implementation lives in `amp/`, the fake in `tests/fakes/`. This is what lets us build and test most of the bot **before** the API docs arrive.
 3. **Generated models, hand-written facade.** Generate types from AMP's OpenAPI JSON (e.g. `datamodel-code-generator` to pydantic v2), pinned to a spec snapshot checked into `amp/spec/`. Generated classes never leave `amp/`; they are mapped to `core` types. Re-generating after a beta update then shows up as a reviewable diff, and a CI job can fail when the live spec drifts from the snapshot.
-4. **Capabilities become first-class errors.** A `403` turns into `MissingCapability("ScheduleRead", shard)`, which Discord shows as "Gatekeeper's AMP account is missing ScheduleRead on Survival", not a stack trace.
+4. **Capabilities become first-class errors.** A `403` turns into `MissingCapability("ScheduleRead", shard)`, which Discord shows as "Portcullis's AMP account is missing ScheduleRead on Survival", not a stack trace.
 
 ### Two permission layers
 
@@ -232,7 +232,7 @@ V3 runs its own scheduler (`schedule_cog.py`, a 30-second loop over a `Schedules
 V3 polls `Core/GetUpdates` once per second per instance, in a thread each. For AMP 3, in order of preference:
 
 1. a push stream (WebSocket / SSE) from the API;
-2. AMP 3 webhooks into a small HTTP listener in Gatekeeper. This is simple when Gatekeeper runs next to AMP, but needs an open port otherwise;
+2. AMP 3 webhooks into a small HTTP listener in Portcullis. This is simple when Portcullis runs next to AMP, but needs an open port otherwise;
 3. one async poller per online shard with backoff.
 
 Whichever it is sits behind `streams.py`. `core/relay.py` publishes `ConsoleLine` / `ChatMessage` / `PlayerJoined` / `PlayerLeft` on the event bus, and the Discord side subscribes. Regex filters, the console denylist, rate limiting and `@everyone` stripping from V3 4.8.0 carry over unchanged.
@@ -249,7 +249,7 @@ Discord does most of the work, but the bot still chooses colours, labels and ima
 - **Buttons have text labels.** Icons are fine next to a label, but never instead of one. Destructive buttons (Kill, Delete) use Discord's danger style *and* a confirmation step, as in V3.
 - **Banner images get a text equivalent.** A generated banner is a picture of text, which screen readers can't read. Each banner message also carries the server name, status and player count as plain text, and the image gets alt text (the attachment `description`).
 - **Custom banner colours are contrast-checked.** V3 lets admins pick any text colour over any background. The banner editor checks each text colour against the background under that text with the WCAG ratio (4.5:1 for normal text, 3:1 for large text) and warns when it fails. On photo backgrounds it checks the worst spot under the text, not the average, and suggests the blur or a darkening overlay.
-- **Nothing essential lives only in an image or a tooltip.** Discord's buttons and select menus are keyboard-reachable already; Gatekeeper must not undo that by hiding information where a keyboard or screen reader can't get to it.
+- **Nothing essential lives only in an image or a tooltip.** Discord's buttons and select menus are keyboard-reachable already; Portcullis must not undo that by hiding information where a keyboard or screen reader can't get to it.
 
 ## 8. Delivery plan
 
@@ -301,17 +301,17 @@ Then:
 
 ### Phase 4: release
 
-- V3 database import, docs (README, command reference with the old-to-new command map, permissions guide), an AMP 3 template for running Gatekeeper as a shard if AMP 3 supports that (Q-9), tagged release.
+- V3 database import, docs (README, command reference with the old-to-new command map, permissions guide), an AMP 3 template for running Portcullis as a shard if AMP 3 supports that (Q-9), tagged release.
 
 ## 9. Assumptions (to confirm against the API)
 
 - **A-1** A "shard" is the AMP 3 equivalent of an AMP 2 instance: one game server.
-- **A-2** "Spires" are hosts (AMP 2's targets) and "Datastores" are storage locations. Gatekeeper only needs to read them.
+- **A-2** "Spires" are hosts (AMP 2's targets) and "Datastores" are storage locations. Portcullis only needs to read them.
 - **A-3** The OpenAPI JSON is reachable next to the Scalar page (ASP.NET's default would be `/openapi/v1.json`).
-- **A-4** Everything Gatekeeper needs per server lives under `/api/shards/{shardId}/...`, including power actions, console and players.
+- **A-4** Everything Portcullis needs per server lives under `/api/shards/{shardId}/...`, including power actions, console and players.
 - **A-5** JSON bodies, UUID ids, standard HTTP status codes (`401`, `403` with the capability name, `404`), as in the screenshot.
-- **A-6** One AMP 3 panel per Gatekeeper install, same as V3. Multi-panel support is not planned.
-- **A-7** A shard exposes which template or module it runs, so Gatekeeper can pick a game profile.
+- **A-6** One AMP 3 panel per Portcullis install, same as V3. Multi-panel support is not planned.
+- **A-7** A shard exposes which template or module it runs, so Portcullis can pick a game profile.
 
 ## 10. Open questions
 
@@ -322,18 +322,18 @@ These are what the API page needs to answer. Most are for the docs; a few (marke
 - **Q-3 Least privilege.** Can the bot account get only what it needs on chosen shards, and can the bot read its own effective capabilities (V3 used `Core/CurrentSessionHasPermission`)?
 - **Q-4 Console and events.** Is there a WebSocket/SSE stream for console output, chat, player join/leave and state changes? What do AMP 3 webhooks cover, and how are they signed? Or is it polling again?
 - **Q-5 Power and status.** Endpoints for start/stop/restart/kill, live state, metrics (CPU, RAM, player count, TPS) and the online player list.
-- **Q-6 Game identity and player events.** How does a shard say which template it runs? Does AMP 3 turn the template's join/leave/chat regexes into API events or a player list, or does Gatekeeper have to apply them to the console itself? Are any game actions (whitelist, kick, ban) API endpoints?
+- **Q-6 Game identity and player events.** How does a shard say which template it runs? Does AMP 3 turn the template's join/leave/chat regexes into API events or a player list, or does Portcullis have to apply them to the console itself? Are any game actions (whitelist, kick, ban) API endpoints?
 - **Q-7 Scheduling catalog.** Which triggers and tasks exist, and is there a webhook task? Does "emits signals" mean there is an event feed?
 - **Q-8 Files & Backups.** Backup create/list/delete/restore endpoints and their capabilities.
-- **Q-9 Running inside AMP.** Can Gatekeeper still be deployed as an AMP 3 shard (V2/V3 shipped an AMP template)? A "Python App Runner" template already exists in `AMPTemplates` (git repo, `requirements.txt`, script, `.env`); does it work unchanged in AMP 3, and does the bot then need its own template at all? *(Ask Mike.)*
+- **Q-9 Running inside AMP.** Can Portcullis still be deployed as an AMP 3 shard (V2/V3 shipped an AMP template)? A "Python App Runner" template already exists in `AMPTemplates` (git repo, `requirements.txt`, script, `.env`); does it work unchanged in AMP 3, and does the bot then need its own template at all? *(Ask Mike.)*
 - **Q-10 Rate limits and stability.** Are there documented rate limits? Will the API be versioned or change freely during the beta?
 - **Q-11 Audit log.** Can the bot write entries to AMP's audit log, so actions taken from Discord show up in AMP with the Discord user named?
-- **Q-12 "Generate MCP".** What does it produce? Not needed for Gatekeeper, but it may be a quick way to explore the API.
+- **Q-12 "Generate MCP".** What does it produce? Not needed for Portcullis, but it may be a quick way to explore the API.
 
 ## 11. Decisions we need from the team
 
 - **D-1 AMP 3 only, or AMP 2 and 3 in one bot?** Recommendation: **AMP 3 only.** V3 stays the AMP 2 bot. CubeCoders keeps developing AMP 2 alongside AMP 3, so V3 users are not stranded. The `AmpPort` design leaves the door open if this changes.
-- **D-2 Name and versioning.** "Gatekeeper V4"? "Gatekeeper AMP 3"? Affects package name, Docker image and docs.
+- **D-2 Name and versioning.** Decided (Min, 2026-11-07): the AMP 3 edition is called **Portcullis**. The repo is `MinVT-dev/Portcullis`; the Python package and Docker image use `portcullis`. Brand assets are in `docs/branding/`.
 - **D-3 Licence.** This repo is **AGPL-3.0**; V2/V3 files carry **GPL-3.0-or-later** headers (copyright Katelynn Cadwallader). Porting that code into an AGPL project is allowed (GPLv3 section 13), but the original copyright notices must stay on ported files, and k8t should agree the new edition is AGPL. If AGPL wasn't a deliberate choice, now is the cheapest time to switch to GPL-3.0-or-later to match.
 - **D-4 Python floor.** V3 targets 3.11 and 3.12. Keep 3.11 as the floor unless the AMP 3 container image dictates otherwise.
 - **D-5 Command set.** Agree on section 5 before Phase 0 task 0.7. Commands are the hardest thing to change after release.
@@ -343,7 +343,7 @@ These are what the API page needs to answer. Most are for the docs; a few (marke
 
 - **The API changes during the beta.** Mitigated by the `amp/` boundary, spec snapshot and drift check; expect to regenerate models several times.
 - **No headless auth at beta start** (passkeys only). Would block everything past Phase 0. Worth asking Mike early (Q-1).
-- **AMP 3 doesn't expose player/chat events** (Q-6). Gatekeeper would then have to apply the templates' regexes itself, which needs access to template data it may not get through the API.
+- **AMP 3 doesn't expose player/chat events** (Q-6). Portcullis would then have to apply the templates' regexes itself, which needs access to template data it may not get through the API.
 - **Panels turn out clumsy for some settings.** If a setting is used often enough to want a command, it can get one later. Adding a command after release is easy; removing one isn't.
 - **Game profiles drift from the templates.** If a template changes a whitelist command, the profile breaks without anyone noticing. A weekly CI job can compare profiles with `CubeCoders/AMPTemplates`.
 
@@ -435,7 +435,7 @@ Count: 23 slash commands and one user menu to keep, 18 optional ideas (only some
 | `/alert list` | slash | Keep | Mute and delete are buttons. | Q-7 |
 | `/audit [filters]` | slash | Keep | Who did what from Discord. Export is a button. | Q-11 can the bot write to AMP's audit log |
 | `/user <member>` | slash | Keep | Info and role for a member. | none |
-| Apps → Gatekeeper user | user menu | Keep | Same as `/user`, from a right-click. | none |
+| Apps → Portcullis user | user menu | Keep | Same as `/user`, from a right-click. | none |
 | `/setup [server]` | slash | Keep | One panel for every setting. | none |
 | `/admin diagnostics` | slash | Keep | Missing capabilities per shard, connection state, clean-up button. | Q-2, Q-3 capabilities, Q-10 rate limits |
 | `/admin export` | slash | Keep | Config backup. | none |
@@ -452,10 +452,10 @@ Count: 23 slash commands and one user menu to keep, 18 optional ideas (only some
 | "Restore" button on `/backups` | button | Optional | Destructive, so it needs a confirmation step and its own permission node. | Q-8 restore endpoint |
 | `/whitelist list <server>` | slash | Optional | Shows who is whitelisted. Only works for games with a profile. | Q-6 |
 | `/kick`, `/ban`, `/unban` | one slash with an action option | Optional | Only 1 of 244 templates defines kick or ban actions, so each game would need a profile entry. | Q-6 |
-| `/notify <server>` | slash | Optional | A member asks to be pinged when a server comes online or restarts. Stored in Gatekeeper's database only. | Q-4 state-change events |
+| `/notify <server>` | slash | Optional | A member asks to be pinged when a server comes online or restarts. Stored in Portcullis's database only. | Q-4 state-change events |
 | `/vote restart` | slash | Optional, not recommended | A poll that restarts a server if it passes. Fun, but overlaps `/poll` and `/server power`. | none |
 | `/access` | slash | Optional | Read-only view of what the bot's AMP account can do per shard. Writing AMP roles from Discord is riskier and should wait. | Q-2, Q-3 |
-| AMP audit entries inside `/audit` | filter | Optional | Shows AMP's own log next to Gatekeeper's. | Q-11 |
+| AMP audit entries inside `/audit` | filter | Optional | Shows AMP's own log next to Portcullis's. | Q-11 |
 | Spires and datastores in `/admin diagnostics` | diagnostics field | Optional | Read-only host and storage status. | A-2 |
 | Schedule run history and next-fire preview | buttons on `/schedule list` | Optional | The API already has both. | Q-7 |
 | Quick console presets | buttons | Optional | Admin-defined one-click commands such as "save world", set in `/setup`. | Q-4 |
@@ -481,7 +481,7 @@ Count: 23 slash commands and one user menu to keep, 18 optional ideas (only some
 | File manager commands (browse, edit, upload) | Drop | Security and size limits, and AMP's panel does it better. |
 | Create or delete shards from Discord | Drop | Destructive and capability-heavy. Revisit only if members ask. |
 | Networking and tunnel management | Drop for now | We don't know yet what AMP 3's Networking section does; no open question covers it yet, so look at it on day one. |
-| AI agent or "ask AMP" commands (AMP's "Generate MCP") | Drop | Not Gatekeeper's job. |
+| AI agent or "ask AMP" commands (AMP's "Generate MCP") | Drop | Not Portcullis's job. |
 
 ### B.4 Owner-only text commands (not in the picker)
 
