@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import discord
 from discord import app_commands
 
-from portcullis.bot.base import NONE, Ctx, Module, reply, valid_line
+from portcullis.bot.base import NONE, Ctx, Module, card, reply, valid_line
 from portcullis.core.relay import escape
 from portcullis.db.ops import Event
 
@@ -83,7 +83,7 @@ def parse_when(text: str, tz: ZoneInfo, now: datetime | None = None) -> datetime
 
 def event_embed(event: Event, going: list[int], server_name: str | None) -> discord.Embed:
     start = datetime.fromisoformat(event.starts_at)
-    embed = discord.Embed(title=event.title[:256], description=escape(event.description or "")[:2000] or None,
+    embed = card(title=event.title[:256], description=escape(event.description or "")[:2000] or None,
                           colour=0x7F8C8D if event.cancelled else 0x9B59B6)
     embed.add_field(name="When", value=f"{discord.utils.format_dt(start, 'F')} ({discord.utils.format_dt(start, 'R')})",
                     inline=False)
@@ -197,7 +197,7 @@ class EventModule(Module):
             on = f" · {escape(where)}" if where else ""
             lines.append(f"{discord.utils.format_dt(start, 'f')} · **{escape(e.title)}**{on} · "
                          f"{len(await self.ctx.events.going(e.id))} going")
-        await reply(interaction, embed=discord.Embed(title="Coming up", description="\n".join(lines)[:4000]))
+        await reply(interaction, embed=card(title="Coming up", description="\n".join(lines)[:4000]))
 
     async def going(self, interaction: discord.Interaction, event_id: int) -> None:
         event = await self.ctx.events.get(event_id)

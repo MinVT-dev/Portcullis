@@ -188,11 +188,12 @@ Three levels: **everyone** in the server; **operators** (members with a role in 
 |---|---|---|
 | `/server list [players]` | everyone | Every server with its state and player count. With `players`, also names everyone online. |
 | `/server status <server>` | everyone | State, players, CPU, memory and how long it has been up. Operators also get Start, Stop and Restart buttons, plus the server's quick commands (8.6). If the server allows it, members get a Start button while it is stopped. Shows the address players connect to, when one is set. |
-| `/server power <server> <action>` | operators | Start, stop, restart, or restart with a warning (says so in game chat 5 minutes and 1 minute before, with a Cancel button). Stopping or restarting asks first when players are online. The reply is public, so the channel sees who did it. |
+| `/server power <server> <action>` | operators | Start, stop, restart, or restart with a warning (says so in game chat 5 minutes and 1 minute before, with a Cancel button). Also update the game, sleep and wake, which ask first (update and sleep) and haven't been seen working on a real panel. Stopping or restarting asks first when players are online. The reply is public, so the channel sees who did it. |
 | `/server power-all <action> [tag]` | operators | Starts or stops every server you may run, or only those with an AMP tag. Asks first. |
 | `/server send <server> <text> [as]` | operators | Sends one console command, or a chat message if the server has a chat command set (8.6). Only the command word is logged, never its arguments. |
 | `/server console <server> [lines]` | operators | The latest console lines (20 by default, up to 50) from AMP's own history, without needing a console relay. AMP's own lines can be mixed in. |
-| `/backups <server>` | operators | Lists the server's backups. Making and deleting backups from Discord comes later. |
+| `/backups <server>` | operators | Lists the server's backups. Operators get a **Make a backup** button; admins also get a picker to **restore** one. Both ask first. The first backup has to be made in AMP, because the bot copies the settings of an existing one. Neither has been seen working on a real panel. |
+| `/schedule list <server>` | operators | AMP's schedules on that server, with **Run now**, **Turn on** and **Turn off**. Create them in AMP's panel. |
 | `/whitelist request <server> [name]` | everyone | Asks the operators to whitelist you. Without `name`, your linked name is used. |
 | `/whitelist add\|remove <server> <name>` | operators | Runs the server's whitelist command (8.6). |
 | `/whitelist list <server>` | operators | Names Portcullis has whitelisted on that server. Names added in game aren't known to it. |
@@ -214,7 +215,7 @@ Three levels: **everyone** in the server; **operators** (members with a role in 
 | `/admin export` / `/admin import <file>` | admins | Download all Portcullis settings as a file, and restore them. Gatekeeper V3 databases can't be imported yet. |
 | `/help` | everyone | Lists the commands you can use. |
 
-Not built yet: `/schedule` (needs AMP's scheduler checked against a real panel), custom alert rules beyond the ones in 8.6, and making or deleting backups (AMP's API doesn't say which snapshot type numbers to send).
+Not built: creating schedules and custom alert rules (the scheduler's step and trigger formats haven't been checked on a real panel), a Discord-to-game chat bridge (it needs a privileged Discord intent, and `/server send as:chat` covers it), and giveaways, vote-to-restart and managing AMP accounts from Discord (not game-server features, or too easy to abuse).
 
 Discord's **Server Settings → Integrations → Portcullis** can narrow further who sees each command. It can't widen the bot's own checks.
 
@@ -249,6 +250,7 @@ Mentions never ping: everything the bot posts has `@everyone`, `@here`, user and
 
 The rest of `/setup bot`:
 
+- **Daily summary and count channel**: a channel for a daily summary (yesterday's players, new players and peak) and play-time milestones, and a channel, voice channels included, renamed to the number online (needs Manage Channels, and lags a few minutes).
 - **Alert and log channels**: an **alerts** channel (a server crashes, stops without `/server power`, stays above its CPU or memory threshold, or hasn't been backed up for the set number of days; also when AMP can't be reached for 3 minutes and when it's back), a **moderator notes** channel (watchlist and name-rule joins) and an **audit log** channel (every action as it happens, at most 20 posts a minute).
 - **Roles**: a role pinged on alerts; a role whose members' whitelist requests are approved at once if they ask for a name they have linked; and a role given to members who link a name. The last two can't be `@everyone`, a role with admin-type permissions, or a role above the bot's own; the bot needs **Manage Roles** to hand one out.
 - **Options**: the time zone for `/event` times (such as `Europe/Amsterdam`), the backup age in days that triggers an alert, and name rules: words that flag a joining player's name to moderators (look-alike letters such as `4` for `a` are caught too).
@@ -285,7 +287,8 @@ It lists breaking, changed and added API operations against the spec Portcullis 
 ## 11. Known gaps
 
 - **In-memory restart warnings.** A warned restart counts down inside the bot; restarting Portcullis during the countdown cancels it.
-- **Not every planned command exists.** `/schedule`, custom alert rules and making or deleting backups are still to come (see 8.4).
+- **Not every planned command exists.** Creating schedules, custom alert rules and deleting backups are still to come (see 8.4).
+- **Unverified AMP actions.** Update, sleep, wake, making and restoring backups, and the schedule buttons use routes from the API spec that haven't run on a real panel.
 - **Play time starts now.** `/player` only knows what the bot has seen since it started recording. Sessions still open when the bot stops are closed at its next start, so a long restart can count a little extra time.
 - **Leaves are not verified.** AMP's player-left event hasn't been captured yet for any game; if it never arrives, a player's session ends when the server stops.
 - **Untested against a real AMP 3.** Everything has been tested against a fake AMP built from the API docs. Not yet checked against a real panel: whether login and the live hub work as the docs say, which connection mode works, whether joining a shard's events succeeds, what the event payloads really look like, and whether the generated models accept real responses. The recorder exists to answer these questions.

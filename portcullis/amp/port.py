@@ -22,6 +22,7 @@ from portcullis.core.types import (
     Backup,
     Player,
     PowerAction,
+    Schedule,
     ServerEvent,
     ServerId,
     ServerInfo,
@@ -203,6 +204,39 @@ class AmpServerPort:
         oldest = datetime.min.replace(tzinfo=UTC)
         out.sort(key=lambda b: b.created_at or oldest, reverse=True)
         return out
+
+    async def create_backup(self, server: ServerId, name: str) -> None:
+        """Take a snapshot shaped like the newest existing one.
+
+        The spec doesn't document the integer values for a snapshot's kind and content, so they're
+        copied from a backup AMP already made rather than guessed. AMP may stop or pause the server
+        while it captures.
+        """
+        graph = await self.client.files_backups.get_shards_snapshots(server)
+        usable = [n for n in graph.nodes or [] if n.kind is not None and n.content is not None]
+        if not usable:
+            raise ValueError("there is no earlier backup to copy the settings from; make the first one in AMP")
+        latest = max(usable, key=lambda n: n.created_at or datetime.min.replace(tzinfo=UTC))
+        await self.client.files_backups.post_shards_snapshots(server, {
+            "kind": latest.kind.root, "content": latest.content.root, "name": name,
+            "description": "Made from Discord", "sticky": False})
+
+    async def restore_backup(self, server: ServerId, backup_id: str) -> None:
+        await self.client.files_backups.post_shards_snapshots_restore(server, backup_id)
+
+    async def list_schedules(self, server: ServerId) -> list[Schedule]:
+        out = []
+        for dto in await self.client.scheduling.get_shards_schedules(server):
+            d = dto.definition
+            out.append(Schedule(id=str(d.id), name=d.name or str(d.id), enabled=bool(d.enabled),
+                                next_fire=dto.next_fire_time))
+        return out
+
+    async def run_schedule(self, server: ServerId, schedule_id: str) -> None:
+        await self.client.scheduling.post_shards_schedules_run(server, schedule_id)
+
+    async def set_schedule_enabled(self, server: ServerId, schedule_id: str, enabled: bool) -> None:
+        await self.client.scheduling.post_shards_schedules_enabled(server, schedule_id, {"enabled": enabled})
 
     async def permissions(self) -> list[str]:
         """The bot account's grant strings. ``">"`` means everything (seen on an admin account)."""

@@ -13,7 +13,8 @@ import discord
 from discord import app_commands
 
 from portcullis.assets import game_art
-from portcullis.bot.base import NONE, Ctx, Module, code, fill, reply, short_error, state_text, valid_line
+from portcullis.bot.backups import BackupView
+from portcullis.bot.base import NONE, Ctx, Module, card, code, fill, reply, short_error, state_text, valid_line
 from portcullis.core.relay import console_safe, escape
 from portcullis.core.types import PowerAction, ServerState, ServerStatus
 from portcullis.db.repos import ServerRow
@@ -30,7 +31,15 @@ STATE_COLOURS = {
     ServerState.UNKNOWN: 0x7F8C8D,
 }
 POWER_ACTIONS = (PowerAction.START, PowerAction.STOP, PowerAction.RESTART)
-VERBS = {"start": "Starting", "stop": "Stopping", "restart": "Restarting"}
+# AMP has routes for these but none has been run on a real panel yet, so they're single-server only and
+# update and sleep always ask first.
+UNVERIFIED_ACTIONS = {PowerAction.UPDATE: "Update the game (unverified)", PowerAction.SLEEP: "Sleep (unverified)",
+                      PowerAction.WAKE: "Wake from sleep (unverified)"}
+ASK_FIRST = {PowerAction.UPDATE: "Update it", PowerAction.SLEEP: "Put it to sleep"}
+# Actions that take the server down on purpose, so the offline alert stays quiet.
+GOES_DOWN = (PowerAction.STOP, PowerAction.RESTART, PowerAction.UPDATE, PowerAction.SLEEP)
+VERBS = {"start": "Starting", "stop": "Stopping", "restart": "Restarting", "update": "Updating",
+         "sleep": "Putting to sleep", "wake": "Waking"}
 STATUS_TIMEOUT = 8.0
 SAY_KEY = "say"  # per-server setting: console command template for in-game chat, e.g. "say {message}"
 QUICK_KEY = "quick_commands"  # per-server setting: [{"label": "Save world", "command": "save"}, ...]
@@ -76,7 +85,7 @@ def console_block(lines: list[str]) -> str:
 
 
 def status_embed(row: ServerRow, status: ServerStatus, address: str | None = None) -> discord.Embed:
-    embed = discord.Embed(title=row.name, colour=STATE_COLOURS.get(status.state, 0x7F8C8D))
+    embed = card(title=row.name, colour=STATE_COLOURS.get(status.state, 0x7F8C8D))
     embed.add_field(name="State", value=state_text(status.state))
     count = f"{status.player_count}" + (f" / {status.max_players}" if status.max_players else "")
     embed.add_field(name="Players", value=count)
@@ -209,7 +218,7 @@ class ServerModule(Module):
             return line
 
         lines = await asyncio.gather(*(one(r) for r in rows))
-        await reply(interaction, embed=discord.Embed(title="Servers", description="\n".join(lines)[:4000]))
+        await reply(interaction, embed=card(title="Servers", description="\n".join(lines)[:4000]))
 
     async def server_status(self, interaction: discord.Interaction, server: str) -> None:
         if not await self.in_guild(interaction):
@@ -240,9 +249,9 @@ class ServerModule(Module):
     async def server_power(self, interaction: discord.Interaction, server: str, action: str) -> None:
         if not await self.in_guild(interaction):
             return
-        power = next((a for a in POWER_ACTIONS if a.value == action), None)
+        power = next((a for a in (*POWER_ACTIONS, *UNVERIFIED_ACTIONS) if a.value == action), None)
         if power is None and action != WARNED:
-            await reply(interaction, "Choose start, stop, restart or restart with warning.")
+            await reply(interaction, "Choose one of the actions in the list.")
             return
         row = await self.server(interaction, server)
         if row is None:
@@ -276,8 +285,14 @@ class ServerModule(Module):
                             view=Confirm(interaction.user.id,
                                          lambda i: self.do_power(i, row, power, confirmed=True), "Stop it"))
                 return
+        if power in ASK_FIRST and not confirmed:
+            await reply(interaction, f"{UNVERIFIED_ACTIONS[power].split(' (')[0]}: **{escape(row.name)}**? "
+                                     "Portcullis hasn't seen this work on a real panel yet.",
+                        view=Confirm(interaction.user.id,
+                                     lambda i: self.do_power(i, row, power, confirmed=True), ASK_FIRST[power]))
+            return
         await interaction.response.defer(thinking=True)  # public, so everyone sees who did it
-        if power in (PowerAction.STOP, PowerAction.RESTART):
+        if power in GOES_DOWN:
             self.ctx.expect_offline(row.shard_id)
         try:
             await self.ctx.port.power(row.shard_id, power)
@@ -530,9 +545,48 @@ class ServerModule(Module):
             pin = " · 📌 kept" if b.sticky else ""
             lines.append(f"**{escape(b.name or b.id)}** · {when}{size}{pin}")
         more = f"\n…and {len(items) - 15} older" if len(items) > 15 else ""
-        embed = discord.Embed(title=f"Backups of {row.name}", description="\n".join(lines) + more)
-        embed.set_footer(text="Making and deleting backups from Discord comes later (see docs/SETUP.md).")
-        await reply(interaction, embed=embed)
+        embed = card(title=f"Backups of {row.name}", description="\n".join(lines) + more)
+        embed.set_footer(text="Making and restoring are not yet seen working on a real panel.")
+        can_make = await self.ctx.allowed(interaction.user, "backup.create", row.shard_id)
+        can_restore = self.ctx.access.is_admin(interaction.user) and \
+            await self.ctx.allowed(interaction.user, "backup.restore", row.shard_id)
+        view = BackupView(self, row, items, can_make=can_make, can_restore=can_restore) \
+            if can_make or can_restore else None
+        await reply(interaction, embed=embed, **({"view": view} if view is not None else {}))
+
+    def backups_make(self, row: ServerRow):  # noqa: ANN201
+        async def make(interaction: discord.Interaction) -> None:
+            name = f"Discord {time.strftime('%Y-%m-%d %H:%M', time.gmtime())}"
+            await self._backup_job(interaction, row, "backup.create", f"Making a backup of {escape(row.name)}.",
+                                   self.ctx.port.create_backup(row.shard_id, name), {"name": name})
+        return make
+
+    def backups_restore(self, row: ServerRow, backup_id: str, name: str):  # noqa: ANN201
+        async def restore(interaction: discord.Interaction) -> None:
+            if not self.ctx.access.is_admin(interaction.user):
+                await reply(interaction, "Restoring needs the Manage Server permission.")
+                return
+            self.ctx.expect_offline(row.shard_id)
+            await self._backup_job(interaction, row, "backup.restore",
+                                   f"Restoring {escape(row.name)} to **{escape(name)}**.",
+                                   self.ctx.port.restore_backup(row.shard_id, backup_id), {"backup": name})
+        return restore
+
+    async def _backup_job(self, interaction: discord.Interaction, row: ServerRow, node: str, done: str,
+                          call: Awaitable[None], detail: dict[str, str]) -> None:
+        await interaction.response.defer(thinking=True)
+        try:
+            await call
+        except Exception as exc:  # noqa: BLE001
+            log.warning("%s on %s failed: %s", node, row.name, exc)
+            await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, result="failed",
+                                        detail={**detail, "error": short_error(exc)})
+            await reply(interaction, f"AMP didn't do that for {escape(row.name)}: {escape(short_error(exc))}",
+                        ephemeral=False)
+            return
+        await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, detail=detail)
+        await reply(interaction, f"{done} Asked by {interaction.user.mention}. AMP finishes it in the "
+                                 "background; check `/backups` in a minute.", ephemeral=False)
 
     def register(self, tree: app_commands.CommandTree) -> None:
         group = app_commands.Group(name="server", description="Game servers", guild_only=True)
@@ -554,7 +608,9 @@ class ServerModule(Module):
         @app_commands.autocomplete(server=auto)
         @app_commands.choices(action=[app_commands.Choice(name=a.value.capitalize(), value=a.value)
                                       for a in POWER_ACTIONS] +
-                                     [app_commands.Choice(name="Restart with a warning in game chat", value=WARNED)])
+                                     [app_commands.Choice(name="Restart with a warning in game chat", value=WARNED)] +
+                                     [app_commands.Choice(name=label, value=a.value)
+                                      for a, label in UNVERIFIED_ACTIONS.items()])
         async def server_power(interaction: discord.Interaction, server: str, action: str) -> None:
             await self.server_power(interaction, server, action)
 
@@ -583,7 +639,7 @@ class ServerModule(Module):
                                  lines: app_commands.Range[int, 1, CONSOLE_MAX] = CONSOLE_DEFAULT) -> None:
             await self.server_console(interaction, server, lines)
 
-        @app_commands.command(name="backups", description="List a server's backups (operators)")
+        @app_commands.command(name="backups", description="List, make and restore backups (operators)")
         @app_commands.guild_only()
         @app_commands.describe(server="The game server")
         @app_commands.autocomplete(server=auto)

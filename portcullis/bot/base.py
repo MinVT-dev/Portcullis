@@ -46,7 +46,7 @@ NODE_GROUPS = (
     ("server.power", "power"), ("server.send", "console"), ("server.console", "console"),
     ("server.quick", "console"), ("whitelist", "whitelist"), ("player.moderate", "moderation"),
     ("watch", "moderation"), ("user", "moderation"), ("poll", "polls"), ("event", "events"),
-    ("backup", "backups"),
+    ("backup", "backups"), ("schedule", "backups"),
 )
 ROLE_GRANTS = "role_grants"  # bot scope: {group: [role ids]}
 SERVER_OPERATORS = "operator_roles"  # server scope: [role ids] that may do everything on that server
@@ -57,6 +57,8 @@ OWNER_ONLY_KEYS = frozenset({ROLE_GRANTS, SERVER_OPERATORS})
 ALERT_CHANNEL, ALERT_ROLE = "alert_channel", "alert_role"  # outages, crashes, high load, old backups
 MOD_CHANNEL = "mod_channel"  # watchlist and name-check notes, never pinged
 AUDIT_CHANNEL = "audit_channel"  # a live copy of the audit log
+SUMMARY_CHANNEL = "summary_channel"  # daily summary and play-time milestones
+COUNT_CHANNEL = "count_channel"  # a channel renamed to "N online"
 
 
 def group_for(node: str) -> str | None:
@@ -266,6 +268,21 @@ def code(text: str) -> str:
     """``text`` as inline code. Markdown escapes would show up literally there, so only the
     backtick (which would end the span) and mentions are neutralised."""
     return "`" + text.replace("`", "ˋ").replace("@", "@​") + "`"
+
+
+INFO, GOOD, WARN, BAD = 0x5865F2, 0x2ECC71, 0xF1C40F, 0xE74C3C  # embed colours; text always says it too
+
+
+def card(**kwargs: Any) -> discord.Embed:
+    """An embed in the house style: blurple unless the caller picks a colour."""
+    kwargs.setdefault("colour", INFO)
+    return discord.Embed(**kwargs)
+
+
+def problem_text(ref: str) -> str:
+    """What a member sees when a command broke on our side. The ref matches a line in the bot's log."""
+    return (f"Something went wrong on my side, and I may not have finished. Try again in a minute. "
+            f"If it keeps happening, tell an admin and give them this code: `{ref}`.")
 
 
 def short_error(exc: BaseException) -> str:

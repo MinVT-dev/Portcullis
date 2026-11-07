@@ -10,7 +10,15 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Protocol, runtime_checkable
 
-from portcullis.core.types import Backup, PowerAction, ServerEvent, ServerId, ServerInfo, ServerStatus
+from portcullis.core.types import (
+    Backup,
+    PowerAction,
+    Schedule,
+    ServerEvent,
+    ServerId,
+    ServerInfo,
+    ServerStatus,
+)
 
 
 @runtime_checkable
@@ -28,6 +36,18 @@ class AmpPort(Protocol):
     def events(self, server: ServerId) -> AsyncIterator[ServerEvent]: ...
 
     async def list_backups(self, server: ServerId) -> list[Backup]: ...
+
+    async def create_backup(self, server: ServerId, name: str) -> None:
+        """Copies the kind and content of the newest existing backup. Raises if there is none to copy."""
+        ...
+
+    async def restore_backup(self, server: ServerId, backup_id: str) -> None: ...
+
+    async def list_schedules(self, server: ServerId) -> list[Schedule]: ...
+
+    async def run_schedule(self, server: ServerId, schedule_id: str) -> None: ...
+
+    async def set_schedule_enabled(self, server: ServerId, schedule_id: str, enabled: bool) -> None: ...
 
     async def permissions(self) -> list[str]: ...
 

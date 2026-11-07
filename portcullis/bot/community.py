@@ -17,6 +17,7 @@ from portcullis.bot.base import (
     Ctx,
     Module,
     as_id,
+    card,
     duration,
     fill,
     reply,
@@ -56,7 +57,7 @@ def new_code() -> str:
 
 def request_embed(req: WhitelistRequest, server_name: str, note: str | None = None) -> discord.Embed:
     colour = {"pending": 0xF1C40F, "approved": 0x2ECC71, "denied": 0xE74C3C}.get(req.status, 0x7F8C8D)
-    embed = discord.Embed(title=f"Whitelist request for {server_name}", colour=colour)
+    embed = card(title=f"Whitelist request for {server_name}", colour=colour)
     embed.add_field(name="Member", value=f"<@{req.discord_id}>")
     embed.add_field(name="In-game name", value=escape(req.ingame_name))
     status = req.status.capitalize()
@@ -276,7 +277,7 @@ class CommunityModule(Module):
             by = "Portcullis" if e.added_by == 0 else (f"<@{e.added_by}>" if e.added_by else "unknown")
             lines.append(f"**{escape(e.ingame_name)}**{member} · added by {by} {when(e.added_at)}")
         more = f"\n…and {len(entries) - 60} more" if len(entries) > 60 else ""
-        embed = discord.Embed(title=f"Whitelisted on {row.name}", description=("\n".join(lines) + more)[:4000])
+        embed = card(title=f"Whitelisted on {row.name}", description=("\n".join(lines) + more)[:4000])
         embed.set_footer(text="Only names added through Portcullis. Names added in game or in the game's own "
                               "files aren't listed.")
         await reply(interaction, embed=embed)
@@ -349,7 +350,7 @@ class CommunityModule(Module):
             return
         lines = [f"**{escape(e.ingame_name)}** · <@{e.added_by}> {when(e.added_at)}" +
                  (f" · {escape(e.note)}" if e.note else "") for e in entries[:60]]
-        await reply(interaction, embed=discord.Embed(title="Watchlist", description="\n".join(lines)[:4000]))
+        await reply(interaction, embed=card(title="Watchlist", description="\n".join(lines)[:4000]))
 
     # ---------------------------------------------------------------- link role
 
@@ -433,7 +434,7 @@ class CommunityModule(Module):
             await reply(interaction, f"I haven't seen {escape(name)} on any server.")
             return
         names = {r.shard_id: r.name for r in await self.ctx.servers.list(include_gone=True)}
-        embed = discord.Embed(title=found.name)
+        embed = card(title=found.name)
         if found.online_on:
             embed.add_field(name="Online now", value=", ".join(escape(names.get(s, s)) for s in found.online_on))
         else:
@@ -461,14 +462,14 @@ class CommunityModule(Module):
             return
         lines = [f"{i}. **{escape(name)}** · {duration(secs)}" for i, (name, secs) in enumerate(ranking, 1)]
         title = f"Most played on {row.name}" if row else "Most played"
-        await reply(interaction, embed=discord.Embed(title=title, description="\n".join(lines)))
+        await reply(interaction, embed=card(title=title, description="\n".join(lines)))
 
     # ---------------------------------------------------------------- /user
 
     async def user_embed(self, member: Any) -> discord.Embed:
         flags = await self.ctx.users.flags(member.id)
         links = await self.ctx.users.links_for(member.id)
-        embed = discord.Embed(title=getattr(member, "display_name", str(member.id)))
+        embed = card(title=getattr(member, "display_name", str(member.id)))
         embed.add_field(name="Member", value=f"<@{member.id}>")
         embed.add_field(name="Donator", value="Yes" if flags["donator"] else "No")
         embed.add_field(name="Blocked from requests", value="Yes" if flags["banned"] else "No")

@@ -13,9 +13,11 @@ from discord import app_commands
 
 from portcullis.bot.admin import AdminModule
 from portcullis.bot.alerts import Alerts, AuditFeed
+from portcullis.bot.backups import ScheduleModule
 from portcullis.bot.base import Access, Ctx, Module
 from portcullis.bot.board import StatusBoard
 from portcullis.bot.community import CommunityModule, WhitelistDecision
+from portcullis.bot.digest import Digest
 from portcullis.bot.events import EventCancel, EventGoing, EventModule
 from portcullis.bot.joins import JoinWatch
 from portcullis.bot.notify import NotifyModule
@@ -42,17 +44,21 @@ class Modules:
         self.admin = AdminModule(ctx)
         self.notify = NotifyModule(ctx)
         self.events = EventModule(ctx)
+        self.schedules = ScheduleModule(ctx)
         self.alerts = Alerts(ctx)
         self.joins = JoinWatch(ctx)
+        self.digest = Digest(ctx)
         self.audit_feed = AuditFeed(ctx)
         ctx.audit.listeners.append(self.audit_feed)
 
     def all(self) -> list[Module]:
-        return [self.server, self.setup, self.community, self.polls, self.notify, self.events, self.admin]
+        return [self.server, self.setup, self.community, self.polls, self.notify, self.events, self.schedules,
+                self.admin]
 
     async def tick(self) -> None:
-        """Once a minute: event reminders, load and backup alerts."""
-        for name, job in (("events", self.events.tick), ("alerts", self.alerts.tick)):
+        """Once a minute: event reminders, load and backup alerts, the daily summary and milestones."""
+        for name, job in (("events", self.events.tick), ("alerts", self.alerts.tick),
+                          ("digest", self.digest.tick)):
             try:
                 await job()
             except Exception:  # one failing job must not stop the others

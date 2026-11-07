@@ -26,9 +26,9 @@ The design budget is about 25 slash commands (DESIGN.md, Appendix B), so most ne
 | Restart with warning | Says "restarting in 5 minutes" in game chat at 5 and 1 minutes, then restarts. Uses the server's `say` command. | ✅ Built. The countdown lives in memory, so restarting Portcullis cancels it. |
 | Start on demand | Members (not only operators) may start a stopped server, but not stop it. A per-server setting. | ✅ Built |
 | Power all | Start or stop every server, or every server with a tag, in one go. | ✅ Built |
-| Update game button | Runs AMP's update action from status. | 🟡 The update route is in the spec but hasn't been run. |
+| Update game button | Runs AMP's update action from status. | ✅ Built as `/server power update`, with a confirm. Not yet seen working on a real panel. |
 | Kill a stuck server | Force stop. | ⚪ AMP 3.0.0.6 has a permission for it but no route. |
-| Sleep and wake | Some games can sleep when empty. | 🟡 Routes exist; no game has been seen sleeping. |
+| Sleep and wake | Some games can sleep when empty. | ✅ Built as `/server power sleep|wake` (sleep asks first). Not yet seen working on a real panel. |
 
 ## 2. Monitoring and alerts
 
@@ -38,11 +38,11 @@ The design budget is about 25 slash commands (DESIGN.md, Appendix B), so most ne
 | Live server board | One self-updating message with every server's state. | ✅ Built |
 | `/notify` | Members get a DM when a server comes online. | ✅ Built |
 | Offline alert with role ping | Pings a chosen role when a server goes offline without anyone using `/server power`. | ✅ Built. A stop from AMP's own panel also alerts. The crash alert uses the Failed state, which hasn't been seen on a real crash yet. |
-| Crash alert | Pings a role when a server enters the Failed state. | 🟡 Failed is mapped from AMP's error code, but no real crash has been captured. |
+| Crash alert | Pings a role when a server enters the Failed state. | ✅ Built (see above). Failed hasn't been seen on a real crash. |
 | AMP unreachable alert | Posts in an admin channel when Portcullis loses AMP for more than a few minutes, and when it's back. | ✅ Built |
 | High CPU or memory alert | Posts when a server stays above a threshold for N minutes. | ✅ Built |
-| Player count in a channel name | A voice channel named "Survival: 5 online". | ⚪ Discord allows 2 renames per 10 minutes, so it lags. |
-| Daily summary | One post a day: uptime, peak players, new players. | 🟡 Play time needs leaves; peak and new players are fine. |
+| Player count in a channel name | A voice channel named "Survival: 5 online". | ✅ Built. Renames at most every 5.5 minutes, so the number lags. |
+| Daily summary | One post a day: uptime, peak players, new players. | ✅ Built. Posts yesterday's players, new players and peak at midnight in the bot's time zone. |
 | `/alert` thresholds | Admin-defined alerts from AMP's own triggers. | 🟡 Waits on the scheduler payloads. |
 
 ## 3. Players and community
@@ -53,7 +53,7 @@ The design budget is about 25 slash commands (DESIGN.md, Appendix B), so most ne
 | `/link` | Prove an in-game name is yours by typing a code in game chat. | ✅ Built (needs a chat pattern for the game). |
 | `/poll` | Community polls with buttons. | ✅ Built |
 | First-join welcome | "Bob joined Survival for the first time" in the events channel. | ✅ Built. It starts once Portcullis has a day of join history for the server. |
-| Milestones | "Alice reached 100 hours" posts. | 🟡 Needs leaves for real play time. |
+| Milestones | "Alice reached 100 hours" posts. | ✅ Built (10, 50, 100, 250, 500, 1000 hours). Hours are approximate until leaves are verified. |
 | Who's online, everywhere | A `/server list` option that names every online player. | ✅ Built |
 | Chat bridge, Discord to game | Messages in the chat channel are sent into the game with `say`. | 🟡 Needs the Message Content intent (privileged) and a chat pattern per game. `/server send as:chat` already covers it. |
 | Events calendar | Operators schedule a game night; members RSVP with a button; a reminder goes out. Discord-only. | ✅ Built |
@@ -78,10 +78,10 @@ The design budget is about 25 slash commands (DESIGN.md, Appendix B), so most ne
 | Idea | What it does | Status |
 |---|---|---|
 | `/backups` list | Recent backups with size and date. | ✅ Built |
-| Make a backup | A button on `/backups`. | 🟡 AMP's API doesn't say which snapshot type to send. |
-| Restore a backup | With a confirmation and its own permission. | 🟡 Restore route not tried; destructive. |
-| `/schedule` | Create and list schedules on AMP's own scheduler. | 🟡 Scheduler payloads not checked on a real panel. |
-| Schedule run history | Buttons on `/schedule list`. | 🟡 Same as above. |
+| Make a backup | A button on `/backups`. | ✅ Built on `/backups`. It copies the settings of the newest existing backup because the spec doesn't name them. Not yet seen working on a real panel. |
+| Restore a backup | With a confirmation and its own permission. | ✅ Built on `/backups` for Manage Server holders, with a confirm. AMP saves the current state first. Not yet seen working. |
+| `/schedule` | Create and list schedules on AMP's own scheduler. | 🟡 Partly built: `/schedule list` with Run now, On and Off. Creating schedules needs the step and trigger formats checked on a real panel. |
+| Schedule run history | Buttons on `/schedule list`. | 🟡 Not built; the history route is in the spec. |
 | Backup reminder | Warns admins when a server's newest backup is older than N days. | ✅ Built |
 
 ## 6. Setup, admin and safety

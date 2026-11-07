@@ -18,12 +18,15 @@ from portcullis.bot.base import (
     ALERT_CHANNEL,
     ALERT_ROLE,
     AUDIT_CHANNEL,
+    COUNT_CHANNEL,
     GROUPS,
     MOD_CHANNEL,
     ROLE_GRANTS,
     SERVER_OPERATORS,
+    SUMMARY_CHANNEL,
     Module,
     as_id,
+    card,
     code,
     id_list,
     reply,
@@ -69,6 +72,14 @@ def can_post(interaction: discord.Interaction, channel_id: int) -> bool | None:
     return bool(perms.view_channel and perms.send_messages)
 
 
+def can_rename(interaction: discord.Interaction, channel_id: int) -> bool | None:
+    guild = interaction.guild
+    if guild is None or getattr(guild, "me", None) is None or not hasattr(guild, "get_channel"):
+        return None
+    channel = guild.get_channel(channel_id)
+    return None if channel is None else bool(channel.permissions_for(guild.me).manage_channels)
+
+
 def mention(channel_id: int | None) -> str:
     return f"<#{channel_id}>" if channel_id else "off"
 
@@ -93,7 +104,9 @@ def percent(text: str) -> int | None | str:
 
 BOT_CHANNELS = {ALERT_CHANNEL: "Alerts (outages, crashes, high load, old backups)",
                 MOD_CHANNEL: "Moderator notes (watchlist, name checks)",
-                AUDIT_CHANNEL: "Audit log (every action, as it happens)"}
+                AUDIT_CHANNEL: "Audit log (every action, as it happens)",
+                SUMMARY_CHANNEL: "Daily summary and play-time milestones",
+                COUNT_CHANNEL: "Channel renamed to the player count (a voice channel works)"}
 BOT_ROLES = {ALERT_ROLE: "Pinged on alerts",
              AUTO_APPROVE_ROLE: "Auto-approve whitelist requests (with a linked name)",
              LINK_ROLE: "Given to members with a linked name"}
@@ -143,7 +156,7 @@ class SetupModule(Module):
 
     async def server_embed(self, row: ServerRow) -> discord.Embed:
         commands = await self.ctx.settings.all(scope=row.shard_id)
-        embed = discord.Embed(title=f"Settings for {row.name}")
+        embed = card(title=f"Settings for {row.name}")
         embed.add_field(name="Display name", value=escape(row.display_name or f"{row.amp_name} (from AMP)"))
         embed.add_field(name="Hidden from members", value="Yes" if row.hidden else "No")
         embed.add_field(name="Chat prefix", value=escape(row.prefix) if row.prefix else "none")
@@ -291,7 +304,7 @@ class SetupModule(Module):
     # ---------------------------------------------------------------- /setup bot
 
     async def bot_embed(self) -> discord.Embed:
-        embed = discord.Embed(title="Portcullis settings")
+        embed = card(title="Portcullis settings")
         channel = await self.ctx.settings.get(WHITELIST_CHANNEL)
         embed.add_field(name="Whitelist requests go to", value=mention(channel), inline=False)
         board = await self.ctx.settings.get(BOARD_CHANNEL)
@@ -393,7 +406,7 @@ class SetupModule(Module):
         settings = await self.ctx.settings.all()
         for key, label in ((WHITELIST_CHANNEL, "whitelist requests"), (BOARD_CHANNEL, "the server board"),
                            (ALERT_CHANNEL, "alerts"), (MOD_CHANNEL, "moderator notes"),
-                           (AUDIT_CHANNEL, "the audit log")):
+                           (AUDIT_CHANNEL, "the audit log"), (SUMMARY_CHANNEL, "the daily summary")):
             if settings.get(key):
                 channel = as_id(settings[key])
                 if channel is not None:
@@ -767,19 +780,24 @@ class ChannelsPanel(AdminView):
         super().__init__(module)
         for row, (key, label) in enumerate(BOT_CHANNELS.items()):
             select: discord.ui.ChannelSelect[ChannelsPanel] = discord.ui.ChannelSelect(
-                placeholder=f"{label}…", channel_types=[discord.ChannelType.text], min_values=1, max_values=1,
-                row=row)
+                placeholder=f"{label}…", min_values=1, max_values=1, row=row,
+                channel_types=[discord.ChannelType.text, discord.ChannelType.voice])
             select.callback = self._picked(key, select)  # type: ignore[method-assign]
             self.add_item(select)
             off: discord.ui.Button[ChannelsPanel] = discord.ui.Button(
-                label=f"Turn off: {label.split(' (')[0].lower()}", style=discord.ButtonStyle.danger, row=3)
+                label=f"Turn off: {label.split(' (')[0].lower()}"[:80], style=discord.ButtonStyle.danger, row=4)
             off.callback = self._off(key)  # type: ignore[method-assign]
             self.add_item(off)
 
     def _picked(self, key: str, select: discord.ui.ChannelSelect[ChannelsPanel]):  # noqa: ANN202
         async def picked(interaction: discord.Interaction) -> None:
             channel_id = select.values[0].id
-            if can_post(interaction, channel_id) is False:
+            if key == COUNT_CHANNEL:
+                if can_rename(interaction, channel_id) is False:
+                    await interaction.response.edit_message(
+                        content=f"I can't rename <#{channel_id}>. Give me Manage Channels there.", view=self)
+                    return
+            elif can_post(interaction, channel_id) is False:
                 await interaction.response.edit_message(content=f"I can't post in <#{channel_id}>.", view=self)
                 return
             await self.module.set_bot_channel(interaction, key, channel_id)

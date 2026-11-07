@@ -81,6 +81,14 @@ class ServerStatus:
 
 
 @dataclass(frozen=True)
+class Schedule:
+    id: str
+    name: str
+    enabled: bool
+    next_fire: datetime | None = None
+
+
+@dataclass(frozen=True)
 class Backup:
     id: str
     name: str | None

@@ -181,8 +181,8 @@ async def test_power_failure_and_bad_action(h: Harness) -> None:
     await h.m.server.server_power(i, "Survival", "restart")
     assert "AMP didn't restart Survival" in i.text
     i = FakeInteraction(owner())
-    await h.m.server.server_power(i, "Survival", "update")
-    assert "Choose start, stop, restart or restart with warning" in i.text
+    await h.m.server.server_power(i, "Survival", "explode")
+    assert "Choose one of the actions in the list" in i.text
 
 
 async def test_send_console_and_chat(h: Harness) -> None:

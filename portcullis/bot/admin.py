@@ -13,7 +13,7 @@ from typing import Any
 import discord
 from discord import app_commands
 
-from portcullis.bot.base import OWNER_ONLY_KEYS, Module, code, reply, short_error, state_text, when
+from portcullis.bot.base import OWNER_ONLY_KEYS, Module, card, code, reply, short_error, state_text, when
 from portcullis.core.relay import escape
 from portcullis.db.features import all_settings
 from portcullis.db.repos import ServerRepo
@@ -38,7 +38,8 @@ HELP = [
     ("/server power-all", "mod", "Start, stop or restart every server, or every server with a tag"),
     ("/server send", "mod", "Send a console command or chat message"),
     ("/server console", "mod", "A server's latest console lines"),
-    ("/backups", "mod", "A server's backups"),
+    ("/backups", "mod", "A server's backups, with Make a backup and (for admins) Restore"),
+    ("/schedule list", "mod", "A server's AMP schedules, with Run now, On and Off"),
     ("/whitelist add · remove · list", "mod", "Change or see a server's whitelist"),
     ("/player moderate", "mod", "Kick, ban or unban a player"),
     ("/player watch · watchlist", "mod", "Get a quiet note when a player joins"),
@@ -62,7 +63,7 @@ class AdminModule(Module):
         if access.is_admin(interaction.user):
             allowed.add("admin")
         lines = [f"`{cmd}` · {what}" for cmd, who, what in HELP if who in allowed]
-        embed = discord.Embed(title="Portcullis", description="\n".join(lines))
+        embed = card(title="Portcullis", description="\n".join(lines))
         embed.set_footer(text="Only the commands you can use are listed.")
         await reply(interaction, embed=embed)
 
@@ -96,7 +97,7 @@ class AdminModule(Module):
             what = f" · {escape(e.target)}" if e.target else ""
             mark = "" if e.result == "ok" else f" · **{e.result}**"
             lines.append(f"{when(e.at)} {who} `{e.action}`{where}{what}{mark}")
-        await reply(interaction, embed=discord.Embed(title="Audit log", description="\n".join(lines)[:4000]))
+        await reply(interaction, embed=card(title="Audit log", description="\n".join(lines)[:4000]))
 
     # ---------------------------------------------------------------- /admin diagnostics
 
@@ -104,7 +105,7 @@ class AdminModule(Module):
         if not await self.in_guild(interaction) or not await self.require_admin(interaction, "admin.diagnostics"):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        embed = discord.Embed(title="Diagnostics")
+        embed = card(title="Diagnostics")
         started = time.perf_counter()
         try:
             servers = await asyncio.wait_for(self.ctx.port.list_servers(), 10)

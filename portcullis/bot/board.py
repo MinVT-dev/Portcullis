@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 
 import discord
 
-from portcullis.bot.base import NONE, Ctx, state_text
+from portcullis.bot.base import NONE, Ctx, card, state_text
 from portcullis.core.relay import escape
 from portcullis.core.types import ServerState
 
@@ -42,7 +42,7 @@ class StatusBoard:
             count = f" · {players} online" if state is ServerState.RUNNING else ""
             lines.append(f"{state_text(state)} · **{escape(row.name)}**{count}")
         summary = live.summary()
-        embed = discord.Embed(title="Servers", description="\n".join(lines)[:4000] or "No servers yet.",
+        embed = card(title="Servers", description="\n".join(lines)[:4000] or "No servers yet.",
                               timestamp=datetime.now(UTC))
         embed.set_footer(text=f"{summary.text()} · updates by itself")
         return embed

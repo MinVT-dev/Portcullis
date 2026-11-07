@@ -12,7 +12,7 @@ from collections.abc import Callable
 import discord
 from discord import app_commands
 
-from portcullis.bot.base import Access, Ctx
+from portcullis.bot.base import Access, Ctx, problem_text
 from portcullis.bot.commands import DYNAMIC_ITEMS, Modules
 from portcullis.bot.notify import Notifier
 from portcullis.core.live import LinkVerifier, LiveState, PlayerTracker
@@ -50,6 +50,26 @@ class DiscordSink:
                            suppress_embeds=True)
 
 
+async def _ui_error(self: discord.ui.View | discord.ui.Modal, interaction: discord.Interaction,
+                    error: Exception, *args: object) -> None:
+    """A button, menu or form that raised. discord.py only logs it, which leaves the member with
+    "This interaction failed", so tell them and log a code they can quote."""
+    ref = format(int(time.time() * 1000) % 0xFFFFFF, "06x")
+    log.error("interaction failed [%s]: %r", ref, error, exc_info=error)
+    text = problem_text(ref)
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(text, ephemeral=True)
+        else:
+            await interaction.response.send_message(text, ephemeral=True)
+    except discord.HTTPException:
+        log.warning("could not tell the member about [%s]", ref)
+
+
+discord.ui.View.on_error = _ui_error  # type: ignore[assignment,method-assign]
+discord.ui.Modal.on_error = _ui_error  # type: ignore[assignment,method-assign]
+
+
 class PortcullisBot(discord.Client):
     def __init__(
         self,
@@ -84,6 +104,7 @@ class PortcullisBot(discord.Client):
             LinkVerifier(self.ctx.links, self.ctx.users, on_linked=self.modules.community.on_linked),
         ]
         self.tree = app_commands.CommandTree(self)
+        self.tree.on_error = self.on_command_error  # type: ignore[method-assign]
         self.modules.register(self.tree)
         self._refresher: asyncio.Task[None] | None = None
         self._ticker: asyncio.Task[None] | None = None
@@ -104,6 +125,20 @@ class PortcullisBot(discord.Client):
         await self.refresh()
         self._refresher = asyncio.create_task(self._refresh_loop(), name="portcullis-refresh")
         self._ticker = asyncio.create_task(self._tick_loop(), name="portcullis-tick")
+
+    async def on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        """Any command or button that raised: log it with a short code and tell the member, never go silent."""
+        ref = format(int(time.time() * 1000) % 0xFFFFFF, "06x")
+        original = getattr(error, "original", error)
+        log.error("command failed [%s]: %r", ref, original, exc_info=original)
+        text = problem_text(ref)
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(text, ephemeral=True)
+            else:
+                await interaction.response.send_message(text, ephemeral=True)
+        except discord.HTTPException:
+            log.warning("could not tell the member about [%s]", ref)
 
     async def on_ready(self) -> None:
         log.info("logged in to Discord as %s", self.user)
