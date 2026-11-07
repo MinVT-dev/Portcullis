@@ -49,22 +49,10 @@ from portcullis.amp import AmpClient, Credentials  # noqa: E402
 from portcullis.amp.errors import AmpError, AuthFailed, LoginNotSupported  # noqa: E402
 from portcullis.amp.redact import RedactingFilter, Redactor  # noqa: E402
 from portcullis.amp.signalr import MODES, HubConnection, HubEvent  # noqa: E402
+from portcullis.config import load_env_file  # noqa: E402
 
 log = logging.getLogger("recorder")
 IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
-
-
-def load_env_file(path: Path) -> None:
-    """Minimal .env reader (KEY=VALUE, # comments). Real environment variables win."""
-    if not path.is_file():
-        return
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        value = value.strip().strip('"').strip("'")
-        os.environ.setdefault(key.strip(), value)
 
 
 class CaptureRedactor(Redactor):

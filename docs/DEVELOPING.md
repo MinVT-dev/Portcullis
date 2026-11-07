@@ -1,6 +1,6 @@
 # Developing Portcullis
 
-The first code is the AMP 3 client layer (`portcullis/amp/`) and three tools. There is no Discord code yet.
+So far: the AMP 3 client layer (`portcullis/amp/`), the core types and `AmpPort` interface (`portcullis/core/`), settings loading, and three tools. There is no Discord code yet.
 
 ## Layout
 
@@ -14,6 +14,11 @@ The first code is the AMP 3 client layer (`portcullis/amp/`) and three tools. Th
 | `portcullis/amp/signalr.py` | A small SignalR (JSON protocol) client that fetches a new hub ticket for every connect and reconnect. |
 | `portcullis/amp/redact.py` | Removes tokens, tickets and passwords from logs and captures. |
 | `portcullis/amp/client.py` | `AmpClient`, which ties the above together. |
+| `portcullis/amp/port.py` | `AmpServerPort`: the real `AmpPort`. Maps AMP models to core types and shares one shard-hub connection between all event subscribers. |
+| `portcullis/amp/events.py` | Turns hub events into core events. **Provisional:** the payload shapes are guesses until a capture exists. |
+| `portcullis/core/types.py`, `port.py` | AMP-agnostic types (`ServerInfo`, `ServerStatus`, `PowerAction`, events) and the `AmpPort` interface the rest of the bot uses. |
+| `portcullis/config.py` | Reads `.env` and the environment, reports every problem at once without echoing secrets, and sets up redacted logging. |
+| `tests/fakes/amp.py` | `FakeAmpPort`: an in-memory `AmpPort` for building and testing core and command code without AMP. |
 | `tools/generate_client.py` | Regenerates `models.py` and `api/` from the pinned spec. `--check` fails when they are stale. |
 | `tools/spec_diff.py` | Compares two specs and lists breaking changes. Exits 1 if there are any. |
 | `tools/record_events.py` | Records live hub events from your own AMP 3 to `captures/`. |
