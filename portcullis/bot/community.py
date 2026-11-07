@@ -12,8 +12,30 @@ from typing import Any
 import discord
 from discord import app_commands
 
-from portcullis.bot.base import NONE, Ctx, Module, duration, fill, reply, short_error, valid_name, when
-from portcullis.bot.setup import WHITELIST_CHANNEL, WL_ADD, WL_REMOVE
+from portcullis.bot.base import (
+    NONE,
+    Ctx,
+    Module,
+    as_id,
+    duration,
+    fill,
+    reply,
+    role_ids,
+    role_problem,
+    short_error,
+    valid_line,
+    valid_name,
+    valid_reason,
+    when,
+)
+from portcullis.bot.setup import (
+    AUTO_APPROVE_ROLE,
+    LINK_ROLE,
+    MOD_KEYS,
+    WHITELIST_CHANNEL,
+    WL_ADD,
+    WL_REMOVE,
+)
 from portcullis.core.relay import escape
 from portcullis.db.features import LinkCode, WhitelistRequest, links_by_name
 from portcullis.db.repos import ServerRow
@@ -118,6 +140,8 @@ class CommunityModule(Module):
         if await self.ctx.whitelist.pending_for(user_id, row.shard_id):
             await reply(interaction, f"You already have a request waiting for {escape(row.name)}.")
             return
+        if await self._auto_approve(interaction, row, name, int(channel_id)):
+            return
         req = await self.ctx.whitelist.create(row.shard_id, user_id, name)
         try:
             channel = await self.ctx.channel(int(channel_id))
@@ -131,6 +155,39 @@ class CommunityModule(Module):
         await self.ctx.audit.record("whitelist.request", actor_id=user_id, shard_id=row.shard_id, target=name)
         await reply(interaction, f"Asked the moderators to whitelist **{escape(name)}** on **{escape(row.name)}**. "
                                  "I'll message you when they decide.")
+
+    async def _auto_approve(self, interaction: discord.Interaction, row: ServerRow, name: str,
+                            channel_id: int) -> bool:
+        """Whitelist at once if the member has the auto-approve role and ``name`` is their verified link.
+        Returns False to fall back to asking the moderators."""
+        role = as_id(await self.ctx.settings.get(AUTO_APPROVE_ROLE))
+        user_id = interaction.user.id
+        if role is None or role not in role_ids(interaction.user):
+            return False
+        owner = await self.ctx.users.find_link(platform_of(row), name)
+        if owner is None or owner.discord_id != user_id:
+            return False
+        template = await self.ctx.settings.get(WL_ADD, scope=row.shard_id)
+        try:
+            await self.ctx.port.send_console(row.shard_id, fill(template, name=name))
+        except Exception as exc:  # noqa: BLE001 - the moderators can still approve it by hand
+            log.info("auto-approve for %s on %s failed, asking the moderators: %s", name, row.name, exc)
+            return False
+        req = await self.ctx.whitelist.create(row.shard_id, user_id, name)
+        await self.ctx.whitelist.decide(req.id, "approved", 0)
+        await self.ctx.whitelisted.add(row.shard_id, name, by=0, discord_id=user_id)
+        await self.ctx.audit.record("whitelist.approve", shard_id=row.shard_id, target=name,
+                                    detail={"auto": True, "member": user_id})
+        decided = await self.ctx.whitelist.get(req.id)
+        if decided is not None:
+            with contextlib.suppress(Exception):  # the record is a courtesy; the member is already in
+                channel = await self.ctx.channel(channel_id)
+                await channel.send(embed=request_embed(decided, row.name, f"Approved by Portcullis: {name} is their "
+                                                                          f"linked name and they have <@&{role}>."),
+                                   allowed_mentions=NONE)
+        await reply(interaction, f"**{escape(name)}** is whitelisted on **{escape(row.name)}**. Your linked name "
+                                 "and role let Portcullis approve it straight away.")
+        return True
 
     async def decide(self, interaction: discord.Interaction, request_id: int, action: str) -> None:
         node = f"whitelist.{action}"
@@ -154,6 +211,9 @@ class CommunityModule(Module):
                 await self.ctx.port.send_console(req.shard_id, fill(template, name=req.ingame_name))
             except Exception as exc:  # noqa: BLE001
                 note = f"Approved, but AMP didn't take the command ({short_error(exc)}). Add the name by hand."
+            else:
+                await self.ctx.whitelisted.add(req.shard_id, req.ingame_name, by=interaction.user.id,
+                                               discord_id=req.discord_id)
         await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=req.shard_id, target=req.ingame_name,
                                     result="failed" if note else "ok")
         updated = await self.ctx.whitelist.get(request_id)
@@ -192,9 +252,132 @@ class CommunityModule(Module):
             await reply(interaction, f"AMP didn't take the command: {escape(short_error(exc))}")
             return
         await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, target=name)
+        if add:
+            await self.ctx.whitelisted.add(row.shard_id, name, by=interaction.user.id)
+        else:
+            await self.ctx.whitelisted.remove(row.shard_id, name)
         verb = "Added" if add else "Removed"
         await reply(interaction, f"{verb} **{escape(name)}** {'to' if add else 'from'} the whitelist on "
                                  f"**{escape(row.name)}**.")
+
+    async def whitelist_list(self, interaction: discord.Interaction, server: str) -> None:
+        if not await self.in_guild(interaction):
+            return
+        row = await self.server(interaction, server)
+        if row is None or not await self.require_mod(interaction, "whitelist.list", row.shard_id):
+            return
+        entries = await self.ctx.whitelisted.for_server(row.shard_id)
+        if not entries:
+            await reply(interaction, f"Portcullis hasn't whitelisted anyone on {escape(row.name)}.")
+            return
+        lines = []
+        for e in entries[:60]:
+            member = f" · <@{e.discord_id}>" if e.discord_id else ""
+            by = "Portcullis" if e.added_by == 0 else (f"<@{e.added_by}>" if e.added_by else "unknown")
+            lines.append(f"**{escape(e.ingame_name)}**{member} · added by {by} {when(e.added_at)}")
+        more = f"\n…and {len(entries) - 60} more" if len(entries) > 60 else ""
+        embed = discord.Embed(title=f"Whitelisted on {row.name}", description=("\n".join(lines) + more)[:4000])
+        embed.set_footer(text="Only names added through Portcullis. Names added in game or in the game's own "
+                              "files aren't listed.")
+        await reply(interaction, embed=embed)
+
+    # ---------------------------------------------------------------- /player moderate, watch, watchlist
+
+    async def moderate(self, interaction: discord.Interaction, server: str, name: str, action: str,
+                       reason: str | None = None) -> None:
+        if not await self.in_guild(interaction):
+            return
+        if action not in MOD_KEYS:
+            await reply(interaction, "Choose kick, ban or unban.")
+            return
+        row = await self.server(interaction, server)
+        node = f"player.moderate.{action}"
+        if row is None or not await self.require_mod(interaction, node, row.shard_id):
+            return
+        if not valid_name(name):
+            await reply(interaction, "That in-game name has characters I can't send to the server.")
+            return
+        if reason is not None and not valid_reason(reason):
+            await reply(interaction, "Keep the reason to one line of up to 100 characters, without "
+                                     "quotes or symbols like ; | $ < >.")
+            return
+        template = await self.ctx.settings.get(action, scope=row.shard_id)
+        if not template:
+            await reply(interaction, f"{escape(row.name)} has no {action} command. An admin can add one under "
+                                     "Moderation commands in `/setup server`.")
+            return
+        line = fill(template, name=name, reason=reason or "no reason given")
+        try:
+            await self.ctx.port.send_console(row.shard_id, line)
+        except Exception as exc:  # noqa: BLE001
+            await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, target=name,
+                                        result="failed", detail={"error": short_error(exc)})
+            await reply(interaction, f"AMP didn't take the command: {escape(short_error(exc))}")
+            return
+        await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, target=name,
+                                    detail={"reason": reason} if reason else None)
+        verb = {"kick": "Kicked", "ban": "Banned", "unban": "Unbanned"}[action]
+        await reply(interaction, f"{verb} **{escape(name)}** on **{escape(row.name)}**.")
+
+    async def watch(self, interaction: discord.Interaction, name: str, note: str | None = None) -> None:
+        if not await self.in_guild(interaction) or not await self.require_mod(interaction, "watch.toggle"):
+            return
+        if not valid_name(name):
+            await reply(interaction, "That doesn't look like an in-game name.")
+            return
+        if note is not None and (len(note) > 200 or not valid_line(note)):
+            await reply(interaction, "Keep the note to one line of up to 200 characters.")
+            return
+        added = await self.ctx.watchlist.toggle(name, by=interaction.user.id, note=note)
+        if added is None:
+            await reply(interaction, f"The watchlist is full ({self.ctx.watchlist.LIMIT} names). Remove some first.")
+            return
+        await self.ctx.audit.record("watch.add" if added else "watch.remove", actor_id=interaction.user.id,
+                                    target=name)
+        if added:
+            await reply(interaction, f"Watching **{escape(name)}**. Moderators get a note when they join a server "
+                                     "(set the channel in `/setup bot`). Run this again to stop.")
+        else:
+            await reply(interaction, f"Stopped watching **{escape(name)}**.")
+
+    async def watchlist(self, interaction: discord.Interaction) -> None:
+        if not await self.in_guild(interaction) or not await self.require_mod(interaction, "watch.list"):
+            return
+        entries = await self.ctx.watchlist.all()
+        if not entries:
+            await reply(interaction, "Nobody is on the watchlist. Add a name with `/player watch`.")
+            return
+        lines = [f"**{escape(e.ingame_name)}** · <@{e.added_by}> {when(e.added_at)}" +
+                 (f" · {escape(e.note)}" if e.note else "") for e in entries[:60]]
+        await reply(interaction, embed=discord.Embed(title="Watchlist", description="\n".join(lines)[:4000]))
+
+    # ---------------------------------------------------------------- link role
+
+    async def sync_link_role(self, discord_id: int) -> None:
+        """Give the link role to a member with a linked name, and take it back when the last link goes."""
+        role_id = as_id(await self.ctx.settings.get(LINK_ROLE))
+        client = self.ctx.client
+        guild = client.get_guild(self.ctx.guild_id) if role_id and client and hasattr(client, "get_guild") else None
+        if guild is None or role_id is None:
+            return
+        role = guild.get_role(role_id)
+        if role is None:
+            log.warning("the link role %s no longer exists", role_id)
+            return
+        problem = role_problem(role, guild, self.ctx.access, handed_out=True)
+        if problem:
+            log.warning("not handing out the link role: %s", problem)
+            return
+        try:
+            member = guild.get_member(discord_id) or await guild.fetch_member(discord_id)
+            linked = bool(await self.ctx.users.links_for(discord_id))
+            has = any(r.id == role.id for r in member.roles)
+            if linked and not has:
+                await member.add_roles(role, reason="Linked an in-game name with Portcullis")
+            elif not linked and has:
+                await member.remove_roles(role, reason="No linked in-game names left in Portcullis")
+        except Exception as exc:  # noqa: BLE001 - usually a missing Manage Roles permission; /setup bot checks it
+            log.warning("could not update the link role for %s: %s", discord_id, exc)
 
     # ---------------------------------------------------------------- /link
 
@@ -238,6 +421,7 @@ class CommunityModule(Module):
         await self.ctx.audit.record("link.verified", actor_id=code.discord_id, shard_id=code.shard_id,
                                     target=code.ingame_name)
         await self._dm(code.discord_id, f"Linked: you are **{escape(code.ingame_name)}** in game.")
+        await self.sync_link_role(code.discord_id)
 
     # ---------------------------------------------------------------- /player
 
@@ -329,6 +513,11 @@ class CommunityModule(Module):
         async def wl_remove(interaction: discord.Interaction, server: str, name: str) -> None:
             await self.whitelist_change(interaction, server, name, add=False)
 
+        @wl.command(name="list", description="Who Portcullis has whitelisted on a server (operators)")
+        @app_commands.autocomplete(server=self.autocomplete_server)
+        async def wl_list(interaction: discord.Interaction, server: str) -> None:
+            await self.whitelist_list(interaction, server)
+
         @app_commands.command(name="link", description="Prove which in-game name is yours, or see your links")
         @app_commands.guild_only()
         @app_commands.describe(server="A server you can join", name="Your in-game name")
@@ -348,6 +537,26 @@ class CommunityModule(Module):
         @app_commands.autocomplete(server=self.autocomplete_server)
         async def player_top(interaction: discord.Interaction, server: str | None = None) -> None:
             await self.player_top(interaction, server)
+
+        @player.command(name="moderate", description="Kick, ban or unban a player (operators)")
+        @app_commands.describe(server="The game server", name="The player's in-game name", action="What to do",
+                               reason="Shown to the player if the game supports it")
+        @app_commands.autocomplete(server=self.autocomplete_server, name=self.autocomplete_player)
+        @app_commands.choices(action=[app_commands.Choice(name=label, value=key) for key, label in MOD_KEYS.items()])
+        async def player_moderate(interaction: discord.Interaction, server: str, name: str, action: str,
+                                  reason: str | None = None) -> None:
+            await self.moderate(interaction, server, name, action, reason)
+
+        @player.command(name="watch", description="Get a quiet note when a player joins (run again to stop; "
+                                                   "operators)")
+        @app_commands.describe(name="The player's in-game name", note="Why, for the other moderators")
+        @app_commands.autocomplete(name=self.autocomplete_player)
+        async def player_watch(interaction: discord.Interaction, name: str, note: str | None = None) -> None:
+            await self.watch(interaction, name, note)
+
+        @player.command(name="watchlist", description="Players on the watchlist (operators)")
+        async def player_watchlist(interaction: discord.Interaction) -> None:
+            await self.watchlist(interaction)
 
         @app_commands.command(name="user", description="A member's links and flags (operators)")
         @app_commands.guild_only()
@@ -373,6 +582,7 @@ class UnlinkView(discord.ui.View):
     async def unlink(self, interaction: discord.Interaction, button: discord.ui.Button[UnlinkView]) -> None:
         removed = await self.module.ctx.users.remove_links(self.user_id)
         await self.module.ctx.audit.record("link.remove", actor_id=self.user_id, detail={"removed": removed})
+        await self.module.sync_link_role(self.user_id)
         await interaction.response.edit_message(content=f"Removed {removed} link(s).", view=None)
 
 
@@ -383,7 +593,7 @@ class UserView(discord.ui.View):
         self.member = member
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if self.module.ctx.access.is_mod(interaction.user):
+        if await self.module.ctx.allowed(interaction.user, "user.edit"):
             return True
         await reply(interaction, "You need an operator role for that.")
         return False
@@ -405,4 +615,5 @@ class UserView(discord.ui.View):
         removed = await self.module.ctx.users.remove_links(self.member.id)
         await self.module.ctx.audit.record("user.unlink", actor_id=interaction.user.id, target=str(self.member.id),
                                            detail={"removed": removed})
+        await self.module.sync_link_role(self.member.id)
         await interaction.response.edit_message(embed=await self.module.user_embed(self.member), view=self)

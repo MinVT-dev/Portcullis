@@ -204,5 +204,10 @@ class AmpServerPort:
         out.sort(key=lambda b: b.created_at or oldest, reverse=True)
         return out
 
+    async def permissions(self) -> list[str]:
+        """The bot account's grant strings. ``">"`` means everything (seen on an admin account)."""
+        mine = await self.client.my_account.get_me_permissions()
+        return list(mine.grants)
+
     async def close(self) -> None:
         await self.hub.close()

@@ -46,6 +46,7 @@ def _now() -> datetime:
 
 class FakeAmpPort:
     def __init__(self) -> None:
+        self.grants: list[str] = [">"]
         self.servers: dict[ServerId, FakeServer] = {}
         self.sent: list[tuple[ServerId, str]] = []
         self.power_calls: list[tuple[ServerId, PowerAction]] = []
@@ -133,3 +134,6 @@ class FakeAmpPort:
 
     async def list_backups(self, server: ServerId) -> list[Backup]:
         return list(self._get(server).backups)
+
+    async def permissions(self) -> list[str]:
+        return list(self.grants)

@@ -13,7 +13,7 @@ from typing import Any
 import discord
 from discord import app_commands
 
-from portcullis.bot.base import Module, reply, short_error, state_text, when
+from portcullis.bot.base import OWNER_ONLY_KEYS, Module, code, reply, short_error, state_text, when
 from portcullis.core.relay import escape
 from portcullis.db.features import all_settings
 from portcullis.db.repos import ServerRepo
@@ -25,20 +25,25 @@ MAX_IMPORT_BYTES = 1_000_000
 
 # (command, who, what) for /help. "who" is everyone, mod or admin.
 HELP = [
-    ("/server list", "everyone", "Every server and whether it's online"),
-    ("/server status", "everyone", "One server's state and who is online"),
+    ("/server list", "everyone", "Every server and whether it's online (players: names who's on)"),
+    ("/server status", "everyone", "One server's state, who is online and its address"),
     ("/player lookup", "everyone", "When a player was last seen, and their play time"),
     ("/player top", "everyone", "Who has played the most"),
     ("/whitelist request", "everyone", "Ask to be whitelisted on a server"),
     ("/link", "everyone", "Prove which in-game name is yours"),
     ("/notify", "everyone", "Get a DM when a server comes online"),
+    ("/event list", "everyone", "Events coming up"),
     ("/help", "everyone", "This list"),
-    ("/server power", "mod", "Start, stop or restart a server"),
+    ("/server power", "mod", "Start, stop, restart, or restart with a warning in game chat"),
+    ("/server power-all", "mod", "Start, stop or restart every server, or every server with a tag"),
     ("/server send", "mod", "Send a console command or chat message"),
     ("/server console", "mod", "A server's latest console lines"),
     ("/backups", "mod", "A server's backups"),
-    ("/whitelist add · remove", "mod", "Change a server's whitelist"),
+    ("/whitelist add · remove · list", "mod", "Change or see a server's whitelist"),
+    ("/player moderate", "mod", "Kick, ban or unban a player"),
+    ("/player watch · watchlist", "mod", "Get a quiet note when a player joins"),
     ("/poll create · list", "mod", "Community polls"),
+    ("/event create", "mod", "Announce an event with a Going button and a reminder"),
     ("/user (or right-click → Apps → Portcullis user)", "mod", "A member's links and flags"),
     ("/setup relay · server · bot", "admin", "Relays, server settings, bot settings"),
     ("/audit", "admin", "Who did what through Portcullis"),
@@ -52,7 +57,7 @@ class AdminModule(Module):
     async def help(self, interaction: discord.Interaction) -> None:
         access = self.ctx.access
         allowed = {"everyone"}
-        if access.is_mod(interaction.user):
+        if await self.ctx.is_staff(interaction.user):
             allowed.add("mod")
         if access.is_admin(interaction.user):
             allowed.add("admin")
@@ -117,6 +122,7 @@ class AdminModule(Module):
                 lines.append(f"❌ {escape(info.name)} · {escape(short_error(exc))[:150]}")
         if lines:
             embed.add_field(name="Servers", value="\n".join(lines)[:1024], inline=False)
+        embed.add_field(name="AMP account permissions", value=await self.permission_text(), inline=False)
         rows = await self.ctx.servers.list()
         relays = sum(1 for r in rows if r.console_channel or r.event_channel or r.chat_channel)
         embed.add_field(name="Relays", value=f"{relays} server(s) with a relay channel")
@@ -128,6 +134,27 @@ class AdminModule(Module):
             embed.add_field(name="Discord latency", value=f"{self.ctx.client.latency * 1000:.0f} ms")
         embed.add_field(name="Database", value=f"schema version {self.ctx.db.version}")
         await reply(interaction, embed=embed)
+
+    async def permission_text(self) -> str:
+        """What the bot's AMP account may do, from ``GET /api/me/permissions``."""
+        try:
+            grants = await asyncio.wait_for(self.ctx.port.permissions(), 8)
+        except Exception as exc:  # noqa: BLE001
+            return f"❌ couldn't read them: {escape(short_error(exc))[:200]}"
+        if ">" in grants:
+            return ("⚠️ Everything (an admin account). It works, but if the bot's password leaks, so does the "
+                    "whole panel. docs/SETUP.md lists a smaller role.")
+        if not grants:
+            return "❌ None. Give the bot's AMP account a role (docs/SETUP.md)."
+        wanted = ("view", "power.start", "power.stop", "power.restart", "console.read", "console.send")
+        text = " ".join(grants)
+        missing = [w for w in wanted if w not in text]
+        shown = ", ".join(code(g) for g in grants[:20]) + (f" and {len(grants) - 20} more"
+                                                            if len(grants) > 20 else "")
+        if missing:
+            shown += ("\nNot found in that list: " + ", ".join(code(m) for m in missing) +
+                      ". AMP's grant format isn't fully mapped yet, so check the role in AMP before changing it.")
+        return shown[:1024]
 
     # ---------------------------------------------------------------- /admin export, import
 
@@ -147,8 +174,9 @@ class AdminModule(Module):
         await reply(interaction, "Portcullis settings. Keep this file: `/admin import` restores it.",
                     file=discord.File(io.BytesIO(data), filename="portcullis-settings.json"))
 
-    async def import_data(self, data: Any, by: int) -> tuple[int, int, list[str]]:
-        """Apply an export. Returns (servers updated, settings written, problems)."""
+    async def import_data(self, data: Any, by: int, *, owner: bool = False) -> tuple[int, int, list[str]]:
+        """Apply an export. Returns (servers updated, settings written, problems).
+        Operator role settings are only imported for owners: a file mustn't hand out powers."""
         if not isinstance(data, dict) or data.get("portcullis_export") != EXPORT_VERSION:
             return 0, 0, ["This isn't a Portcullis settings export (Gatekeeper V3 databases can't be imported yet)."]
         problems: list[str] = []
@@ -167,6 +195,9 @@ class AdminModule(Module):
             if not isinstance(values, dict):
                 continue
             for key, value in values.items():
+                if key in OWNER_ONLY_KEYS and not owner:
+                    problems.append(f"skipped {key} ({scope}): only owners can import operator roles")
+                    continue
                 await self.ctx.settings.set(str(key), value, scope=str(scope), by=by)
                 written += 1
         return updated, written, problems
@@ -182,7 +213,8 @@ class AdminModule(Module):
         except ValueError:
             await reply(interaction, "That file isn't JSON.")
             return
-        updated, written, problems = await self.import_data(data, interaction.user.id)
+        updated, written, problems = await self.import_data(data, interaction.user.id,
+                                                            owner=self.ctx.access.is_owner(interaction.user))
         await self.ctx.audit.record("admin.import", actor_id=interaction.user.id,
                                     detail={"servers": updated, "settings": written, "problems": problems[:20]})
         await self.ctx.relay_changed()

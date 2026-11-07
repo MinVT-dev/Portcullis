@@ -7,12 +7,17 @@ Handlers are plain methods taking an interaction, so tests call them with a fake
 
 from __future__ import annotations
 
+import logging
+
 from discord import app_commands
 
 from portcullis.bot.admin import AdminModule
+from portcullis.bot.alerts import Alerts, AuditFeed
 from portcullis.bot.base import Access, Ctx, Module
 from portcullis.bot.board import StatusBoard
 from portcullis.bot.community import CommunityModule, WhitelistDecision
+from portcullis.bot.events import EventCancel, EventGoing, EventModule
+from portcullis.bot.joins import JoinWatch
 from portcullis.bot.notify import NotifyModule
 from portcullis.bot.polls import PollClose, PollModule, PollVote
 from portcullis.bot.server import ServerModule
@@ -20,8 +25,10 @@ from portcullis.bot.setup import SetupModule
 
 __all__ = ["Access", "Ctx", "Modules", "DYNAMIC_ITEMS"]
 
+log = logging.getLogger(__name__)
+
 # Buttons that must keep working after a restart (their state is in the custom id).
-DYNAMIC_ITEMS = (WhitelistDecision, PollVote, PollClose)
+DYNAMIC_ITEMS = (WhitelistDecision, PollVote, PollClose, EventGoing, EventCancel)
 
 
 class Modules:
@@ -34,9 +41,26 @@ class Modules:
         self.polls = PollModule(ctx)
         self.admin = AdminModule(ctx)
         self.notify = NotifyModule(ctx)
+        self.events = EventModule(ctx)
+        self.alerts = Alerts(ctx)
+        self.joins = JoinWatch(ctx)
+        self.audit_feed = AuditFeed(ctx)
+        ctx.audit.listeners.append(self.audit_feed)
 
     def all(self) -> list[Module]:
-        return [self.server, self.setup, self.community, self.polls, self.notify, self.admin]
+        return [self.server, self.setup, self.community, self.polls, self.notify, self.events, self.admin]
+
+    async def tick(self) -> None:
+        """Once a minute: event reminders, load and backup alerts."""
+        for name, job in (("events", self.events.tick), ("alerts", self.alerts.tick)):
+            try:
+                await job()
+            except Exception:  # one failing job must not stop the others
+                log.exception("the %s job failed", name)
+
+    async def close(self) -> None:
+        await self.server.close()
+        await self.audit_feed.close()
 
     def register(self, tree: app_commands.CommandTree) -> None:
         for module in self.all():

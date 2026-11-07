@@ -23,6 +23,8 @@ from portcullis.db.database import Database
 log = logging.getLogger(__name__)
 
 REFRESH_EVERY = 300.0  # seconds between re-reading AMP's server list and states
+RETRY_EVERY = 60.0  # while AMP is unreachable, so the outage alert and recovery come sooner
+TICK_EVERY = 60.0  # reminders and alert checks
 PRESENCE_EVERY = 15.0  # at most one profile status change this often (Discord rate-limits presence)
 STATUS_TIMEOUT = 8.0
 
@@ -72,15 +74,19 @@ class PortcullisBot(discord.Client):
         self.board = self.ctx.board
         self.notifier = Notifier(self.ctx)
         self.relay = Relay(port, DiscordSink(self), hooks=hooks, follow_all=True)
+        # JoinWatch first: it needs to know whether a join is someone's first, before PlayerTracker records it.
         self.relay.listeners += [
+            self.modules.joins,
             self.live,
             self.notifier,
+            self.modules.alerts,
             PlayerTracker(self.ctx.players),
             LinkVerifier(self.ctx.links, self.ctx.users, on_linked=self.modules.community.on_linked),
         ]
         self.tree = app_commands.CommandTree(self)
         self.modules.register(self.tree)
         self._refresher: asyncio.Task[None] | None = None
+        self._ticker: asyncio.Task[None] | None = None
         self._presence_text: str | None = None
         self._presence_at = 0.0
         self._presence_pending: asyncio.Task[None] | None = None
@@ -97,6 +103,7 @@ class PortcullisBot(discord.Client):
             log.info("closed %d player session(s) left open by the last run", closed)
         await self.refresh()
         self._refresher = asyncio.create_task(self._refresh_loop(), name="portcullis-refresh")
+        self._ticker = asyncio.create_task(self._tick_loop(), name="portcullis-tick")
 
     async def on_ready(self) -> None:
         log.info("logged in to Discord as %s", self.user)
@@ -119,6 +126,8 @@ class PortcullisBot(discord.Client):
         except Exception as exc:  # noqa: BLE001 - keep running on the last known list
             log.warning("could not read the server list from AMP: %s", exc)
             await self.live.set_reachable(False)
+        with contextlib.suppress(Exception):
+            await self.modules.alerts.reachability(self.live.reachable)
         await self._seed_live()
         await self.apply_relays()
         with contextlib.suppress(Exception):
@@ -146,8 +155,14 @@ class PortcullisBot(discord.Client):
 
     async def _refresh_loop(self) -> None:
         while True:
-            await asyncio.sleep(self.refresh_every)
+            await asyncio.sleep(self.refresh_every if self.live.reachable else min(self.refresh_every, RETRY_EVERY))
             await self.refresh()
+
+    async def _tick_loop(self) -> None:
+        while True:
+            await asyncio.sleep(TICK_EVERY)
+            if self.is_ready():
+                await self.modules.tick()
 
     # ---------------------------------------------------------------- profile status and server board
 
@@ -189,12 +204,13 @@ class PortcullisBot(discord.Client):
         self._presence_at = time.monotonic()
 
     async def close(self) -> None:
-        for task in (self._refresher, self._presence_pending):
+        for task in (self._refresher, self._ticker, self._presence_pending):
             if task is not None:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
         self._refresher = None
+        await self.modules.close()
         await self.board.close()
         await self.notifier.close()
         await self.relay.close()

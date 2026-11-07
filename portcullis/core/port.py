@@ -29,5 +29,7 @@ class AmpPort(Protocol):
 
     async def list_backups(self, server: ServerId) -> list[Backup]: ...
 
+    async def permissions(self) -> list[str]: ...
+
     # create_backup waits: TakeBody needs SnapshotKind and SnapshotContent numbers that the spec
     # doesn't list. Read them off a snapshot taken in the panel first.

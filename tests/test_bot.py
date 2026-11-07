@@ -130,6 +130,10 @@ async def test_status_embed_and_power_buttons_for_mods_only(h: Harness) -> None:
     assert [b.label for b in view.children] == ["Start", "Stop", "Restart"]
     press = FakeInteraction(operator())
     await view.children[1].callback(press)
+    assert h.port.power_calls == []  # a player is online, so it asks first
+    assert "1 player is online" in press.text
+    confirm = FakeInteraction(operator())
+    await press.replies[-1]["view"].children[0].callback(confirm)
     assert h.port.power_calls == [(SURVIVAL, PowerAction.STOP)]
 
 
@@ -178,7 +182,7 @@ async def test_power_failure_and_bad_action(h: Harness) -> None:
     assert "AMP didn't restart Survival" in i.text
     i = FakeInteraction(owner())
     await h.m.server.server_power(i, "Survival", "update")
-    assert "Choose start, stop or restart" in i.text
+    assert "Choose start, stop, restart or restart with warning" in i.text
 
 
 async def test_send_console_and_chat(h: Harness) -> None:
@@ -564,10 +568,10 @@ def test_command_tree() -> None:
     client = discord.Client(intents=intents())
     tree = app_commands.CommandTree(client)
     ctx = SimpleNamespace(access=Access())
-    from portcullis.bot import admin, community, notify, polls, server, setup
+    from portcullis.bot import admin, community, events, notify, polls, server, setup
 
     for cls in (server.ServerModule, setup.SetupModule, community.CommunityModule, polls.PollModule,
-                notify.NotifyModule, admin.AdminModule):
+                notify.NotifyModule, events.EventModule, admin.AdminModule):
         module = cls.__new__(cls)
         module.ctx = ctx  # type: ignore[assignment]
         module.register(tree)
@@ -575,9 +579,10 @@ def test_command_tree() -> None:
     for c in tree.get_commands():
         names[c.name] = sorted(x.name for x in getattr(c, "commands", []))
     assert names == {
-        "server": ["console", "list", "power", "send", "status"], "backups": [], "setup": ["bot", "relay", "server"],
-        "whitelist": ["add", "remove", "request"], "link": [], "player": ["lookup", "top"], "user": [],
-        "Portcullis user": [], "poll": ["create", "list"], "notify": [], "help": [], "audit": [],
+        "server": ["console", "list", "power", "power-all", "send", "status"], "backups": [],
+        "setup": ["bot", "relay", "server"], "whitelist": ["add", "list", "remove", "request"], "link": [],
+        "player": ["lookup", "moderate", "top", "watch", "watchlist"], "user": [], "Portcullis user": [],
+        "poll": ["create", "list"], "notify": [], "event": ["create", "list"], "help": [], "audit": [],
         "admin": ["diagnostics", "export", "import"],
     }
     groups = {c.name: c for c in tree.get_commands()}

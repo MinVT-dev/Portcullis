@@ -63,6 +63,21 @@ class PlayerRepo:
                 (at or now_iso(), shard_id.lower()))
         return cur.rowcount
 
+    async def seen_on(self, shard_id: str, name: str) -> bool:
+        async with self.db.conn.execute(
+            "SELECT 1 FROM player_sessions WHERE shard_id = ? AND player_name = ? COLLATE NOCASE LIMIT 1",
+            (shard_id.lower(), name),
+        ) as cur:
+            return await cur.fetchone() is not None
+
+    async def tracked_since(self, shard_id: str) -> str | None:
+        """When Portcullis first saw anyone on this server, or None if it never has."""
+        async with self.db.conn.execute(
+            "SELECT MIN(joined_at) AS first FROM player_sessions WHERE shard_id = ?", (shard_id.lower(),)
+        ) as cur:
+            row = await cur.fetchone()
+        return row["first"] if row else None
+
     async def online(self, shard_id: str) -> list[str]:
         async with self.db.conn.execute(
             "SELECT player_name FROM player_sessions WHERE shard_id = ? AND left_at IS NULL ORDER BY joined_at",

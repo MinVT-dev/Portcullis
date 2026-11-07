@@ -5,12 +5,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import time
+from collections.abc import Awaitable, Callable
 
 import discord
 from discord import app_commands
 
 from portcullis.assets import game_art
-from portcullis.bot.base import Module, fill, reply, short_error, state_text, valid_line
+from portcullis.bot.base import NONE, Ctx, Module, code, fill, reply, short_error, state_text, valid_line
 from portcullis.core.relay import console_safe, escape
 from portcullis.core.types import PowerAction, ServerState, ServerStatus
 from portcullis.db.repos import ServerRow
@@ -34,6 +37,18 @@ QUICK_KEY = "quick_commands"  # per-server setting: [{"label": "Save world", "co
 QUICK_LIMIT = 5
 CONSOLE_DEFAULT, CONSOLE_MAX = 20, 50
 CONSOLE_CHARS = 1800  # leaves room for the heading and code fences in Discord's 2000-character limit
+CONNECT_KEY = "connect_address"  # per-server setting: the address players type, e.g. play.example.com:27015
+START_KEY = "members_can_start"  # per-server setting: any member may start it (never stop it)
+START_COOLDOWN = 120.0  # seconds between member starts of one server
+WARNED = "restart_warned"
+# Warnings as (seconds before the restart, text for players).
+WARN_STEPS = ((300, "5 minutes"), (60, "1 minute"))
+WARN_TEXT = "Server restart in {when}."
+_ADDRESS = re.compile(r"^[A-Za-z0-9.\-]{1,253}(:\d{1,5})?$")
+
+
+def valid_address(text: str) -> bool:
+    return bool(_ADDRESS.match(text))
 
 
 def quick_commands(value: object) -> list[dict[str, str]]:
@@ -60,7 +75,7 @@ def console_block(lines: list[str]) -> str:
     return "```\n" + "\n".join(reversed(kept)) + "\n```"
 
 
-def status_embed(row: ServerRow, status: ServerStatus) -> discord.Embed:
+def status_embed(row: ServerRow, status: ServerStatus, address: str | None = None) -> discord.Embed:
     embed = discord.Embed(title=row.name, colour=STATE_COLOURS.get(status.state, 0x7F8C8D))
     embed.add_field(name="State", value=state_text(status.state))
     count = f"{status.player_count}" + (f" / {status.max_players}" if status.max_players else "")
@@ -75,6 +90,8 @@ def status_embed(row: ServerRow, status: ServerStatus) -> discord.Embed:
     if status.players:
         names = ", ".join(escape(p.name) for p in status.players)
         embed.add_field(name="Online now", value=names if len(names) <= 1000 else names[:999] + "…", inline=False)
+    if address:
+        embed.add_field(name="Address", value=code(address))
     if status.message:
         embed.add_field(name="Message", value=escape(status.message)[:1000], inline=False)
     art = game_art(row.template, name=row.amp_name)
@@ -87,13 +104,15 @@ def status_embed(row: ServerRow, status: ServerStatus) -> discord.Embed:
 class PowerButtons(discord.ui.View):
     """Start/Stop/Restart under a status reply, plus the server's quick commands. Moderators only."""
 
-    def __init__(self, module: ServerModule, row: ServerRow, quick: list[dict[str, str]] | None = None) -> None:
+    def __init__(self, module: ServerModule, row: ServerRow, quick: list[dict[str, str]] | None = None, *,
+                 start_only: bool = False) -> None:
         super().__init__(timeout=600)
         self.module = module
         self.row = row
-        for action, style in ((PowerAction.START, discord.ButtonStyle.success),
-                              (PowerAction.STOP, discord.ButtonStyle.danger),
-                              (PowerAction.RESTART, discord.ButtonStyle.secondary)):
+        buttons = ((PowerAction.START, discord.ButtonStyle.success),
+                   (PowerAction.STOP, discord.ButtonStyle.danger),
+                   (PowerAction.RESTART, discord.ButtonStyle.secondary))
+        for action, style in buttons[:1] if start_only else buttons:
             button: discord.ui.Button[PowerButtons] = discord.ui.Button(label=action.value.capitalize(), style=style)
             button.callback = self._handler(action)  # type: ignore[method-assign]
             self.add_item(button)
@@ -114,8 +133,60 @@ class PowerButtons(discord.ui.View):
         return press
 
 
+class Confirm(discord.ui.View):
+    """Yes/No under an ephemeral question. Only the person who asked can answer."""
+
+    def __init__(self, owner_id: int, on_yes: Callable[[discord.Interaction], Awaitable[None]],
+                 yes_label: str) -> None:
+        super().__init__(timeout=120)
+        self.owner_id = owner_id
+        self.on_yes = on_yes
+        yes: discord.ui.Button[Confirm] = discord.ui.Button(label=yes_label, style=discord.ButtonStyle.danger)
+        yes.callback = self._yes  # type: ignore[method-assign]
+        no: discord.ui.Button[Confirm] = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary)
+        no.callback = self._no  # type: ignore[method-assign]
+        self.add_item(yes)
+        self.add_item(no)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.owner_id
+
+    async def _yes(self, interaction: discord.Interaction) -> None:
+        self.stop()
+        await self.on_yes(interaction)
+
+    async def _no(self, interaction: discord.Interaction) -> None:
+        self.stop()
+        await interaction.response.edit_message(content="Cancelled. Nothing was changed.", view=None)
+
+
+class CancelRestart(discord.ui.View):
+    def __init__(self, module: ServerModule, row: ServerRow) -> None:
+        super().__init__(timeout=max(s for s, _ in WARN_STEPS) + 120)
+        self.module = module
+        self.row = row
+
+    @discord.ui.button(label="Cancel the restart", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button[CancelRestart]) -> None:
+        await self.module.cancel_restart(interaction, self.row)
+
+
 class ServerModule(Module):
-    async def server_list(self, interaction: discord.Interaction) -> None:
+    def __init__(self, ctx: Ctx) -> None:
+        super().__init__(ctx)
+        self.restarts: dict[str, asyncio.Task[None]] = {}
+        self.member_starts: dict[str, float] = {}
+        self.sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+
+    async def players_online(self, row: ServerRow) -> int | None:
+        """How many players are on, or None if AMP couldn't say."""
+        try:
+            status = await asyncio.wait_for(self.ctx.port.get_status(row.shard_id), STATUS_TIMEOUT)
+        except Exception:  # noqa: BLE001
+            return None
+        return status.player_count if status.state is ServerState.RUNNING else 0
+
+    async def server_list(self, interaction: discord.Interaction, players: bool = False) -> None:
         if not await self.in_guild(interaction):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -130,8 +201,12 @@ class ServerModule(Module):
             except Exception as exc:  # noqa: BLE001 - one bad server must not hide the rest
                 log.warning("status for %s failed: %s", row.name, exc)
                 return f"{state_text(ServerState.UNKNOWN)} · **{escape(row.name)}** · couldn't reach AMP"
-            players = f" · {status.player_count} online" if status.state is ServerState.RUNNING else ""
-            return f"{state_text(status.state)} · **{escape(row.name)}**{players}"
+            running = status.state is ServerState.RUNNING
+            count = f" · {status.player_count} online" if running else ""
+            line = f"{state_text(status.state)} · **{escape(row.name)}**{count}"
+            if players and running and status.players:
+                line += "\n　" + ", ".join(escape(p.name) for p in status.players)
+            return line
 
         lines = await asyncio.gather(*(one(r) for r in rows))
         await reply(interaction, embed=discord.Embed(title="Servers", description="\n".join(lines)[:4000]))
@@ -151,28 +226,59 @@ class ServerModule(Module):
                                      f"{escape(short_error(exc))}")
             return
         extra = {}
-        if self.ctx.access.is_mod(interaction.user):
-            quick = quick_commands(await self.ctx.settings.get(QUICK_KEY, scope=row.shard_id))
+        user = interaction.user
+        can_power = await self.ctx.allowed(user, "server.power", row.shard_id)
+        can_console = await self.ctx.allowed(user, "server.quick", row.shard_id)
+        quick = quick_commands(await self.ctx.settings.get(QUICK_KEY, scope=row.shard_id)) if can_console else []
+        if can_power or quick:
             extra["view"] = PowerButtons(self, row, quick)
-        await reply(interaction, embed=status_embed(row, status), **extra)
+        elif status.state is ServerState.STOPPED and await self.ctx.settings.get(START_KEY, False, scope=row.shard_id):
+            extra["view"] = PowerButtons(self, row, start_only=True)
+        address = await self.ctx.settings.get(CONNECT_KEY, scope=row.shard_id)
+        await reply(interaction, embed=status_embed(row, status, address), **extra)
 
     async def server_power(self, interaction: discord.Interaction, server: str, action: str) -> None:
         if not await self.in_guild(interaction):
             return
         power = next((a for a in POWER_ACTIONS if a.value == action), None)
-        if power is None:
-            await reply(interaction, "Choose start, stop or restart.")
+        if power is None and action != WARNED:
+            await reply(interaction, "Choose start, stop, restart or restart with warning.")
             return
         row = await self.server(interaction, server)
         if row is None:
             return
-        await self.do_power(interaction, row, power)
+        if power is None:
+            await self.warned_restart(interaction, row)
+        else:
+            await self.do_power(interaction, row, power)
 
-    async def do_power(self, interaction: discord.Interaction, row: ServerRow, power: PowerAction) -> None:
+    async def do_power(self, interaction: discord.Interaction, row: ServerRow, power: PowerAction,
+                       confirmed: bool = False) -> None:
         node = f"server.power.{power.value}"
-        if not await self.require_mod(interaction, node, row.shard_id):
-            return
+        on_demand = False
+        if not await self.ctx.allowed(interaction.user, node, row.shard_id):
+            if power is PowerAction.START and await self.ctx.settings.get(START_KEY, False, scope=row.shard_id):
+                on_demand = True
+            elif not await self.require_mod(interaction, node, row.shard_id):
+                return
+        if on_demand:
+            last = self.member_starts.get(row.shard_id)
+            if last is not None and time.monotonic() - last < START_COOLDOWN:
+                await reply(interaction, f"Someone started {escape(row.name)} a moment ago. Give it a minute.")
+                return
+            self.member_starts[row.shard_id] = time.monotonic()
+        if power is PowerAction.STOP and not confirmed:
+            online = await self.players_online(row)
+            if online != 0:
+                who = "someone may be playing (AMP didn't say)" if online is None else \
+                    f"{online} player{'s are' if online != 1 else ' is'} online"
+                await reply(interaction, f"Stop **{escape(row.name)}**? {who}.",
+                            view=Confirm(interaction.user.id,
+                                         lambda i: self.do_power(i, row, power, confirmed=True), "Stop it"))
+                return
         await interaction.response.defer(thinking=True)  # public, so everyone sees who did it
+        if power in (PowerAction.STOP, PowerAction.RESTART):
+            self.ctx.expect_offline(row.shard_id)
         try:
             await self.ctx.port.power(row.shard_id, power)
         except Exception as exc:  # noqa: BLE001
@@ -182,9 +288,151 @@ class ServerModule(Module):
             await reply(interaction, f"AMP didn't {power.value} {escape(row.name)}: {escape(short_error(exc))}",
                         ephemeral=False)
             return
-        await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id)
+        await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id,
+                                    detail={"member_start": True} if on_demand else None)
         await reply(interaction, f"{VERBS[power.value]} **{escape(row.name)}** (asked by {interaction.user.mention}).",
                     ephemeral=False)
+
+    # ---------------------------------------------------------------- restart with warning
+
+    async def warned_restart(self, interaction: discord.Interaction, row: ServerRow) -> None:
+        node = "server.power.restart"
+        if not await self.require_mod(interaction, node, row.shard_id):
+            return
+        template = await self.ctx.settings.get(SAY_KEY, scope=row.shard_id)
+        if not template:
+            await reply(interaction, f"{escape(row.name)} has no chat command, so players can't be warned. An admin "
+                                     "can add one in `/setup server` (for example `say {message}`), or use a "
+                                     "plain restart.")
+            return
+        task = self.restarts.get(row.shard_id)
+        if task is not None and not task.done():
+            await reply(interaction, f"A restart of {escape(row.name)} is already counting down.")
+            return
+        if await self.players_online(row) == 0:
+            await self.do_power(interaction, row, PowerAction.RESTART)
+            return
+        await self.ctx.audit.record("server.power.restart.warned", actor_id=interaction.user.id, shard_id=row.shard_id)
+        first = WARN_STEPS[0][1]
+        await reply(interaction, f"Restarting **{escape(row.name)}** in {first} (asked by {interaction.user.mention}). "
+                                 "Players get a warning in game chat.", ephemeral=False,
+                    view=CancelRestart(self, row))
+        self.restarts[row.shard_id] = asyncio.create_task(self._count_down(interaction, row, template),
+                                                          name=f"portcullis-restart-{row.shard_id[:8]}")
+
+    async def _count_down(self, interaction: discord.Interaction, row: ServerRow, template: str) -> None:
+        try:
+            for index, (seconds, label) in enumerate(WARN_STEPS):
+                try:
+                    await self.ctx.port.send_console(row.shard_id, fill(template, message=WARN_TEXT.format(when=label)))
+                except Exception as exc:  # noqa: BLE001 - a missed warning shouldn't stop the restart
+                    log.warning("restart warning on %s failed: %s", row.name, exc)
+                following = WARN_STEPS[index + 1][0] if index + 1 < len(WARN_STEPS) else 0
+                await self.sleep(seconds - following)
+            self.ctx.expect_offline(row.shard_id)
+            try:
+                await self.ctx.port.power(row.shard_id, PowerAction.RESTART)
+            except Exception as exc:  # noqa: BLE001
+                await self.ctx.audit.record("server.power.restart", actor_id=interaction.user.id,
+                                            shard_id=row.shard_id, result="failed", detail={"error": short_error(exc)})
+                await self._update(interaction, f"AMP didn't restart **{escape(row.name)}**: "
+                                                f"{escape(short_error(exc))}")
+                return
+            await self.ctx.audit.record("server.power.restart", actor_id=interaction.user.id, shard_id=row.shard_id)
+            await self._update(interaction, f"Restarted **{escape(row.name)}** after warning players "
+                                            f"(asked by {interaction.user.mention}).")
+        finally:
+            self.restarts.pop(row.shard_id, None)
+
+    @staticmethod
+    async def _update(interaction: discord.Interaction, text: str) -> None:
+        try:
+            await interaction.edit_original_response(content=text, view=None, allowed_mentions=NONE)
+        except Exception as exc:  # noqa: BLE001 - the message may be gone; the restart still happened
+            log.info("could not update the restart message: %s", exc)
+
+    async def cancel_restart(self, interaction: discord.Interaction, row: ServerRow) -> None:
+        if not await self.require_mod(interaction, "server.power.restart", row.shard_id):
+            return
+        task = self.restarts.pop(row.shard_id, None)
+        if task is None or task.done():
+            await reply(interaction, "That restart already happened or was cancelled.")
+            return
+        task.cancel()
+        await self.ctx.audit.record("server.power.restart.cancelled", actor_id=interaction.user.id,
+                                    shard_id=row.shard_id)
+        template = await self.ctx.settings.get(SAY_KEY, scope=row.shard_id)
+        if template:
+            try:
+                await self.ctx.port.send_console(row.shard_id, fill(template, message="The restart is cancelled."))
+            except Exception as exc:  # noqa: BLE001
+                log.info("could not tell players the restart is off: %s", exc)
+        await interaction.response.edit_message(
+            content=f"Restart of **{escape(row.name)}** cancelled by {interaction.user.mention}.", view=None,
+            allowed_mentions=NONE)
+
+    # ---------------------------------------------------------------- power all
+
+    async def power_all(self, interaction: discord.Interaction, action: str, tag: str | None = None) -> None:
+        if not await self.in_guild(interaction):
+            return
+        power = next((a for a in POWER_ACTIONS if a.value == action), None)
+        if power is None:
+            await reply(interaction, "Choose start, stop or restart.")
+            return
+        node = f"server.power.{power.value}"
+        wanted = tag.strip().lower() if tag else None
+        targets = []
+        for row in await self.ctx.servers.list():
+            if wanted and wanted not in (t.lower() for t in row.tags):
+                continue
+            if not await self.ctx.allowed(interaction.user, node, row.shard_id):
+                continue
+            state = self.ctx.live.states.get(row.shard_id, ServerState.UNKNOWN)
+            if (power is PowerAction.START and state is ServerState.RUNNING) or \
+                    (power is not PowerAction.START and state is ServerState.STOPPED):
+                continue
+            targets.append(row)
+        if not targets:
+            await self.ctx.audit.record(f"{node}.all", actor_id=interaction.user.id, result="denied",
+                                        target=wanted)
+            where = f" tagged {escape(wanted)}" if wanted else ""
+            await reply(interaction, f"No servers{where} to {power.value} that you're allowed to.")
+            return
+        players = sum(len(self.ctx.live.players.get(r.shard_id, ())) for r in targets)
+        names = ", ".join(f"**{escape(r.name)}**" for r in targets)
+        online = f" {players} player{'s are' if players != 1 else ' is'} online." if players else ""
+        await reply(interaction, f"{power.value.capitalize()} {len(targets)} server(s): {names}?{online}",
+                    view=Confirm(interaction.user.id, lambda i: self._power_many(i, targets, power),
+                                 f"{power.value.capitalize()} {len(targets)}"))
+
+    async def _power_many(self, interaction: discord.Interaction, rows: list[ServerRow], power: PowerAction) -> None:
+        await interaction.response.edit_message(content=f"Working on {len(rows)} server(s)…", view=None)
+        node = f"server.power.{power.value}"
+        done, failed = [], []
+        for row in rows:
+            if power in (PowerAction.STOP, PowerAction.RESTART):
+                self.ctx.expect_offline(row.shard_id)
+            try:
+                await self.ctx.port.power(row.shard_id, power)
+            except Exception as exc:  # noqa: BLE001 - keep going; report the failures together
+                failed.append(f"{escape(row.name)} ({escape(short_error(exc))[:100]})")
+                await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id,
+                                            result="failed", detail={"error": short_error(exc), "all": True})
+                continue
+            done.append(f"**{escape(row.name)}**")
+            await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id,
+                                        detail={"all": True})
+        text = f"{VERBS[power.value]} {', '.join(done) or 'nothing'} (asked by {interaction.user.mention})."
+        if failed:
+            text += "\nAMP refused: " + "; ".join(failed)
+        await interaction.followup.send(text[:2000], allowed_mentions=NONE)
+
+    async def close(self) -> None:
+        for task in list(self.restarts.values()):
+            task.cancel()
+        await asyncio.gather(*self.restarts.values(), return_exceptions=True)
+        self.restarts.clear()
 
     async def server_send(self, interaction: discord.Interaction, server: str, text: str, as_: str = "console") -> None:
         if not await self.in_guild(interaction):
@@ -291,8 +539,9 @@ class ServerModule(Module):
         auto = self.autocomplete_server
 
         @group.command(name="list", description="List the game servers and whether they are online")
-        async def server_list(interaction: discord.Interaction) -> None:
-            await self.server_list(interaction)
+        @app_commands.describe(players="Also name everyone who is online")
+        async def server_list(interaction: discord.Interaction, players: bool = False) -> None:
+            await self.server_list(interaction, players)
 
         @group.command(name="status", description="Show one server's state and who is online")
         @app_commands.describe(server="The game server")
@@ -304,9 +553,18 @@ class ServerModule(Module):
         @app_commands.describe(server="The game server", action="What to do")
         @app_commands.autocomplete(server=auto)
         @app_commands.choices(action=[app_commands.Choice(name=a.value.capitalize(), value=a.value)
-                                      for a in POWER_ACTIONS])
+                                      for a in POWER_ACTIONS] +
+                                     [app_commands.Choice(name="Restart with a warning in game chat", value=WARNED)])
         async def server_power(interaction: discord.Interaction, server: str, action: str) -> None:
             await self.server_power(interaction, server, action)
+
+        @group.command(name="power-all", description="Start, stop or restart every server, or every server "
+                                                     "with an AMP tag (operators)")
+        @app_commands.describe(action="What to do", tag="Only servers with this tag in AMP")
+        @app_commands.choices(action=[app_commands.Choice(name=a.value.capitalize(), value=a.value)
+                                      for a in POWER_ACTIONS])
+        async def power_all(interaction: discord.Interaction, action: str, tag: str | None = None) -> None:
+            await self.power_all(interaction, action, tag)
 
         @group.command(name="send", description="Send a console command or a chat message to a server (operators)")
         @app_commands.describe(server="The game server", text="One line to send",
