@@ -246,3 +246,35 @@ async def test_discord_sink_disables_mentions_and_fetches_unknown_channels() -> 
 
 def test_escape() -> None:
     assert escape("a_b*c @everyone [x](http://y)") == r"a\_b\*c @" + "​" + r"everyone \[x\]\(http://y\)"
+
+
+async def test_listeners_get_events_and_chat_and_follow_all() -> None:
+    from portcullis.core.relay import ChatLine
+
+    port, sink = FakeAmpPort(), RecordingSink()
+    sid = port.add_server("3" * 32, "Survival")
+    seen: list[ServerEvent] = []
+
+    async def listener(event: ServerEvent) -> None:
+        seen.append(event)
+
+    async def broken(event: ServerEvent) -> None:
+        raise RuntimeError("listener bug")
+
+    def parse(event: ConsoleLine) -> tuple[str, str] | None:
+        return ("Alice", event.text[5:]) if event.text.startswith("chat ") else None
+
+    relay = Relay(port, sink, flush_interval=3600, follow_all=True, hooks=lambda game: GameHooks(chat=parse))
+    relay.listeners += [broken, listener]
+    await relay.apply([target(sid)])  # no channels, followed anyway
+    await settle()
+    port.say(sid, "chat hi")
+    port.emit(line(sid, "agent noise", stream="agent"))
+    port.join(sid, "Bob")
+    await settle()
+    kinds = [type(e).__name__ for e in seen]
+    assert kinds == ["ConsoleLine", "ChatLine", "PlayerJoined"]
+    assert isinstance(seen[1], ChatLine) and (seen[1].player, seen[1].text) == ("Alice", "hi")
+    await relay.flush()
+    assert sink.sent == []
+    await relay.close()

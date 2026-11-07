@@ -1,25 +1,29 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""``PortcullisBot``: the discord.py client that owns the command tree and the relay."""
+"""``PortcullisBot``: the discord.py client that owns the commands, the relay and the profile status."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import logging
+import time
 from collections.abc import Callable
 
 import discord
 from discord import app_commands
 
-from portcullis.bot.commands import Access, Commands, register
+from portcullis.bot.base import Access, Ctx
+from portcullis.bot.commands import DYNAMIC_ITEMS, Modules
+from portcullis.core.live import LinkVerifier, LiveState, PlayerTracker
 from portcullis.core.port import AmpPort
 from portcullis.core.relay import GameHooks, Relay, RelayTarget, no_hooks
 from portcullis.db.database import Database
-from portcullis.db.repos import AuditRepo, ServerRepo
 
 log = logging.getLogger(__name__)
 
-REFRESH_EVERY = 300.0  # seconds between re-reading AMP's server list
+REFRESH_EVERY = 300.0  # seconds between re-reading AMP's server list and states
+PRESENCE_EVERY = 15.0  # at most one profile status change this often (Discord rate-limits presence)
+STATUS_TIMEOUT = 8.0
 
 
 def intents() -> discord.Intents:
@@ -57,25 +61,36 @@ class PortcullisBot(discord.Client):
         super().__init__(intents=intents(), allowed_mentions=discord.AllowedMentions.none())
         self.port = port
         self.guild_id = guild_id
-        self.servers = ServerRepo(db)
-        self.audit = AuditRepo(db)
-        self.relay = Relay(port, DiscordSink(self), hooks=hooks)
         self.refresh_every = refresh_every
+        self.live = LiveState(on_change=self.update_presence)
+        self.ctx = Ctx(port, db, access, guild_id, live=self.live, on_relay_changed=self.apply_relays,
+                       has_chat=lambda game: hooks(game).chat is not None, client=self)
+        self.servers = self.ctx.servers
+        self.audit = self.ctx.audit
+        self.modules = Modules(self.ctx)
+        self.relay = Relay(port, DiscordSink(self), hooks=hooks, follow_all=True)
+        self.relay.listeners += [
+            self.live,
+            PlayerTracker(self.ctx.players),
+            LinkVerifier(self.ctx.links, self.ctx.users, on_linked=self.modules.community.on_linked),
+        ]
         self.tree = app_commands.CommandTree(self)
-        self.commands = Commands(
-            port, self.servers, self.audit, access, guild_id=guild_id,
-            on_relay_changed=self.apply_relays,
-            has_chat_pattern=lambda game: hooks(game).chat is not None,
-        )
-        register(self.tree, self.commands)
+        self.modules.register(self.tree)
         self._refresher: asyncio.Task[None] | None = None
+        self._presence_text: str | None = None
+        self._presence_at = 0.0
+        self._presence_pending: asyncio.Task[None] | None = None
 
     async def setup_hook(self) -> None:
+        self.add_dynamic_items(*DYNAMIC_ITEMS)
         guild = discord.Object(id=self.guild_id)
         self.tree.copy_global_to(guild=guild)
         self.tree.clear_commands(guild=None)
         await self.tree.sync(guild=guild)  # guild commands show up at once
         await self.tree.sync()  # removes any global copies an older build registered
+        closed = await self.ctx.players.close_all()  # sessions still open from before a restart
+        if closed:
+            log.info("closed %d player session(s) left open by the last run", closed)
         await self.refresh()
         self._refresher = asyncio.create_task(self._refresh_loop(), name="portcullis-refresh")
 
@@ -84,16 +99,37 @@ class PortcullisBot(discord.Client):
         if self.get_guild(self.guild_id) is None:
             log.warning("Portcullis is not in the Discord server set in DISCORD_GUILD_ID (%s). "
                         "Invite it with the URL from docs/SETUP.md.", self.guild_id)
+        self._presence_text = None  # a reconnect clears the presence; set it again
+        await self.update_presence()
+
+    # ---------------------------------------------------------------- refresh
 
     async def refresh(self) -> None:
-        """Sync the server table with AMP, then follow the servers that have relay channels."""
+        """Sync servers with AMP, poll their states for the profile status, follow them, close due polls."""
         try:
             new, gone = await self.servers.sync(await self.port.list_servers())
             if new or gone:
                 log.info("servers: %d new, %d gone", len(new), len(gone))
+            await self.live.set_reachable(True)
         except Exception as exc:  # noqa: BLE001 - keep running on the last known list
             log.warning("could not read the server list from AMP: %s", exc)
+            await self.live.set_reachable(False)
+        await self._seed_live()
         await self.apply_relays()
+        with contextlib.suppress(Exception):
+            await self.modules.polls.close_due()
+
+    async def _seed_live(self) -> None:
+        rows = await self.servers.list(include_hidden=False)
+
+        async def one(shard_id: str):  # noqa: ANN202
+            try:
+                return await asyncio.wait_for(self.port.get_status(shard_id), STATUS_TIMEOUT)
+            except Exception:  # noqa: BLE001
+                return None
+
+        statuses = await asyncio.gather(*(one(r.shard_id) for r in rows))
+        await self.live.seed([s for s in statuses if s is not None], [r.shard_id for r in rows])
 
     async def apply_relays(self) -> None:
         rows = await self.servers.list()
@@ -108,11 +144,46 @@ class PortcullisBot(discord.Client):
             await asyncio.sleep(self.refresh_every)
             await self.refresh()
 
+    # ---------------------------------------------------------------- profile status
+
+    def presence(self) -> tuple[discord.Status, discord.BaseActivity]:
+        summary = self.live.summary()
+        status = discord.Status.online if summary.reachable else discord.Status.idle
+        return status, discord.CustomActivity(name=summary.text())
+
+    async def update_presence(self) -> None:
+        """Show the summary on the bot's profile, at most once per PRESENCE_EVERY seconds."""
+        if self._presence_pending is not None and not self._presence_pending.done():
+            return  # a change is already scheduled and will pick up the latest summary
+        wait = self._presence_at + PRESENCE_EVERY - time.monotonic()
+        if wait > 0:
+            self._presence_pending = asyncio.create_task(self._presence_later(wait), name="portcullis-presence")
+            return
+        await self._apply_presence()
+
+    async def _presence_later(self, wait: float) -> None:
+        await asyncio.sleep(wait)
+        await self._apply_presence()
+
+    async def _apply_presence(self) -> None:
+        status, activity = self.presence()
+        text = f"{status}:{activity.name}"
+        if text == self._presence_text or not self.is_ready():
+            return
+        try:
+            await self.change_presence(status=status, activity=activity)
+        except Exception as exc:  # noqa: BLE001 - cosmetic; never let it break anything
+            log.debug("could not set the profile status: %s", exc)
+            return
+        self._presence_text = text
+        self._presence_at = time.monotonic()
+
     async def close(self) -> None:
-        if self._refresher is not None:
-            self._refresher.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._refresher
-            self._refresher = None
+        for task in (self._refresher, self._presence_pending):
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        self._refresher = None
         await self.relay.close()
         await super().close()
