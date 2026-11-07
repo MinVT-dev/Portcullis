@@ -20,7 +20,7 @@ async def test_recorder_writes_redacted_capture(fake: FakeAmp, base_url: str, tm
     args = argparse.Namespace(
         url=base_url, username=USERNAME, shard=[], extra_hub=[], mode="auto", duration=3.0,
         out=tmp_path, env_file=tmp_path / "missing.env", keep_host=False, keep_ips=False,
-        quiet=True, verbose=False,
+        quiet=True, verbose=False, join_attempts=3, no_inspect=False,
     )
     task = asyncio.create_task(record_events.run(args))
     await wait_for(lambda: len(fake.joined) == 1)
@@ -41,7 +41,53 @@ async def test_recorder_writes_redacted_capture(fake: FakeAmp, base_url: str, tm
     assert not [s for s in secrets if s in everything]
 
     lifecycle = [json.loads(line)["event"] for line in (capture / "lifecycle.jsonl").read_text().splitlines()]
-    assert lifecycle[0] == "probe-ok"
+    assert lifecycle.index("probe-ok") < lifecycle.index("connected")
     assert lifecycle.count("connected") == 2 and lifecycle.count("joined") == 2
     summary = (capture / "summary.txt").read_text()
     assert "shard:UserJoined: 1" in summary and "mode: direct" in summary
+
+
+def recorder_args(base_url: str, tmp_path: Path, **kw) -> argparse.Namespace:
+    values = dict(url=base_url, username=USERNAME, shard=[], extra_hub=[], mode="auto", duration=3.0,
+                  out=tmp_path, env_file=tmp_path / "missing.env", keep_host=False, keep_ips=False,
+                  quiet=True, verbose=False, join_attempts=3, no_inspect=False)
+    values.update(kw)
+    return argparse.Namespace(**values)
+
+
+def lifecycle_of(capture: Path) -> list[dict]:
+    return [json.loads(line) for line in (capture / "lifecycle.jsonl").read_text().splitlines()]
+
+
+async def test_recorder_gives_up_when_join_always_fails(fake: FakeAmp, base_url: str, tmp_path: Path,
+                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AMP_PASSWORD", PASSWORD)
+    fake.join_error = "Failed to invoke 'JoinShard' due to an error on the server."
+    code = await asyncio.wait_for(record_events.run(recorder_args(base_url, tmp_path, duration=None)), 10)
+    assert code == 3
+
+    capture = next(tmp_path.iterdir())
+    records = lifecycle_of(capture)
+    kinds = [r["event"] for r in records]
+    assert kinds.count("join-failed") == 3 and kinds.count("gave-up") == 1
+    failed = next(r for r in records if r["event"] == "join-failed")
+    assert failed["shard"] == SHARD_ID and failed["arguments"] == [SHARD_ID]
+    assert failed["state"] == "online" and "error on the server" in failed["error"]
+
+    # The alternative argument shapes are tried once, and their errors kept.
+    variants = {r["variant"]: r for r in records if r["event"].startswith("join-variant")}
+    assert set(variants) == {v for v, _ in record_events.JOIN_VARIANTS}
+    assert "expects 1" in variants["two arguments"]["error"]
+    assert "Error binding" in variants["object {shardId}"]["error"]
+
+    panel = (capture / "panel_hub_calls.txt").read_text()
+    assert "invoke('JoinShard', shardId)" in panel
+
+
+async def test_recorder_rejects_unknown_shard(fake: FakeAmp, base_url: str, tmp_path: Path,
+                                              monkeypatch: pytest.MonkeyPatch,
+                                              capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv("AMP_PASSWORD", PASSWORD)
+    code = await record_events.run(recorder_args(base_url, tmp_path, shard=["0000"]))
+    assert code == 1
+    assert "can't see shard 0000" in capsys.readouterr().out

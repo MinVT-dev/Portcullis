@@ -11,7 +11,7 @@ import aiohttp
 import pytest
 
 from portcullis.amp.auth import TokenManager
-from portcullis.amp.signalr import HubConnection, HubEvent, Mode, decode_frame, encode
+from portcullis.amp.signalr import HubConnection, HubEvent, HubGaveUp, Mode, decode_frame, encode
 from tests.fakes.amp_server import SHARD_ID, FakeAmp, wait_for
 
 
@@ -158,3 +158,20 @@ async def test_events_iterator(base_url: str, session: aiohttp.ClientSession, to
             break
     await producer
     assert not conn.connected
+
+
+async def test_repeated_join_failure_gives_up(make_hub, fake: FakeAmp) -> None:
+    fake.join_error = "Failed to invoke 'JoinShard' due to an error on the server."
+    h = make_hub(join_attempts=3)
+    with pytest.raises(HubGaveUp, match="3 identical join failures"):
+        await asyncio.wait_for(h.task, 5)
+    assert len(fake.join_attempts) == 3
+    assert h.conn.tickets_used == 3
+    assert [k for k, _ in h.lifecycle].count("gave-up") == 1
+
+
+async def test_join_failure_retries_forever_by_default(make_hub, fake: FakeAmp) -> None:
+    fake.join_error = "boom"
+    h = make_hub()
+    await wait_for(lambda: len(fake.join_attempts) >= 5)
+    assert not h.task.done()

@@ -52,6 +52,14 @@ class HubError(AmpError):
     """The hub refused the connection or an invocation failed."""
 
 
+class JoinFailed(HubError):
+    """``on_connected`` (joining groups such as shards) failed on a connection that was otherwise fine."""
+
+
+class HubGaveUp(HubError):
+    """The same join failure repeated ``join_attempts`` times, so reconnecting will not fix it."""
+
+
 class HubClosed(HubError):
     """The connection ended. ``allow_reconnect`` mirrors the server's Close message."""
 
@@ -112,6 +120,7 @@ class HubConnection:
         invoke_timeout: float = 30.0,
         backoff: tuple[float, ...] = (0, 2, 5, 10, 30, 60),
         stable_after: float = 60.0,
+        join_attempts: int | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.hub = hub
@@ -128,6 +137,7 @@ class HubConnection:
         self.invoke_timeout = invoke_timeout
         self.backoff = backoff
         self.stable_after = stable_after
+        self.join_attempts = join_attempts
 
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._pending: dict[str, asyncio.Future[Any]] = {}
@@ -301,7 +311,12 @@ class HubConnection:
                 joined = asyncio.create_task(self._on_connected(self))
                 done, _ = await asyncio.wait({joined, reader}, return_when=asyncio.FIRST_COMPLETED)
                 if joined in done:
-                    joined.result()  # raise if joining failed
+                    try:
+                        joined.result()
+                    except (AuthFailed, LoginNotSupported, HubClosed, JoinFailed):
+                        raise
+                    except Exception as exc:  # noqa: BLE001 - reported as a join failure
+                        raise JoinFailed(str(exc)) from exc
                 else:
                     joined.cancel()
             await reader
@@ -319,6 +334,8 @@ class HubConnection:
         """Stay connected until ``close()`` is called. Each attempt uses a brand-new hub ticket."""
         self._stopping = False
         failures = 0
+        same_join_failures = 0
+        last_join_error: str | None = None
         while not self._stopping:
             try:
                 await self._session_once(handler)
@@ -330,6 +347,15 @@ class HubConnection:
                 if self._stopping:
                     break
                 self.last_error = self.redactor.text(str(exc))
+                if isinstance(exc, JoinFailed):
+                    same_join_failures = same_join_failures + 1 if self.last_error == last_join_error else 1
+                    last_join_error = self.last_error
+                    if self.join_attempts is not None and same_join_failures >= self.join_attempts:
+                        self._lifecycle("gave-up", error=self.last_error, attempts=same_join_failures)
+                        raise HubGaveUp(f"gave up after {same_join_failures} identical join failures: "
+                                        f"{self.last_error}") from exc
+                else:
+                    same_join_failures, last_join_error = 0, None
                 lasted = time.monotonic() - self.connected_since if self.connected_since else 0.0
                 if lasted >= self.stable_after:
                     failures = 0
