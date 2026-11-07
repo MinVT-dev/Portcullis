@@ -25,6 +25,8 @@ SVG is the source. Upload-ready PNGs are in [`png/`](png/).
 | [portcullis-discord-banner.svg](portcullis-discord-banner.svg) | 1360×480 | The bot's Discord profile banner (680×240 at 2×). The left third stays plain, because the avatar sits there. |
 | [portcullis-logo.svg](portcullis-logo.svg) / [-dark](portcullis-logo-dark.svg) | 1200 wide | The mark and wordmark together, for dark and light backgrounds. |
 | [portcullis-mark.svg](portcullis-mark.svg) / [-dark](portcullis-mark-dark.svg) | 512×512 | The mark on its own, with a transparent background. |
+| [portcullis-game-banner.svg](portcullis-game-banner.svg) | 920×430 | Placeholder banner for a game with no art of its own. The PNG is `portcullis/assets/fallback/game-banner.png`; see [GAME_ASSETS.md](../GAME_ASSETS.md). |
+| [portcullis-game-logo.svg](portcullis-game-logo.svg) | 512×512 | Placeholder logo for a game with no art of its own (`portcullis/assets/fallback/game-logo.png`). |
 
 [`generate.py`](generate.py) rebuilds every SVG: `python3 generate.py OUT_DIR FONT_DIR` (it needs `fonttools` and `brotli`). FONT_DIR holds Exo 2 Bold and Roboto Regular from Google Fonts as `exo2.woff2` and `roboto.woff2`. All text is converted to outlines, so the SVGs look the same everywhere and don't need the fonts installed.
 

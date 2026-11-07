@@ -9,7 +9,8 @@ import pytest
 from portcullis.config import ConfigError, load, parse_env_file, setup_logging
 
 GOOD = {"AMP_URL": "http://192.168.1.10:8443/", "AMP_USERNAME": "portcullis",
-        "AMP_PASSWORD": "s3cret-pass-word", "DISCORD_TOKEN": "discord-token-value"}
+        "AMP_PASSWORD": "s3cret-pass-word", "DISCORD_TOKEN": "discord-token-value",
+        "DISCORD_GUILD_ID": "123456789012345678"}
 
 
 def test_valid_settings() -> None:
@@ -24,7 +25,7 @@ def test_reports_every_problem_without_echoing_secrets() -> None:
               "PORTCULLIS_OWNER_IDS": "123, abc", "PORTCULLIS_LOG_LEVEL": "loud"}, env_file=None)
     text = str(info.value)
     for needle in ("AMP_URL must start", "AMP_USERNAME is missing", "DISCORD_TOKEN is missing",
-                   "'abc' is not a number", "PORTCULLIS_LOG_LEVEL"):
+                   "'abc' is not a number", "PORTCULLIS_LOG_LEVEL", "DISCORD_GUILD_ID is missing"):
         assert needle in text
     assert "s3cret" not in text
 

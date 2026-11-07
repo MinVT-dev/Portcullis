@@ -233,6 +233,13 @@ body = backdrop(680, 240, "d", 470, 110)
 body += f'<g transform="translate({680 - lw - 48:.1f} 52)">{lk}</g>'
 files["portcullis-discord-banner.svg"] = svg(680, 240, "Portcullis Discord profile banner", body)
 
+# Fallbacks for games with no art of their own (see docs/GAME_ASSETS.md). No text, so one
+# image serves every game; the embed title carries the game's name. The banner is a Steam
+# header at 2x (920x430), so a fallback sits the same size as real game banners in embeds.
+body = backdrop(920, 430, "gb", 460, 215) + place(mark("gb"), 460 - 110, 215 - 118, 220)
+files["portcullis-game-banner.svg"] = svg(920, 430, "Game banner placeholder", body)
+files["portcullis-game-logo.svg"] = svg(512, 512, "Game logo placeholder", icon("gl", light=GREY))
+
 for name, content in files.items():
     (OUT / name).write_text(content)
 print("written", sorted(files))

@@ -32,6 +32,8 @@ class Settings:
     amp_password: str = field(repr=False)
     discord_token: str | None = field(default=None, repr=False)
     owner_ids: tuple[int, ...] = ()
+    guild_id: int | None = None  # the Discord server slash commands are registered in
+    operator_role_ids: tuple[int, ...] = ()  # Discord roles allowed to start, stop and restart servers
     database: Path = Path("data/portcullis.db")
     log_level: str = "INFO"
 
@@ -100,13 +102,29 @@ def load(
     if require_discord and not token:
         problems.append("DISCORD_TOKEN is missing. Copy it from the Discord developer portal (Bot tab).")
 
-    owner_ids: list[int] = []
-    for part in filter(None, (p.strip() for p in get("PORTCULLIS_OWNER_IDS").split(","))):
-        if part.isdigit():
-            owner_ids.append(int(part))
+    def id_list(name: str, what: str) -> list[int]:
+        ids: list[int] = []
+        for part in filter(None, (p.strip() for p in get(name).split(","))):
+            if part.isdigit():
+                ids.append(int(part))
+            else:
+                problems.append(f"{name} must be Discord {what} ids separated by commas; {part!r} is not a number.")
+        return ids
+
+    owner_ids = id_list("PORTCULLIS_OWNER_IDS", "user")
+    operator_role_ids = id_list("PORTCULLIS_OPERATOR_ROLE_IDS", "role")
+
+    guild_id: int | None = None
+    raw_guild = get("DISCORD_GUILD_ID")
+    if require_discord and not raw_guild:
+        problems.append("DISCORD_GUILD_ID is missing. Portcullis serves one Discord server: right-click its "
+                        "icon and Copy Server ID (turn on Developer Mode in Discord's Advanced settings first).")
+    elif raw_guild:
+        if raw_guild.isdigit():
+            guild_id = int(raw_guild)
         else:
-            problems.append(f"PORTCULLIS_OWNER_IDS must be Discord user ids separated by commas; "
-                            f"{part!r} is not a number.")
+            problems.append("DISCORD_GUILD_ID must be the numeric id of your Discord server "
+                            "(right-click the server icon, Copy Server ID).")
 
     level = (get("PORTCULLIS_LOG_LEVEL") or "INFO").upper()
     if level not in LOG_LEVELS:
@@ -122,6 +140,8 @@ def load(
         amp_password=password,
         discord_token=token,
         owner_ids=tuple(owner_ids),
+        guild_id=guild_id,
+        operator_role_ids=tuple(operator_role_ids),
         database=database,
         log_level=level,
     )
