@@ -182,16 +182,34 @@ If a setting is missing it lists every problem and stops. Otherwise it logs in t
 
 ### 8.4 Commands
 
-| Command | Who can use it | What it does |
+Three levels: **everyone** in the server; **operators** (members with a role in `PORTCULLIS_OPERATOR_ROLE_IDS`); **admins** (members with **Manage Server**). Owners (`PORTCULLIS_OWNER_IDS`) can do everything. Replies are only visible to you unless the table says otherwise.
+
+| Command | Who | What it does |
 |---|---|---|
-| `/server list` | everyone | Every server with its state and player count. Only you see the reply. |
-| `/server status <server>` | everyone | One server: state, players and who is online, CPU and memory. |
-| `/server power <server> <start\|stop\|restart>` | owners and operator roles | Asks AMP to start, stop or restart. The reply is public, so the channel sees who did it. |
-| `/setup relay <server> <console\|events\|chat> [channel]` | owners and members with **Manage Server** | Posts that server's live console lines, events (joins, leaves, state changes) or chat in a channel. Leave out the channel to stop. |
+| `/server list` | everyone | Every server with its state and player count. |
+| `/server status <server>` | everyone | State, players, CPU and memory. Operators also get Start, Stop and Restart buttons. |
+| `/server power <server> <start\|stop\|restart>` | operators | Asks AMP to start, stop or restart. The reply is public, so the channel sees who did it. |
+| `/server send <server> <text> [as]` | operators | Sends one console command, or a chat message if the server has a chat command set (8.6). Only the command word is logged, never its arguments. |
+| `/backups <server>` | operators | Lists the server's backups. Making and deleting backups from Discord comes later. |
+| `/whitelist request <server> [name]` | everyone | Asks the operators to whitelist you. Without `name`, your linked name is used. |
+| `/whitelist add\|remove <server> <name>` | operators | Runs the server's whitelist command (8.6). |
+| `/link [server] [name]` | everyone | Without options: your linked names. With both: gives you a code to type in game chat, which proves the name is yours. Only for games whose chat Portcullis can read. |
+| `/player lookup <name>` | everyone | When a player was last seen, total play time and servers. |
+| `/player top [server]` | everyone | Most play time. |
+| `/poll create <question> <options> [hours]` | operators | Posts a poll with a button per answer (separate answers with `;`). Each member has one vote and can change it. It closes after `hours`, or with its Close button. |
+| `/poll list` | operators | Open polls, with links. |
+| `/user <member>`, or right-click a member → **Apps → Portcullis user** | operators | Linked names, flags and recent actions, with buttons to mark them as a donator, block them from whitelist requests, or remove their links. |
+| `/setup relay`, `/setup server <server>`, `/setup bot` | admins | Relay channels, per-server settings, and bot-wide settings (8.6). |
+| `/audit [member] [server] [action] [result] [export]` | admins | Who did what through Portcullis, refused attempts included. `export` sends it all as a JSON file. |
+| `/admin diagnostics` | admins | Checks the connection to AMP and every server, and shows the relays and the bot's status. A server line with a 403 names the AMP permission the bot lacks. |
+| `/admin export` / `/admin import <file>` | admins | Download all Portcullis settings as a file, and restore them. Gatekeeper V3 databases can't be imported yet. |
+| `/help` | everyone | Lists the commands you can use. |
 
-Every power action and relay change, including refused attempts, is written to the audit table in the database. Servers you hide are left out of lists for members (there is no command to hide one yet).
+Not built yet: `/schedule` (needs AMP's scheduler checked against a real panel), `/alert` (no triggers decided), and making or deleting backups (AMP's API doesn't say which snapshot type numbers to send).
 
-Discord's **Server Settings → Integrations → Portcullis** can narrow further who sees each command. It can't widen the bot's own checks: a member without an operator role is still refused.
+Discord's **Server Settings → Integrations → Portcullis** can narrow further who sees each command. It can't widen the bot's own checks.
+
+**Profile status.** The bot's profile shows a live summary such as `2/4 servers online · 5 players`, updated as servers start and stop and players come and go (at most every 15 seconds). Hidden servers aren't counted. If AMP can't be reached, the bot shows as idle with `Can't reach AMP`.
 
 ### 8.5 Relays
 
@@ -202,6 +220,18 @@ Run `/setup relay` once per server and kind. One channel can take several kinds,
 - **Chat** is **off for every game** until Portcullis knows how that game writes chat to its console. AMP 3 has no chat event, so chat is read from console lines with a per-game pattern taken from a real capture. Setting a chat channel for a game without a pattern is allowed, and the bot says nothing will appear yet.
 
 Mentions never ping: everything the bot posts has `@everyone`, `@here`, user and role mentions turned off, and player names and chat are escaped so they can't format text or hide links.
+
+### 8.6 Server and bot settings
+
+`/setup server <server>` opens a panel for one server:
+
+- three channel pickers for the console, events and chat relays, and a **Stop all relays** button;
+- **Name and visibility**: the name shown in Discord, a short prefix, and whether members can see the server at all;
+- **Game commands**: the console commands Portcullis sends for that game, with `{name}` or `{message}` where the player name or text goes. Examples: `whitelist add {name}`, `whitelist remove {name}`, `say {message}`. Each game has its own; check its console help. Whitelist commands and `/server send ... as:chat` stay off for a server until these are filled in.
+
+`/setup bot` sets the channel where whitelist requests appear, with Approve and Deny buttons for operators. Until a channel is set, whitelist requests are off. The requester gets a direct message with the decision, if they allow messages from server members.
+
+Player names are checked before they go into a console command: names with line breaks or characters such as `;`, `|`, `&`, quotes or `$` are refused, so a name can't add a second command.
 
 ## 9. Check a new AMP build's API (spec-diff)
 
@@ -230,7 +260,9 @@ It lists breaking, changed and added API operations against the spec Portcullis 
 
 ## 11. Known gaps
 
-- **The bot is a first slice.** It has four commands. Backups, whitelist, linking, console commands from Discord and the `/setup` panel from [DESIGN.md](DESIGN.md) are still to come, and it hasn't run against a real Discord server and AMP panel together yet.
+- **Not every planned command exists.** `/schedule`, `/alert` and making or deleting backups are still to come (see 8.4).
+- **Play time starts now.** `/player` only knows what the bot has seen since it started recording. Sessions still open when the bot stops are closed at its next start, so a long restart can count a little extra time.
+- **Leaves are not verified.** AMP's player-left event hasn't been captured yet for any game; if it never arrives, a player's session ends when the server stops.
 - **Untested against a real AMP 3.** Everything has been tested against a fake AMP built from the API docs. Not yet checked against a real panel: whether login and the live hub work as the docs say, which connection mode works, whether joining a shard's events succeeds, what the event payloads really look like, and whether the generated models accept real responses. The recorder exists to answer these questions.
 - **Event parsing is provisional.** Until a capture exists, player join, leave and console events are parsed from guessed shapes.
 - **One AMP preview build.** Portcullis is built against AMP 3.0.0.6, which expires on 7 Dec 2026. A newer build may change the API; run spec-diff on it first.
@@ -255,6 +287,8 @@ It lists breaking, changed and added API operations against the spec Portcullis 
 | `Discord refused the bot token` | The token was reset or mistyped. Reset it on the Bot tab and paste the new one. |
 | The slash commands don't appear | Check the bot is in the server set in `DISCORD_GUILD_ID` (the log warns if not), then press Ctrl+R in Discord. Commands only exist in that server. |
 | `Portcullis only works in the Discord server it was set up for` | The command was used in another server. Use it in the one from `DISCORD_GUILD_ID`. |
+| The profile shows no status | It appears a few seconds after the bot logs in. It is shown as a custom status, under the bot's name in the member list. |
+| A whitelist approval says AMP didn't take the command | Check the server's whitelist command in `/setup server`, and that the game is running. The request stays approved; add the name by hand. |
 | Nothing appears in a relay channel | Check the bot can see and post in it, that the server is running, and that something is happening (console lines, a player joining). For chat, see section 8.5. Warnings in the bot's log say if a post failed. |
 | PowerShell: "running scripts is disabled" | Only happens if you use `Activate.ps1`. Use `.\.venv\Scripts\python.exe` as shown, or see step 3. |
 | `py` not found | Python isn't installed, or wasn't added to PATH. Reinstall it with "Add python.exe to PATH" ticked. |

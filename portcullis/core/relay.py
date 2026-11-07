@@ -23,7 +23,7 @@ import contextlib
 import logging
 import re
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -59,6 +59,17 @@ STATE_ICONS = {
 class Sink(Protocol):
     async def send(self, channel_id: int, text: str) -> None: ...
 
+
+@dataclass(frozen=True)
+class ChatLine(ServerEvent):
+    """In-game chat, parsed from a console line by the game's hooks. Passed to listeners only."""
+
+    player: str
+    text: str
+
+
+# Called with every event of a followed server (after the game's drop filter), plus ChatLine.
+Listener = Callable[[ServerEvent], Awaitable[None]]
 
 ChatParser = Callable[[ConsoleLine], "tuple[str, str] | None"]  # line -> (player, text)
 LineFilter = Callable[[ConsoleLine], bool]  # True drops the line
@@ -183,6 +194,7 @@ class Relay:
         max_pending: int = 200,
         retry_min: float = 1.0,
         retry_max: float = 60.0,
+        follow_all: bool = False,
     ) -> None:
         self.port = port
         self.sink = sink
@@ -196,6 +208,8 @@ class Relay:
         self._buffers: dict[int, ChannelBuffer] = {}
         self._senders: dict[int, asyncio.Task[None]] = {}
         self._last_state: dict[ServerId, ServerState] = {}
+        self.follow_all = follow_all  # follow servers without relay channels too, for the listeners
+        self.listeners: list[Listener] = []
 
     @property
     def targets(self) -> dict[ServerId, RelayTarget]:
@@ -203,7 +217,7 @@ class Relay:
 
     async def apply(self, targets: list[RelayTarget]) -> None:
         """Follow exactly these servers. Unchanged targets keep their connection."""
-        wanted = {t.server: t for t in targets if t.active}
+        wanted = {t.server: t for t in targets if t.active or self.follow_all}
         for sid in list(self._targets):
             if wanted.get(sid) != self._targets[sid]:
                 await self._stop(sid)
@@ -233,20 +247,33 @@ class Relay:
 
     # -------------------------------------------------------------------------- events -> lines
 
+    def interpret(self, event: ServerEvent, hooks: GameHooks) -> list[ServerEvent]:
+        """Filter one raw event and add the chat it carries. An empty list means drop it."""
+        if not isinstance(event, ConsoleLine):
+            return [event]
+        if event.stream != "main" or event.kind != "line" or not event.text.strip():
+            return []
+        if hooks.drop is not None and hooks.drop(event):
+            return []
+        chat = hooks.chat(event) if hooks.chat is not None else None
+        if chat is None:
+            return [event]
+        return [event, ChatLine(server=event.server, at=event.at, player=chat[0], text=chat[1])]
+
     def render(self, target: RelayTarget, event: ServerEvent, hooks: GameHooks) -> list[tuple[int, Kind, str]]:
         out: list[tuple[int, Kind, str]] = []
-        if isinstance(event, ConsoleLine):
-            if event.stream != "main" or event.kind != "line" or not event.text.strip():
-                return out
-            if hooks.drop is not None and hooks.drop(event):
-                return out
+        for item in self.interpret(event, hooks):
+            out += self._render_one(target, item)
+        return out
+
+    def _render_one(self, target: RelayTarget, event: ServerEvent) -> list[tuple[int, Kind, str]]:
+        out: list[tuple[int, Kind, str]] = []
+        if isinstance(event, ChatLine):
+            if target.chat_channel:
+                out.append((target.chat_channel, "text", f"💬 **{escape(event.player)}**: {escape(event.text)}"))
+        elif isinstance(event, ConsoleLine):
             if target.console_channel:
                 out.append((target.console_channel, "console", console_safe(event.text)))
-            if target.chat_channel and hooks.chat is not None:
-                chat = hooks.chat(event)
-                if chat is not None:
-                    player, text = chat
-                    out.append((target.chat_channel, "text", f"💬 **{escape(player)}**: {escape(text)}"))
         elif isinstance(event, PlayerJoined | PlayerLeft) and target.event_channel:
             verb, icon = ("joined", "➡️") if isinstance(event, PlayerJoined) else ("left", "⬅️")
             out.append((target.event_channel, "text",
@@ -268,8 +295,10 @@ class Relay:
             try:
                 async for event in events:
                     delay = self.retry_min
-                    for channel, kind, text in self.render(target, event, hooks):
-                        self._buffer(channel).add(kind, text)
+                    for item in self.interpret(event, hooks):
+                        for channel, kind, text in self._render_one(target, item):
+                            self._buffer(channel).add(kind, text)
+                        await self._tell(item)
                 log.info("event stream for %s ended; reconnecting", target.name)
             except asyncio.CancelledError:
                 raise
@@ -282,6 +311,13 @@ class Relay:
                         await aclose()
             await asyncio.sleep(delay)
             delay = min(delay * 2, self.retry_max)
+
+    async def _tell(self, event: ServerEvent) -> None:
+        for listener in self.listeners:
+            try:
+                await listener(event)
+            except Exception:  # noqa: BLE001 - a listener bug must not stop the relay
+                log.exception("relay listener failed on %s", type(event).__name__)
 
     # -------------------------------------------------------------------------- sending
 

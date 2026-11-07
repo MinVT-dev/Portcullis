@@ -18,6 +18,11 @@ class FakeMember:
     id: int
     roles: list[FakeRole] = field(default_factory=list)
     manage_guild: bool = False
+    display_name: str = "member"
+    dms: list[str] = field(default_factory=list)
+
+    async def send(self, content: str, **kwargs: Any) -> None:
+        self.dms.append(content)
 
     @property
     def guild_permissions(self) -> SimpleNamespace:
@@ -41,8 +46,22 @@ class FakeChannel:
     def permissions_for(self, member: Any) -> SimpleNamespace:
         return SimpleNamespace(view_channel=self.can_post, send_messages=self.can_post)
 
-    async def send(self, content: str, **kwargs: Any) -> None:
+    async def send(self, content: str | None = None, **kwargs: Any) -> SimpleNamespace:
         self.sent.append({"content": content, **kwargs})
+        return SimpleNamespace(id=len(self.sent))
+
+    async def fetch_message(self, message_id: int) -> FakeMessage:
+        return FakeMessage(self, message_id)
+
+
+@dataclass
+class FakeMessage:
+    channel: FakeChannel
+    id: int
+    edits: list[dict[str, Any]] = field(default_factory=list)
+
+    async def edit(self, **kwargs: Any) -> None:
+        self.channel.sent.append({"edit": self.id, **kwargs})
 
 
 class FakeResponse:
@@ -63,6 +82,16 @@ class FakeResponse:
         self._done = True
         self._i.deferred = kwargs
 
+    async def edit_message(self, **kwargs: Any) -> None:
+        assert not self._done, "responded twice"
+        self._done = True
+        self._i.edits.append(kwargs)
+
+    async def send_modal(self, modal: Any) -> None:
+        assert not self._done, "responded twice"
+        self._done = True
+        self._i.modal = modal
+
 
 class FakeFollowup:
     def __init__(self, interaction: FakeInteraction) -> None:
@@ -74,10 +103,14 @@ class FakeFollowup:
 
 
 class FakeInteraction:
-    def __init__(self, user: FakeMember, *, guild_id: int | None = 1) -> None:
+    def __init__(self, user: FakeMember, *, guild_id: int | None = 1, channel_id: int = 55) -> None:
         self.user = user
         self.guild_id = guild_id
-        self.guild = SimpleNamespace(id=guild_id, me=FakeMember(id=999)) if guild_id else None
+        self.channel_id = channel_id
+        self.guild = SimpleNamespace(id=guild_id, me=FakeMember(id=999), get_channel=lambda cid: None) \
+            if guild_id else None
+        self.edits: list[dict[str, Any]] = []
+        self.modal: Any = None
         self.response = FakeResponse(self)
         self.followup = FakeFollowup(self)
         self.replies: list[dict[str, Any]] = []
@@ -92,6 +125,12 @@ class FakeInteraction:
     def embed(self) -> Any:
         return self.replies[-1].get("embed")
 
+    async def original_response(self) -> SimpleNamespace:
+        return SimpleNamespace(id=4242)
+
+    async def edit_original_response(self, **kwargs: Any) -> None:
+        self.edits.append(kwargs)
+
 
 class FakeClient:
     """Stands in for ``discord.Client`` in ``DiscordSink``. Channels not in ``cached`` need a fetch."""
@@ -100,6 +139,15 @@ class FakeClient:
         self.channels = {c.id: c for c in channels}
         self.cached = set(self.channels) if cached else set()
         self.fetched: list[int] = []
+        self.users: dict[int, FakeMember] = {}
+        self.user = FakeMember(999)
+        self.latency = 0.05
+
+    def get_user(self, user_id: int) -> FakeMember:
+        return self.users.setdefault(user_id, FakeMember(user_id))
+
+    async def fetch_user(self, user_id: int) -> FakeMember:
+        return self.get_user(user_id)
 
     def get_channel(self, channel_id: int) -> FakeChannel | None:
         return self.channels[channel_id] if channel_id in self.cached else None

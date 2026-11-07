@@ -23,6 +23,10 @@ async def db():
     await database.close()
 
 
+CURRENT = len(load_migrations())  # the schema version this build creates
+NEXT = f"{CURRENT + 1:04d}"
+
+
 def copy_migrations(tmp_path: Path, *extra: tuple[str, str]) -> Path:
     out = tmp_path / "migrations"
     out.mkdir()
@@ -50,45 +54,46 @@ async def test_upgrade_keeps_data_and_saves_a_backup(tmp_path: Path) -> None:
     path = tmp_path / "portcullis.db"
     async with await Database.open(path) as d:
         await SettingsRepo(d).set("timezone", "Europe/Amsterdam")
-    migrations = copy_migrations(tmp_path, ("0002_add_colour.sql", "ALTER TABLE servers ADD COLUMN colour TEXT;"))
+    migrations = copy_migrations(tmp_path, (f"{NEXT}_add_colour.sql", "ALTER TABLE servers ADD COLUMN colour TEXT;"))
     async with await Database.open(path, migrations_dir=migrations) as d:
-        assert d.version == 2
+        assert d.version == CURRENT + 1
         assert await SettingsRepo(d).get("timezone") == "Europe/Amsterdam"
         async with d.conn.execute("SELECT colour FROM servers") as cur:
             assert await cur.fetchall() == []
-    backup = tmp_path / "portcullis.db.v1.bak"
+    backup = tmp_path / f"portcullis.db.v{CURRENT}.bak"
     assert backup.exists()
     with sqlite3.connect(backup) as old:
-        assert old.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 1
+        assert old.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == CURRENT
 
 
 async def test_failed_migration_rolls_back_completely(tmp_path: Path) -> None:
     path = tmp_path / "portcullis.db"
     async with await Database.open(path):
         pass
-    bad = copy_migrations(tmp_path, ("0002_broken.sql", "CREATE TABLE half_done (x INTEGER);\nNOT SQL AT ALL;"))
-    with pytest.raises(MigrationError, match="0002_broken"):
+    bad = copy_migrations(tmp_path, (f"{NEXT}_broken.sql", "CREATE TABLE half_done (x INTEGER);\nNOT SQL AT ALL;"))
+    with pytest.raises(MigrationError, match=f"{NEXT}_broken"):
         await Database.open(path, migrations_dir=bad)
     with sqlite3.connect(path) as raw:
-        assert raw.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 1
+        assert raw.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == CURRENT
         tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert "half_done" not in tables
 
 
 async def test_refuses_a_newer_database(tmp_path: Path) -> None:
     path = tmp_path / "portcullis.db"
-    newer = copy_migrations(tmp_path, ("0002_future.sql", "CREATE TABLE future (x INTEGER);"))
+    newer = copy_migrations(tmp_path, (f"{NEXT}_future.sql", "CREATE TABLE future (x INTEGER);"))
     async with await Database.open(path, migrations_dir=newer):
         pass
-    with pytest.raises(DatabaseTooNew, match="schema version 2"):
+    with pytest.raises(DatabaseTooNew, match=f"schema version {CURRENT + 1}"):
         await Database.open(path)
 
 
 def test_migration_numbering_is_checked(tmp_path: Path) -> None:
-    gap = copy_migrations(tmp_path, ("0003_skipped.sql", "SELECT 1;"))
+    skipped = f"{CURRENT + 2:04d}_skipped.sql"
+    gap = copy_migrations(tmp_path, (skipped, "SELECT 1;"))
     with pytest.raises(MigrationError, match="without gaps"):
         load_migrations(gap)
-    (gap / "0003_skipped.sql").unlink()
+    (gap / skipped).unlink()
     (gap / "2_badname.sql").write_text("SELECT 1;")
     with pytest.raises(MigrationError, match="must look like"):
         load_migrations(gap)
