@@ -8,12 +8,12 @@ Method: everything was read-only and against this one throwaway VM. Sources were
 
 Companion files in this folder:
 - `API_REFERENCE.md` documents every operation (263) in full: parameters, bodies, responses, permission and live result.
-- `openapi-3.0.0.6.json` is the raw spec.
+- `portcullis/amp/spec/webapi-3.0.0.6.json` is the raw spec (moved there so the client is generated from the pinned copy).
 
 ## 0. Headline: there is a full OpenAPI spec
 
 - **[V]** `webapi.json` sits next to the backend binary (`data/versions/3.0.0/webapi/`). It is OpenAPI 3.1.1 ("webapi | v1"). It has **219 paths, 263 operations and 389 schemas**, with real descriptions: permission needed, NATS subject used, and error codes.
-- **[V]** The server does **not** serve it. `/openapi/v1.json`, `/openapi/v1.yaml` and `/swagger/v1/swagger.json` return 401 without a token and 404 with one. `/swagger`, `/scalar`, `/scalar/v1` and `/api/dev/options` return 404. It probably only shows in dev mode **[I]**. Gatekeeper can generate a client from the file directly.
+- **[V]** The server does **not** serve it. `/openapi/v1.json`, `/openapi/v1.yaml` and `/swagger/v1/swagger.json` return 401 without a token and 404 with one. `/swagger`, `/scalar`, `/scalar/v1` and `/api/dev/options` return 404. It probably only shows in dev mode **[I]**. Portcullis can generate a client from the file directly.
 - **[S]** The spec declares no `securitySchemes`. Auth is still Bearer JWT **[V]**.
 - The panel bundle missed a set of routes that are in the spec. They include file upload (`upload-start/chunk/commit`), `files/download`, `files/zip`, `snapshots/{id}/download`, `Profile/sshkeys`, `Profile/sessions/others`, `networking/tunnel-fronts`, `networking/gateways/{id}/egress`, `networking/gateways/preflight`, `networking/spires/{id}/port-claims`, `Shards/{id}/ports/{ref}/access`, `Shards/{id}/settings/{field}/candidates`, `Audit/last/{action}/{targetType}/{targetId}`, `Tasks/{tenantId}/{taskId}/cancel`, `shards/{id}/import` and `csp-report`.
 
@@ -39,14 +39,14 @@ Companion files in this folder:
   - `POST /api/auth/hub-token` returns `{token, expiresAt}`, valid for about 90 s.
   - **Each token works once.** A second negotiate with the same token gets 401, even on a different hub.
   - It works **only as `?access_token=`**. As an `Authorization` header it gets 401. The main JWT gets 401 on hubs.
-  - Gatekeeper must fetch a fresh hub token for every hub connection and every reconnect.
+  - Portcullis must fetch a fresh hub token for every hub connection and every reconnect.
 - **[V]** There is no inbound API-key or service-account auth anywhere in the spec. A bot logs in as a normal user with a scoped role.
 - **Permissions [V]:** `GET /api/me/permissions` returns `{grants, catalog}`. The catalog has **71 nodes** in three scopes:
   - **Shard:** `view`, `power.start|stop|restart|kill`, `update.run|abort`, `console.read|send`, `settings.read|write`, `infra.*`, `ports.*`, `files.read|write|delete` (path-scopable), `snapshots.*`, `schedule.read|write`, `analytics.read|users|addresses`, and more.
   - **Spire:** `view`, `shards.create`, `settings.*`, `startup.*`, `datastores.*`, `discover`, `delete`.
   - **Platform:** `audit.read`, `users.*`, `roles.*`, `network.*`, `licence.*`, `webhooks.internal`, `credentials.manage`, `platform.*`.
   - `dangerous` flags mark nodes such as `power.kill`, `delete`, `suspend` and `files.delete`.
-- Minimal Gatekeeper role **[I]**: `view`, `power.start|stop|restart`, `console.read`, `console.send`, `analytics.read`, `analytics.users`, `schedule.read` on the target shards.
+- Minimal Portcullis role **[I]**: `view`, `power.start|stop|restart`, `console.read`, `console.send`, `analytics.read`, `analytics.users`, `schedule.read` on the target shards.
 
 ## 3. Realtime (SignalR)
 
@@ -56,7 +56,7 @@ Companion files in this folder:
 | `/hubs/spire` | **[V]** 200 with a fresh token | `JoinSpire`, `LeaveSpire`, `JoinNetwork`, `LeaveNetwork` | `SpirePresence`, `SpireState`, `NetworkStatus` |
 | `/hubs/tasks` | **[V]** 200 with a fresh token | none | `TaskUpsert` |
 
-- Event payloads were not captured. That needs a live WebSocket client and a player joining, which is a good first spike for Gatekeeper.
+- Event payloads were not captured. That needs a live WebSocket client and a player joining, which is a good first spike for Portcullis.
 - **[V]** The REST equivalents work. `GET /api/Shards/{id}/console/history?limit=N` returns lines shaped `{streamId, text, timestamp, seq, kind, state, code, params, level, origin}`. `GET /api/Shards/{id}/users` returns the current roster.
 
 ## 4. REST routes
@@ -109,7 +109,7 @@ What the live probe showed:
 
 **Common template variables:** `Time`, `TriggerId`, `TriggerName`, `ShardName`, `State`, `UserCount`, `MaxUsers`, `CPUUsage`, `RAMUsage`.
 
-So **webhooks in AMP 3 are outbound schedule tasks**, not a subscription API. Gatekeeper could receive `player.joined` and `player.left` pushes this way, without keeping a SignalR connection open **[I]**. The cost is setting up one schedule per shard.
+So **webhooks in AMP 3 are outbound schedule tasks**, not a subscription API. Portcullis could receive `player.joined` and `player.left` pushes this way, without keeping a SignalR connection open **[I]**. The cost is setting up one schedule per shard.
 
 ## 5. Message bus (NATS)
 
@@ -129,7 +129,7 @@ So **webhooks in AMP 3 are outbound schedule tasks**, not a subscription API. Ga
 | `KV_amp`, `KV_amp_geo`, `KV_identity`, `KV_amp_sr_<shardId>` | `$KV.*` | key-value buckets |
 
 - **[S]** Other subjects named in the spec: `...sr.{id}.ev.con.input` (console input), `...sr.{id}.ev.metrics`, `amp.tn.{t}.sched.{id}[.status]`, `amp.tn.{t}.usr.{user}...` and `amp.tn.{t}.sp.{spire}...`.
-- Gatekeeper should **not** use the bus. It needs AMP's own credentials, and REST plus SignalR already cover everything Gatekeeper needs.
+- Portcullis should **not** use the bus. It needs AMP's own credentials, and REST plus SignalR already cover everything Portcullis needs.
 
 ## 6. Not present or not exposed
 

@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "portcullis"
+version = "0.0.1"
+description = "Discord bot for CubeCoders AMP 3 (successor to Gatekeeper V2/V3)"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp>=3.10,<4",
+    "pydantic>=2.6,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+    # Pinned so regenerating from the same spec gives the same code.
+    "datamodel-code-generator==0.90.0",
+    "black==26.10.1",
+    "isort==8.0.1",
+    "pip-audit>=2.7",
+]
+
+[tool.setuptools.packages.find]
+include = ["portcullis*"]
+
+[tool.setuptools.package-data]
+"portcullis.amp" = ["spec/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["portcullis/amp/models.py", "portcullis/amp/api/"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC"]
+ignore = ["ASYNC109"]  # explicit per-call timeouts are part of the API
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ASYNC240"]

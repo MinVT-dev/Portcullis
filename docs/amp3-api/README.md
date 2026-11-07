@@ -1,12 +1,12 @@
 # AMP 3 API documentation
 
-These docs map the AMP 3 API that Gatekeeper will talk to. They cover the 3.0.0 preview (`amp3-host 3.0.0.6+f3d1a77cea`) and were checked on a throwaway test VM on 7 Nov 2026.
+These docs map the AMP 3 API that Portcullis will talk to. They cover the 3.0.0 preview (`amp3-host 3.0.0.6+f3d1a77cea`) and were checked on a throwaway test VM on 7 Nov 2026.
 
 | File | What it is |
 |---|---|
 | [API_REFERENCE.md](API_REFERENCE.md) | **The full reference.** It covers headers, auth, errors, permissions, SignalR, schedules/webhooks and the message bus. It documents every one of the 263 REST operations: parameters, body, responses, permission and live result. It ends with all 389 data types. Generated from the spec and merged with live probe results. |
 | [API_SURFACE.md](API_SURFACE.md) | A short summary: ports, auth, realtime, bus, what's missing and gotchas, each marked verified, spec, bundle or inferred. |
-| [openapi-3.0.0.6.json](openapi-3.0.0.6.json) | The OpenAPI 3.1.1 spec. It ships on disk with AMP at `data/versions/3.0.0/webapi/webapi.json` and is not served over HTTP. Use it to generate a client. |
+| [webapi-3.0.0.6.json](../../portcullis/amp/spec/webapi-3.0.0.6.json) | The OpenAPI 3.1.1 spec, pinned in the code at `portcullis/amp/spec/`. It ships on disk with AMP at `data/versions/3.0.0/webapi/webapi.json` and is not served over HTTP. Use it to generate a client. |
 
 **This applies to one preview build.** The build expires on 7 Dec 2026 (`/api/Health/status`), and the API may change between previews. Re-check against `webapi.json` on each new build.
 

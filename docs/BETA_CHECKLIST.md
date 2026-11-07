@@ -89,11 +89,11 @@ This decides most of the design, so it is worth the most care.
 - [ ] Backup create, list, delete and restore endpoints, the capability each one needs, and whether a restore reports progress.
 - [ ] File access endpoints, only if you spot them while you are in there.
 
-### 6. Running Gatekeeper inside AMP (Q-9)
+### 6. Running Portcullis inside AMP (Q-9)
 
 - [ ] Create an instance from the **Python App Runner** template (git repository, `requirements.txt`, entry script, `.env`). Does it start, does it install requirements, does it survive a restart?
 - [ ] The beta reports Podman 5.4.2 as its container runtime. Note whether the instance runs in a Podman container, and whether it can reach the panel, the message bus and the internet from inside it.
-- [ ] Note the Python version it provides. Gatekeeper wants 3.11 or newer.
+- [ ] Note the Python version it provides. Portcullis wants 3.11 or newer.
 - [ ] Can the app instance reach the panel API from inside AMP, and at what address?
 
 ### 7. Nice to have (Q-11, Q-12)
@@ -144,5 +144,5 @@ The OpenAPI spec itself should hold no secrets. Search it before sharing anyway.
 ## What I will do with it
 
 1. Read the spec and answer Q-1 to Q-14 in `docs/DESIGN.md`, marking each answered, partly answered or still open.
-2. Fix the AMP interface layer (`gatekeeper/amp/`) to match the real API, and re-check the command list in Appendix B against which endpoints exist.
+2. Fix the AMP interface layer (`portcullis/amp/`) to match the real API, and re-check the command list in Appendix B against which endpoints exist.
 3. List what Mike still needs to answer.
