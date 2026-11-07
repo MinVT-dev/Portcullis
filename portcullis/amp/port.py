@@ -30,6 +30,8 @@ from portcullis.core.types import (
 
 log = logging.getLogger(__name__)
 
+DEFAULT_TENANT = "_root"  # the only tenant on a single-install AMP 3; used if a shard reports none
+
 
 def _float(value: Any) -> float | None:
     try:
@@ -44,9 +46,8 @@ class ShardEvents:
     Joins a shard when its first subscriber arrives, leaves when the last one goes, and joins all
     of them again after every reconnect (group membership does not survive a new connection).
 
-    The panel calls ``JoinShard(scope, shardId)`` with two arguments. The second is the shard id; the
-    first is the shard's tenant id or its spire id (not yet confirmed which), so both are tried and
-    the one that works is remembered.
+    AMP's hub wants ``JoinShard(tenantId, shardId)`` and ``LeaveShard(tenantId, shardId)``, as the
+    panel calls them (verified on AMP 3.0.0.6, where the single tenant is ``_root``).
     """
 
     def __init__(self, client: AmpClient, *, mode: Mode = "direct", queue_size: int = 1000) -> None:
@@ -57,29 +58,16 @@ class ShardEvents:
         self.conn: HubConnection | None = None
         self._task: asyncio.Task[None] | None = None
         self.dropped = 0  # events lost because a subscriber fell behind
-        self._scopes: dict[str, list[str]] = {}  # shard id -> candidate first arguments, best first
-        self.scope_kind: str | None = None  # "tenant" or "spire", once a join has succeeded
+        self._tenants: dict[str, str] = {}  # shard id -> tenant id
 
-    async def _candidates(self, sid: str) -> list[tuple[str, str]]:
-        shard = await self._client.shards.get_shards_by_id(sid)
-        found = [("tenant", shard.tenant_id), ("spire", str(shard.spire_id) if shard.spire_id else None)]
-        candidates = [(kind, value) for kind, value in found if value]
-        if self.scope_kind is not None:
-            candidates.sort(key=lambda c: c[0] != self.scope_kind)
-        return candidates
+    async def _tenant(self, sid: str) -> str:
+        if sid not in self._tenants:
+            shard = await self._client.shards.get_shards_by_id(sid)
+            self._tenants[sid] = shard.tenant_id or DEFAULT_TENANT
+        return self._tenants[sid]
 
     async def _join(self, conn: HubConnection, sid: str) -> None:
-        last: Exception | None = None
-        for kind, scope in await self._candidates(sid):
-            try:
-                await conn.invoke("JoinShard", scope, sid)
-            except AmpError as exc:
-                last = exc
-                continue
-            self.scope_kind = kind
-            self._scopes[sid] = [scope]
-            return
-        raise last or AmpError(f"shard {sid} has no tenant or spire id to join with")
+        await conn.invoke("JoinShard", await self._tenant(sid), sid)
 
     async def _join_all(self, conn: HubConnection) -> None:
         for sid in list(self._subs):
@@ -118,10 +106,10 @@ class ShardEvents:
                 subs.discard(queue)
                 if not subs:
                     del self._subs[sid]
-                    scope = self._scopes.pop(sid, [None])[0]
-                    if scope is not None and self.conn is not None and self.conn.connected:
+                    tenant = self._tenants.get(sid)
+                    if tenant is not None and self.conn is not None and self.conn.connected:
                         with contextlib.suppress(Exception):
-                            await self.conn.send("LeaveShard", scope, sid)
+                            await self.conn.send("LeaveShard", tenant, sid)
 
     async def close(self) -> None:
         if self.conn is not None:

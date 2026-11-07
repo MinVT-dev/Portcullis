@@ -103,8 +103,8 @@ What happens:
 2. It prints `Writing to captures\<time>` and the shards it will record, each as `Name (id): state`.
 3. It reads the panel's own JavaScript and saves every place it calls `JoinShard` to `panel_hub_calls.txt`, so the real call can be compared with ours. Skip this with `--no-inspect`.
 4. It tries up to three ways of connecting to the live event hub and keeps the first that works (see "Connection mode" below).
-5. It joins each shard the way the panel does, `JoinShard(scope, shardId)`. It tries the shard's tenant id as the scope first, then its spire id, and records which one worked as `join_scope` in `summary.txt`. A shard that refuses both is logged and skipped, and the other shards are still recorded. If every shard refuses, it stops after 3 identical failures with exit code 3 instead of retrying forever.
-6. It prints `Recording. ...`, and each event as it arrives.
+5. It joins each shard the way the panel does, `JoinShard(tenantId, shardId)`. A shard that refuses is logged and skipped, and the other shards are still recorded. If every shard refuses, it stops after 3 identical failures with exit code 3 instead of retrying forever.
+6. It prints `Recording. ...`, and then each event as it arrives. `Metrics` (every ~3 s) is never printed, and `UserRoster` and `ShardStateChanged` (repeated every ~10 s) are printed only when they change. Every event is still saved to `events.jsonl`.
 
 While it records, do the things you want captured: join the game, chat, run a console command from the panel, leave. If you can, restart the server once, or unplug the PC's network for a few seconds, to test reconnecting. It stops after `--duration` seconds, or when you press Ctrl+C.
 

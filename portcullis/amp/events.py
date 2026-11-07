@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Turn raw hub events into ``portcullis.core.types`` events.
 
-PROVISIONAL. The payload shapes below are guesses from the REST twins (ConsoleLineDto,
-ConnectedUser, ShardState); nobody has captured a live payload yet. The parser is deliberately
-lenient: it accepts camelCase or PascalCase keys, a payload with or without a leading shard id
-argument, and falls back to ``OtherEvent`` rather than raising. Replace the guesses with fixtures
-from ``tools/record_events.py`` once Min has run it.
+Argument shapes seen live on AMP 3.0.0.6 (recorder capture, 2026-11-07):
+
+* ``Metrics``: ``[shardId, sample]``, every ~3 s
+* ``UserRoster``: ``[shardId, [users]]``, every ~10 s
+* ``ShardStateChanged``: ``[tenantId, shardId, ShardState]``, every ~9 s even when nothing changed
+
+``ConsoleLine``, ``UserJoined`` and ``UserLeft`` are still guesses from the REST twins
+(ConsoleLineDto, ConnectedUser). The parser stays lenient: camelCase or PascalCase keys, optional
+leading tenant and shard id arguments, and ``OtherEvent`` rather than an exception.
 """
 
 from __future__ import annotations
@@ -86,6 +90,9 @@ def player_from(data: Any) -> Player | None:
 def split_arguments(event: HubEvent, joined: Collection[str]) -> tuple[str | None, Any]:
     """Find which shard an event belongs to, and its payload."""
     args = list(event.arguments)
+    # A leading tenant id (e.g. "_root") comes before the shard id on some events.
+    if len(args) >= 3 and isinstance(args[0], str) and not _UUID.match(args[0]):
+        args = args[1:]
     if len(args) >= 2 and isinstance(args[0], str) and _UUID.match(args[0]):
         return args[0].lower(), args[1]
     payload = args[0] if args else None

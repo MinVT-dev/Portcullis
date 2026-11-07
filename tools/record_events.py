@@ -48,12 +48,17 @@ sys.path.insert(0, str(ROOT))
 from portcullis.amp import AmpClient, Credentials  # noqa: E402
 from portcullis.amp.errors import AmpError, AuthFailed, LoginNotSupported  # noqa: E402
 from portcullis.amp.events import state_from  # noqa: E402
+from portcullis.amp.port import DEFAULT_TENANT  # noqa: E402
 from portcullis.amp.redact import RedactingFilter, Redactor  # noqa: E402
 from portcullis.amp.signalr import MODES, HubConnection, HubError, HubEvent, HubGaveUp  # noqa: E402
 from portcullis.config import load_env_file  # noqa: E402
 
 log = logging.getLogger("recorder")
-IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+# Not followed by "+": AMP versions look like "3.0.0.6+f3d1a77cea".
+IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b(?!\+)")
+
+# Sent every few seconds whether or not anything changed: saved, but only echoed when they change.
+NOISY = {"Metrics", "UserRoster", "ShardStateChanged"}
 
 
 class CaptureRedactor(Redactor):
@@ -74,6 +79,7 @@ class Recorder:
         self.redactor = redactor
         self.echo = echo
         self.counts: Counter[str] = Counter()
+        self._last_seen: dict[tuple[str, str], str] = {}
         out_dir.mkdir(parents=True, exist_ok=True)
         self._events = (out_dir / "events.jsonl").open("a", encoding="utf-8")
         self._lifecycle = (out_dir / "lifecycle.jsonl").open("a", encoding="utf-8")
@@ -92,9 +98,24 @@ class Recorder:
             "arguments": self.redactor.data(event.arguments),
         }
         self._line(self._events, record)
-        if self.echo:
+        if self.echo and self._worth_echoing(event):
             preview = json.dumps(record["arguments"], ensure_ascii=False, default=str)
             print(f"{record['t'][11:19]} {event.hub}:{event.target} {preview[:160]}")
+
+    def _worth_echoing(self, event: HubEvent) -> bool:
+        if event.target not in NOISY:
+            return True
+        if event.target == "Metrics":
+            return False
+        # Roster and state repeat on a timer; show them only when they differ from the last one.
+        sid = next((a for a in event.arguments if isinstance(a, str) and a != "_root"), "")
+        payload = event.arguments[-1] if event.arguments else None
+        if event.target == "ShardStateChanged" and isinstance(payload, dict):
+            payload = {k: payload.get(k) for k in ("status", "isRunning", "isStopped", "isBusy", "lastErrorCode")}
+        key, value = (event.target, sid), json.dumps(payload, sort_keys=True, default=str)
+        changed = self._last_seen.get(key) != value
+        self._last_seen[key] = value
+        return changed
 
     def on_lifecycle(self, hub: str, kind: str, detail: dict[str, Any]) -> None:
         record = {"t": datetime.now(UTC).isoformat(), "hub": hub, "event": kind, **self.redactor.data(detail)}
@@ -249,10 +270,8 @@ async def run(args: argparse.Namespace) -> int:
             return 1
         shards = await amp.shards.get_shards()
         names = {str(s.id): s.name for s in shards if s.id}
-        # The panel calls JoinShard(scope, shardId); scope is the tenant id or the spire id.
-        scopes = {str(s.id): [(k, v) for k, v in (("tenant", s.tenant_id),
-                                                  ("spire", str(s.spire_id) if s.spire_id else None)) if v]
-                  for s in shards if s.id}
+        # JoinShard(tenantId, shardId), as the panel calls it.
+        tenants = {str(s.id): s.tenant_id or DEFAULT_TENANT for s in shards if s.id}
         shard_ids = [s.lower() for s in args.shard] or list(names)
         unknown = [s for s in shard_ids if s not in names]
         if unknown:
@@ -273,31 +292,21 @@ async def run(args: argparse.Namespace) -> int:
 
         mode = await pick_mode(amp, args.mode, recorder)
         extra["mode"] = mode
-        working: list[str] = []  # the scope kind that worked, once one has
 
         async def join(conn: HubConnection) -> None:
             failed: dict[str, str] = {}
             for sid in shard_ids:
-                candidates = sorted(scopes[sid], key=lambda c: c[0] not in working)
-                errors: list[str] = []
-                for kind, scope in candidates:
-                    call = [scope, sid]
-                    recorder.on_lifecycle("shard", "join", {"shard": sid, "name": names[sid], "scope": kind,
-                                                            "arguments": call})
-                    try:
-                        result = await conn.invoke("JoinShard", *call)
-                    except HubError as exc:
-                        errors.append(f"{kind}: {exc}")
-                        recorder.on_lifecycle("shard", "join-failed", {
-                            "shard": sid, "name": names[sid], "scope": kind, "state": shard_state_label(snap, sid),
-                            "arguments": call, "error": str(exc)})
-                        continue
-                    working[:] = [kind]
-                    extra["join_scope"] = kind
-                    recorder.on_lifecycle("shard", "joined", {"shard": sid, "scope": kind, "result": result})
-                    break
-                else:
-                    failed[sid] = "; ".join(errors) or "no tenant or spire id"
+                call = [tenants[sid], sid]
+                recorder.on_lifecycle("shard", "join", {"shard": sid, "name": names[sid], "arguments": call})
+                try:
+                    result = await conn.invoke("JoinShard", *call)
+                except HubError as exc:
+                    failed[sid] = str(exc)
+                    recorder.on_lifecycle("shard", "join-failed", {
+                        "shard": sid, "name": names[sid], "state": shard_state_label(snap, sid),
+                        "arguments": call, "error": str(exc)})
+                    continue
+                recorder.on_lifecycle("shard", "joined", {"shard": sid, "result": result})
             if len(failed) == len(shard_ids):
                 raise HubError("no shard could be joined: " + "; ".join(
                     f"{names[s]}: {e}" for s, e in failed.items()))
