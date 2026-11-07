@@ -18,7 +18,7 @@ from portcullis.core.port import AmpPort
 from portcullis.core.relay import STATE_ICONS, escape
 from portcullis.core.types import ServerState
 from portcullis.db.database import Database
-from portcullis.db.features import LinkCodeRepo, PlayerRepo, PollRepo, WhitelistRepo
+from portcullis.db.features import LinkCodeRepo, NotifyRepo, PlayerRepo, PollRepo, WhitelistRepo
 from portcullis.db.repos import AuditRepo, ServerRepo, ServerRow, SettingsRepo, UserRepo
 
 log = logging.getLogger(__name__)
@@ -79,6 +79,7 @@ class Ctx:
     on_relay_changed: Callable[[], Awaitable[None]] | None = None
     has_chat: Callable[[str | None], bool] = lambda game: False
     client: discord.Client | None = None
+    board: Any = None  # StatusBoard, set by Modules (it imports this module)
 
     def __post_init__(self) -> None:
         self.servers = ServerRepo(self.db)
@@ -89,6 +90,7 @@ class Ctx:
         self.whitelist = WhitelistRepo(self.db)
         self.links = LinkCodeRepo(self.db)
         self.polls = PollRepo(self.db)
+        self.notify = NotifyRepo(self.db)
 
     async def relay_changed(self) -> None:
         if self.on_relay_changed is not None:

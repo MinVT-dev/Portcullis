@@ -271,7 +271,8 @@ async def test_setup_bot_whitelist_channel(h: Harness) -> None:
     await h.m.setup.set_whitelist_channel(FakeInteraction(admin()), REQUESTS)
     assert await h.ctx.settings.get(WHITELIST_CHANNEL) == REQUESTS
     embed = await h.m.setup.bot_embed()
-    assert f"<#{REQUESTS}>" in embed.fields[0].value and f"<@&{OPERATOR_ROLE}>" in embed.fields[1].value
+    fields = {f.name: f.value for f in embed.fields}
+    assert f"<#{REQUESTS}>" in fields["Whitelist requests go to"] and f"<@&{OPERATOR_ROLE}>" in fields["Operator roles"]
 
 
 # ------------------------------------------------------------------------------ /whitelist
@@ -563,10 +564,10 @@ def test_command_tree() -> None:
     client = discord.Client(intents=intents())
     tree = app_commands.CommandTree(client)
     ctx = SimpleNamespace(access=Access())
-    from portcullis.bot import admin, community, polls, server, setup
+    from portcullis.bot import admin, community, notify, polls, server, setup
 
     for cls in (server.ServerModule, setup.SetupModule, community.CommunityModule, polls.PollModule,
-                admin.AdminModule):
+                notify.NotifyModule, admin.AdminModule):
         module = cls.__new__(cls)
         module.ctx = ctx  # type: ignore[assignment]
         module.register(tree)
@@ -574,9 +575,9 @@ def test_command_tree() -> None:
     for c in tree.get_commands():
         names[c.name] = sorted(x.name for x in getattr(c, "commands", []))
     assert names == {
-        "server": ["list", "power", "send", "status"], "backups": [], "setup": ["bot", "relay", "server"],
+        "server": ["console", "list", "power", "send", "status"], "backups": [], "setup": ["bot", "relay", "server"],
         "whitelist": ["add", "remove", "request"], "link": [], "player": ["lookup", "top"], "user": [],
-        "Portcullis user": [], "poll": ["create", "list"], "help": [], "audit": [],
+        "Portcullis user": [], "poll": ["create", "list"], "notify": [], "help": [], "audit": [],
         "admin": ["diagnostics", "export", "import"],
     }
     groups = {c.name: c for c in tree.get_commands()}

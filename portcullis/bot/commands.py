@@ -11,7 +11,9 @@ from discord import app_commands
 
 from portcullis.bot.admin import AdminModule
 from portcullis.bot.base import Access, Ctx, Module
+from portcullis.bot.board import StatusBoard
 from portcullis.bot.community import CommunityModule, WhitelistDecision
+from portcullis.bot.notify import NotifyModule
 from portcullis.bot.polls import PollClose, PollModule, PollVote
 from portcullis.bot.server import ServerModule
 from portcullis.bot.setup import SetupModule
@@ -24,14 +26,17 @@ DYNAMIC_ITEMS = (WhitelistDecision, PollVote, PollClose)
 
 class Modules:
     def __init__(self, ctx: Ctx) -> None:
+        if ctx.board is None:
+            ctx.board = StatusBoard(ctx)
         self.server = ServerModule(ctx)
         self.setup = SetupModule(ctx)
         self.community = CommunityModule(ctx)
         self.polls = PollModule(ctx)
         self.admin = AdminModule(ctx)
+        self.notify = NotifyModule(ctx)
 
     def all(self) -> list[Module]:
-        return [self.server, self.setup, self.community, self.polls, self.admin]
+        return [self.server, self.setup, self.community, self.polls, self.notify, self.admin]
 
     def register(self, tree: app_commands.CommandTree) -> None:
         for module in self.all():

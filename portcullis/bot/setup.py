@@ -13,8 +13,9 @@ from typing import Any
 import discord
 from discord import app_commands
 
-from portcullis.bot.base import Module, reply
-from portcullis.bot.server import SAY_KEY
+from portcullis.bot.base import Module, reply, valid_line
+from portcullis.bot.board import BOARD_CHANNEL
+from portcullis.bot.server import QUICK_KEY, QUICK_LIMIT, SAY_KEY, quick_commands
 from portcullis.core.relay import escape
 from portcullis.db.repos import ServerRow
 
@@ -99,6 +100,9 @@ class SetupModule(Module):
         for key, label in COMMAND_KEYS.items():
             value = commands.get(key)
             embed.add_field(name=label, value=f"`{escape(value)}`" if value else "not set", inline=False)
+        quick = quick_commands(commands.get(QUICK_KEY))
+        listed = "\n".join(f"{escape(q['label'])} → `{escape(q['command'])}`" for q in quick)
+        embed.add_field(name="Quick commands (buttons on /server status)", value=listed or "none", inline=False)
         embed.set_footer(text="Pick a channel below to change a relay. This panel works for 15 minutes.")
         return embed
 
@@ -138,12 +142,39 @@ class SetupModule(Module):
         await self.ctx.audit.record("setup.server.commands", actor_id=interaction.user.id, shard_id=row.shard_id)
         return None
 
+    async def save_quick(self, interaction: discord.Interaction, row: ServerRow, text: str) -> str | None:
+        """Store quick commands from ``Label = command`` lines. Returns a problem to show, or None."""
+        items = []
+        for number, raw in enumerate(text.splitlines(), start=1):
+            if not raw.strip():
+                continue
+            label, sep, command = raw.partition("=")
+            label, command = label.strip(), command.strip()
+            if not sep or not label or not command:
+                return f"Line {number} needs a label and a command, like `Save world = save`."
+            if len(label) > 40:
+                return f"Line {number}: keep the label to 40 characters."
+            if len(command) > 200 or not valid_line(command):
+                return f"Line {number}: the command must be one line of up to 200 characters."
+            items.append({"label": label, "command": command})
+        if len(items) > QUICK_LIMIT:
+            return f"Up to {QUICK_LIMIT} quick commands per server."
+        if items:
+            await self.ctx.settings.set(QUICK_KEY, items, scope=row.shard_id, by=interaction.user.id)
+        else:
+            await self.ctx.settings.delete(QUICK_KEY, scope=row.shard_id)
+        await self.ctx.audit.record("setup.server.quick", actor_id=interaction.user.id, shard_id=row.shard_id,
+                                    target=str(len(items)))
+        return None
+
     # ---------------------------------------------------------------- /setup bot
 
     async def bot_embed(self) -> discord.Embed:
         embed = discord.Embed(title="Portcullis settings")
         channel = await self.ctx.settings.get(WHITELIST_CHANNEL)
         embed.add_field(name="Whitelist requests go to", value=mention(channel), inline=False)
+        board = await self.ctx.settings.get(BOARD_CHANNEL)
+        embed.add_field(name="Live server board", value=mention(board), inline=False)
         roles = ", ".join(f"<@&{r}>" for r in sorted(self.ctx.access.operator_role_ids)) or "none"
         embed.add_field(name="Operator roles", value=f"{roles}\n(set in `.env`: PORTCULLIS_OPERATOR_ROLE_IDS)",
                         inline=False)
@@ -161,6 +192,12 @@ class SetupModule(Module):
         else:
             await self.ctx.settings.set(WHITELIST_CHANNEL, channel_id, by=interaction.user.id)
         await self.ctx.audit.record("setup.bot.whitelist_channel", actor_id=interaction.user.id,
+                                    target=str(channel_id) if channel_id else None)
+
+    async def set_board_channel(self, interaction: discord.Interaction, channel_id: int | None) -> None:
+        if self.ctx.board is not None:
+            await self.ctx.board.move(channel_id, by=interaction.user.id)
+        await self.ctx.audit.record("setup.bot.board_channel", actor_id=interaction.user.id,
                                     target=str(channel_id) if channel_id else None)
 
     def register(self, tree: app_commands.CommandTree) -> None:
@@ -251,6 +288,11 @@ class ServerPanel(AdminView):
         values = await self.module.ctx.settings.all(scope=self.row.shard_id)
         await interaction.response.send_modal(CommandsModal(self, values))
 
+    @discord.ui.button(label="Quick commands", style=discord.ButtonStyle.primary, row=3)
+    async def quick(self, interaction: discord.Interaction, button: discord.ui.Button[ServerPanel]) -> None:
+        current = quick_commands(await self.module.ctx.settings.get(QUICK_KEY, scope=self.row.shard_id))
+        await interaction.response.send_modal(QuickModal(self, current))
+
     @discord.ui.button(label="Stop all relays", style=discord.ButtonStyle.danger, row=3)
     async def stop_relays(self, interaction: discord.Interaction, button: discord.ui.Button[ServerPanel]) -> None:
         for kind in RELAY_KINDS:
@@ -297,9 +339,25 @@ class CommandsModal(discord.ui.Modal, title="Game commands"):
         await self.panel.refresh(interaction, problem or "Saved.")
 
 
+class QuickModal(discord.ui.Modal, title="Quick commands"):
+    def __init__(self, panel: ServerPanel, current: list[dict[str, str]]) -> None:
+        super().__init__()
+        self.panel = panel
+        self.lines: discord.ui.TextInput[QuickModal] = discord.ui.TextInput(
+            label=f"One per line: Label = command (up to {QUICK_LIMIT})", style=discord.TextStyle.paragraph,
+            default="\n".join(f"{q['label']} = {q['command']}" for q in current),
+            placeholder="Save world = save\nAnnounce restart = say Restart in 5 minutes", required=False,
+            max_length=1200)
+        self.add_item(self.lines)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        problem = await self.panel.module.save_quick(interaction, self.panel.row, self.lines.value)
+        await self.panel.refresh(interaction, problem or "Saved.")
+
+
 class BotPanel(AdminView):
     @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="Channel for whitelist requests…",
-                       channel_types=[discord.ChannelType.text], min_values=1, max_values=1)
+                       channel_types=[discord.ChannelType.text], min_values=1, max_values=1, row=0)
     async def whitelist_channel(self, interaction: discord.Interaction,
                                 select: discord.ui.ChannelSelect[BotPanel]) -> None:
         channel_id = select.values[0].id
@@ -310,8 +368,28 @@ class BotPanel(AdminView):
         await self.module.set_whitelist_channel(interaction, channel_id)
         await interaction.response.edit_message(content="Saved.", embed=await self.module.bot_embed(), view=self)
 
-    @discord.ui.button(label="Turn whitelist requests off", style=discord.ButtonStyle.danger)
+    @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="Channel for the live server board…",
+                       channel_types=[discord.ChannelType.text], min_values=1, max_values=1, row=1)
+    async def board_channel(self, interaction: discord.Interaction,
+                            select: discord.ui.ChannelSelect[BotPanel]) -> None:
+        channel_id = select.values[0].id
+        if can_post(interaction, channel_id) is False:
+            await interaction.response.edit_message(content=f"I can't post in <#{channel_id}>.",
+                                                    embed=await self.module.bot_embed(), view=self)
+            return
+        await interaction.response.defer()
+        await self.module.set_board_channel(interaction, channel_id)
+        await interaction.edit_original_response(content=f"The server board is now in <#{channel_id}>.",
+                                                 embed=await self.module.bot_embed(), view=self)
+
+    @discord.ui.button(label="Turn whitelist requests off", style=discord.ButtonStyle.danger, row=2)
     async def whitelist_off(self, interaction: discord.Interaction, button: discord.ui.Button[BotPanel]) -> None:
         await self.module.set_whitelist_channel(interaction, None)
         await interaction.response.edit_message(content="Whitelist requests are off.",
+                                                embed=await self.module.bot_embed(), view=self)
+
+    @discord.ui.button(label="Turn the server board off", style=discord.ButtonStyle.danger, row=2)
+    async def board_off(self, interaction: discord.Interaction, button: discord.ui.Button[BotPanel]) -> None:
+        await self.module.set_board_channel(interaction, None)
+        await interaction.response.edit_message(content="The server board is off. You can delete its old message.",
                                                 embed=await self.module.bot_embed(), view=self)

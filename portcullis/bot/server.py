@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""``/server list|status|power|send`` and ``/backups``."""
+"""``/server list|status|power|send|console`` and ``/backups``."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from discord import app_commands
 
 from portcullis.assets import game_art
 from portcullis.bot.base import Module, fill, reply, short_error, state_text, valid_line
-from portcullis.core.relay import escape
+from portcullis.core.relay import console_safe, escape
 from portcullis.core.types import PowerAction, ServerState, ServerStatus
 from portcullis.db.repos import ServerRow
 
@@ -30,6 +30,34 @@ POWER_ACTIONS = (PowerAction.START, PowerAction.STOP, PowerAction.RESTART)
 VERBS = {"start": "Starting", "stop": "Stopping", "restart": "Restarting"}
 STATUS_TIMEOUT = 8.0
 SAY_KEY = "say"  # per-server setting: console command template for in-game chat, e.g. "say {message}"
+QUICK_KEY = "quick_commands"  # per-server setting: [{"label": "Save world", "command": "save"}, ...]
+QUICK_LIMIT = 5
+CONSOLE_DEFAULT, CONSOLE_MAX = 20, 50
+CONSOLE_CHARS = 1800  # leaves room for the heading and code fences in Discord's 2000-character limit
+
+
+def quick_commands(value: object) -> list[dict[str, str]]:
+    """The stored quick commands, ignoring anything malformed."""
+    if not isinstance(value, list):
+        return []
+    out = []
+    for item in value[:QUICK_LIMIT]:
+        if isinstance(item, dict) and isinstance(item.get("label"), str) and isinstance(item.get("command"), str):
+            out.append({"label": item["label"], "command": item["command"]})
+    return out
+
+
+def console_block(lines: list[str]) -> str:
+    """The newest lines that fit in one message, oldest first, inside a code block."""
+    kept: list[str] = []
+    size = 0
+    for text in reversed(lines):
+        safe = console_safe(text)
+        if size + len(safe) + 1 > CONSOLE_CHARS:
+            break
+        kept.append(safe)
+        size += len(safe) + 1
+    return "```\n" + "\n".join(reversed(kept)) + "\n```"
 
 
 def status_embed(row: ServerRow, status: ServerStatus) -> discord.Embed:
@@ -42,6 +70,8 @@ def status_embed(row: ServerRow, status: ServerStatus) -> discord.Embed:
     if status.memory_mb is not None:
         limit = f" / {status.memory_limit_mb} MB" if status.memory_limit_mb else " MB"
         embed.add_field(name="Memory", value=f"{status.memory_mb}{limit}")
+    if status.started_at is not None and status.state is ServerState.RUNNING:
+        embed.add_field(name="Up since", value=discord.utils.format_dt(status.started_at, "R"))
     if status.players:
         names = ", ".join(escape(p.name) for p in status.players)
         embed.add_field(name="Online now", value=names if len(names) <= 1000 else names[:999] + "…", inline=False)
@@ -55,9 +85,9 @@ def status_embed(row: ServerRow, status: ServerStatus) -> discord.Embed:
 
 
 class PowerButtons(discord.ui.View):
-    """Start/Stop/Restart under a status reply, shown to moderators only."""
+    """Start/Stop/Restart under a status reply, plus the server's quick commands. Moderators only."""
 
-    def __init__(self, module: ServerModule, row: ServerRow) -> None:
+    def __init__(self, module: ServerModule, row: ServerRow, quick: list[dict[str, str]] | None = None) -> None:
         super().__init__(timeout=600)
         self.module = module
         self.row = row
@@ -67,6 +97,16 @@ class PowerButtons(discord.ui.View):
             button: discord.ui.Button[PowerButtons] = discord.ui.Button(label=action.value.capitalize(), style=style)
             button.callback = self._handler(action)  # type: ignore[method-assign]
             self.add_item(button)
+        for item in quick or []:
+            quick_button: discord.ui.Button[PowerButtons] = discord.ui.Button(
+                label=item["label"][:80], style=discord.ButtonStyle.primary, row=1)
+            quick_button.callback = self._quick(item)  # type: ignore[method-assign]
+            self.add_item(quick_button)
+
+    def _quick(self, item: dict[str, str]):  # noqa: ANN202
+        async def press(interaction: discord.Interaction) -> None:
+            await self.module.run_quick(interaction, self.row, item)
+        return press
 
     def _handler(self, action: PowerAction):  # noqa: ANN202
         async def press(interaction: discord.Interaction) -> None:
@@ -110,7 +150,10 @@ class ServerModule(Module):
             await reply(interaction, f"Couldn't get the status of {escape(row.name)} from AMP: "
                                      f"{escape(short_error(exc))}")
             return
-        extra = {"view": PowerButtons(self, row)} if self.ctx.access.is_mod(interaction.user) else {}
+        extra = {}
+        if self.ctx.access.is_mod(interaction.user):
+            quick = quick_commands(await self.ctx.settings.get(QUICK_KEY, scope=row.shard_id))
+            extra["view"] = PowerButtons(self, row, quick)
         await reply(interaction, embed=status_embed(row, status), **extra)
 
     async def server_power(self, interaction: discord.Interaction, server: str, action: str) -> None:
@@ -177,6 +220,46 @@ class ServerModule(Module):
                                     target=text.split(" ", 1)[0][:40] if as_ == "console" else None)
         await reply(interaction, f"Sent to **{escape(row.name)}**.")
 
+    async def run_quick(self, interaction: discord.Interaction, row: ServerRow, item: dict[str, str]) -> None:
+        """One of the admin-defined quick commands, pressed under ``/server status``."""
+        node = "server.quick"
+        if not await self.require_mod(interaction, node, row.shard_id):
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            await self.ctx.port.send_console(row.shard_id, item["command"])
+        except Exception as exc:  # noqa: BLE001
+            await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id,
+                                        target=item["label"][:40], result="failed",
+                                        detail={"error": short_error(exc)})
+            await reply(interaction, f"AMP didn't take {escape(item['label'])}: {escape(short_error(exc))}")
+            return
+        await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id,
+                                    target=item["label"][:40])
+        await reply(interaction, f"Ran **{escape(item['label'])}** on **{escape(row.name)}**.")
+
+    async def server_console(self, interaction: discord.Interaction, server: str,
+                             lines: int = CONSOLE_DEFAULT) -> None:
+        """The last console lines from AMP's own history, so a relay channel isn't needed to peek."""
+        if not await self.in_guild(interaction):
+            return
+        row = await self.server(interaction, server)
+        if row is None or not await self.require_mod(interaction, "server.console.read", row.shard_id):
+            return
+        lines = max(1, min(lines, CONSOLE_MAX))
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            history = await asyncio.wait_for(self.ctx.port.recent_console(row.shard_id, limit=lines), STATUS_TIMEOUT)
+        except Exception as exc:  # noqa: BLE001
+            await reply(interaction, f"Couldn't read the console of {escape(row.name)}: {escape(short_error(exc))}")
+            return
+        history = [t for t in history if t.strip()]
+        if not history:
+            await reply(interaction, f"{escape(row.name)} has no recent console output.")
+            return
+        await self.ctx.audit.record("server.console.read", actor_id=interaction.user.id, shard_id=row.shard_id)
+        await reply(interaction, f"Last console lines of **{escape(row.name)}**:\n{console_block(history)}")
+
     async def backups(self, interaction: discord.Interaction, server: str) -> None:
         if not await self.in_guild(interaction):
             return
@@ -234,6 +317,13 @@ class ServerModule(Module):
                                    app_commands.Choice(name="In-game chat", value="chat")])
         async def server_send(interaction: discord.Interaction, server: str, text: str, as_: str = "console") -> None:
             await self.server_send(interaction, server, text, as_)
+
+        @group.command(name="console", description="Show a server's latest console lines (operators)")
+        @app_commands.describe(server="The game server", lines=f"How many lines (1 to {CONSOLE_MAX})")
+        @app_commands.autocomplete(server=auto)
+        async def server_console(interaction: discord.Interaction, server: str,
+                                 lines: app_commands.Range[int, 1, CONSOLE_MAX] = CONSOLE_DEFAULT) -> None:
+            await self.server_console(interaction, server, lines)
 
         @app_commands.command(name="backups", description="List a server's backups (operators)")
         @app_commands.guild_only()

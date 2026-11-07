@@ -187,13 +187,15 @@ Three levels: **everyone** in the server; **operators** (members with a role in 
 | Command | Who | What it does |
 |---|---|---|
 | `/server list` | everyone | Every server with its state and player count. |
-| `/server status <server>` | everyone | State, players, CPU and memory. Operators also get Start, Stop and Restart buttons. |
+| `/server status <server>` | everyone | State, players, CPU, memory and how long it has been up. Operators also get Start, Stop and Restart buttons, plus the server's quick commands (8.6). |
 | `/server power <server> <start\|stop\|restart>` | operators | Asks AMP to start, stop or restart. The reply is public, so the channel sees who did it. |
 | `/server send <server> <text> [as]` | operators | Sends one console command, or a chat message if the server has a chat command set (8.6). Only the command word is logged, never its arguments. |
+| `/server console <server> [lines]` | operators | The latest console lines (20 by default, up to 50) from AMP's own history, without needing a console relay. AMP's own lines can be mixed in. |
 | `/backups <server>` | operators | Lists the server's backups. Making and deleting backups from Discord comes later. |
 | `/whitelist request <server> [name]` | everyone | Asks the operators to whitelist you. Without `name`, your linked name is used. |
 | `/whitelist add\|remove <server> <name>` | operators | Runs the server's whitelist command (8.6). |
 | `/link [server] [name]` | everyone | Without options: your linked names. With both: gives you a code to type in game chat, which proves the name is yours. Only for games whose chat Portcullis can read. |
+| `/notify [server]` | everyone | Get a direct message when a server comes online; run it again to stop. Without `server`: the servers you follow. Up to 25 servers, at most one message per server every 5 minutes. |
 | `/player lookup <name>` | everyone | When a player was last seen, total play time and servers. |
 | `/player top [server]` | everyone | Most play time. |
 | `/poll create <question> <options> [hours]` | operators | Posts a poll with a button per answer (separate answers with `;`). Each member has one vote and can change it. It closes after `hours`, or with its Close button. |
@@ -230,6 +232,10 @@ Mentions never ping: everything the bot posts has `@everyone`, `@here`, user and
 - **Game commands**: the console commands Portcullis sends for that game, with `{name}` or `{message}` where the player name or text goes. Examples: `whitelist add {name}`, `whitelist remove {name}`, `say {message}`. Each game has its own; check its console help. Whitelist commands and `/server send ... as:chat` stay off for a server until these are filled in.
 
 `/setup bot` sets the channel where whitelist requests appear, with Approve and Deny buttons for operators. Until a channel is set, whitelist requests are off. The requester gets a direct message with the decision, if they allow messages from server members.
+
+- **Quick commands**: up to 5 one-click console commands, one per line as `Label = command`, for example `Save world = save`. They show as buttons under `/server status` for operators, and each press is logged with its label.
+
+`/setup bot` also has a channel picker for the **live server board**: one message that Portcullis keeps editing with every server's state and player count (hidden servers left out). It updates at most every 30 seconds. If someone deletes the message, the next update posts a new one. **Turn the server board off** stops it; delete the old message yourself.
 
 Player names are checked before they go into a console command: names with line breaks or characters such as `;`, `|`, `&`, quotes or `$` are refused, so a name can't add a second command.
 

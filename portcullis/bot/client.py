@@ -14,6 +14,7 @@ from discord import app_commands
 
 from portcullis.bot.base import Access, Ctx
 from portcullis.bot.commands import DYNAMIC_ITEMS, Modules
+from portcullis.bot.notify import Notifier
 from portcullis.core.live import LinkVerifier, LiveState, PlayerTracker
 from portcullis.core.port import AmpPort
 from portcullis.core.relay import GameHooks, Relay, RelayTarget, no_hooks
@@ -62,15 +63,18 @@ class PortcullisBot(discord.Client):
         self.port = port
         self.guild_id = guild_id
         self.refresh_every = refresh_every
-        self.live = LiveState(on_change=self.update_presence)
+        self.live = LiveState(on_change=self._live_changed)
         self.ctx = Ctx(port, db, access, guild_id, live=self.live, on_relay_changed=self.apply_relays,
                        has_chat=lambda game: hooks(game).chat is not None, client=self)
         self.servers = self.ctx.servers
         self.audit = self.ctx.audit
         self.modules = Modules(self.ctx)
+        self.board = self.ctx.board
+        self.notifier = Notifier(self.ctx)
         self.relay = Relay(port, DiscordSink(self), hooks=hooks, follow_all=True)
         self.relay.listeners += [
             self.live,
+            self.notifier,
             PlayerTracker(self.ctx.players),
             LinkVerifier(self.ctx.links, self.ctx.users, on_linked=self.modules.community.on_linked),
         ]
@@ -101,6 +105,7 @@ class PortcullisBot(discord.Client):
                         "Invite it with the URL from docs/SETUP.md.", self.guild_id)
         self._presence_text = None  # a reconnect clears the presence; set it again
         await self.update_presence()
+        await self.board.changed()
 
     # ---------------------------------------------------------------- refresh
 
@@ -144,7 +149,12 @@ class PortcullisBot(discord.Client):
             await asyncio.sleep(self.refresh_every)
             await self.refresh()
 
-    # ---------------------------------------------------------------- profile status
+    # ---------------------------------------------------------------- profile status and server board
+
+    async def _live_changed(self) -> None:
+        await self.update_presence()
+        if self.is_ready():
+            await self.board.changed()
 
     def presence(self) -> tuple[discord.Status, discord.BaseActivity]:
         summary = self.live.summary()
@@ -185,5 +195,7 @@ class PortcullisBot(discord.Client):
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
         self._refresher = None
+        await self.board.close()
+        await self.notifier.close()
         await self.relay.close()
         await super().close()

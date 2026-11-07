@@ -308,3 +308,38 @@ async def all_settings(db: Database) -> dict[str, dict[str, Any]]:
         for r in await cur.fetchall():
             out.setdefault(r["scope"], {})[r["key"]] = json.loads(r["value"])
     return out
+
+
+class NotifyRepo:
+    """Who wants a DM when a server comes online (``/notify``)."""
+
+    LIMIT = 25  # servers per member
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    async def toggle(self, discord_id: int, shard_id: str) -> bool | None:
+        """Subscribe or unsubscribe. True = now subscribed, False = removed, None = at the limit."""
+        sid = shard_id.lower()
+        cur = await self.db.conn.execute(
+            "DELETE FROM notify_subscriptions WHERE discord_id = ? AND shard_id = ?", (discord_id, sid))
+        if cur.rowcount:
+            return False
+        if len(await self.for_member(discord_id)) >= self.LIMIT:
+            return None
+        await self.db.conn.execute(
+            "INSERT INTO notify_subscriptions (discord_id, shard_id, created_at) VALUES (?, ?, ?)",
+            (discord_id, sid, now_iso()))
+        return True
+
+    async def for_member(self, discord_id: int) -> list[str]:
+        async with self.db.conn.execute(
+            "SELECT shard_id FROM notify_subscriptions WHERE discord_id = ? ORDER BY created_at", (discord_id,)
+        ) as cur:
+            return [r["shard_id"] for r in await cur.fetchall()]
+
+    async def for_server(self, shard_id: str) -> list[int]:
+        async with self.db.conn.execute(
+            "SELECT discord_id FROM notify_subscriptions WHERE shard_id = ? ORDER BY created_at", (shard_id.lower(),)
+        ) as cur:
+            return [int(r["discord_id"]) for r in await cur.fetchall()]
