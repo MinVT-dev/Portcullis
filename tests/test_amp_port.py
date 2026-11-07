@@ -15,7 +15,7 @@ from portcullis.amp.client import AmpClient
 from portcullis.amp.port import AmpServerPort
 from portcullis.core.port import AmpPort
 from portcullis.core.types import ConsoleLine, PlayerJoined, PowerAction, ServerId, ServerState
-from tests.fakes.amp_server import PASSWORD, SHARD_ID, USERNAME, FakeAmp, wait_for
+from tests.fakes.amp_server import PASSWORD, SHARD_ID, SPIRE_ID, TENANT, USERNAME, FakeAmp, wait_for
 
 SID = ServerId(SHARD_ID)
 
@@ -96,4 +96,23 @@ async def test_events_share_one_connection_and_rejoin(port: AmpServerPort, fake:
     assert fake.left == []  # b still listens
     b.cancel()
     await asyncio.gather(b, return_exceptions=True)
+    await wait_for(lambda: fake.left == [SHARD_ID])
+
+
+async def test_events_join_with_spire_scope_when_tenant_is_refused(port: AmpServerPort, fake: FakeAmp) -> None:
+    fake.join_scope = SPIRE_ID
+    got: list = []
+
+    async def consume() -> None:
+        async for event in port.events(SID):
+            got.append(event)
+
+    task = asyncio.create_task(consume())
+    await wait_for(lambda: fake.joined == [SHARD_ID])
+    assert fake.join_attempts[:2] == [[TENANT, SHARD_ID], [SPIRE_ID, SHARD_ID]]
+    assert port.hub.scope_kind == "spire"
+    await fake.broadcast("ConsoleLine", {"shardId": SHARD_ID, "text": "hello", "seq": 1})
+    await wait_for(lambda: len(got) == 1)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
     await wait_for(lambda: fake.left == [SHARD_ID])

@@ -54,7 +54,7 @@ Content-Type: application/json
 ```
 → `202`. The command is published to the shard over the message bus **[S]**. A `{}` body gets 400 `Command` required **[V]**.
 
-Live events: `POST /api/auth/hub-token` returns a single-use ticket. Then connect SignalR to `/hubs/shard?access_token=<ticket>` and call `JoinShard(shardId)`. See section 8.
+Live events: `POST /api/auth/hub-token` returns a single-use ticket. Then connect SignalR to `/hubs/shard?access_token=<ticket>` and call `JoinShard(scope, shardId)` (two arguments). See section 8.
 
 ## 2. Base URL and transport
 
@@ -241,7 +241,7 @@ All 71 nodes **[V]**:
 
 | Hub | Negotiate | Client → server **[B]** | Server → client events **[B]** |
 |---|---|---|---|
-| `/hubs/shard` | **[V]** 200 with a fresh ticket. Transports: WebSockets, ServerSentEvents, LongPolling | `JoinShard(shardId)`, `LeaveShard(shardId)` | `ConsoleLine`, `Metrics`, `UserJoined`, `UserLeft`, `UserRoster`, `ShardStateChanged`, `Lifecycle`, `ScheduleRun`, `Snapshot`, `Migration` |
+| `/hubs/shard` | **[V]** 200 with a fresh ticket. Transports: WebSockets, ServerSentEvents, LongPolling | `JoinShard(scope, shardId)`, `LeaveShard(scope, shardId)` (two arguments in the panel's code; `scope` is the tenant or spire id) | `ConsoleLine`, `Metrics`, `UserJoined`, `UserLeft`, `UserRoster`, `ShardStateChanged`, `Lifecycle`, `ScheduleRun`, `Snapshot`, `Migration` |
 | `/hubs/spire` | **[V]** 200 with a fresh ticket | `JoinSpire`, `LeaveSpire`, `JoinNetwork`, `LeaveNetwork` | `SpirePresence`, `SpireState`, `NetworkStatus` |
 | `/hubs/tasks` | **[V]** 200 with a fresh ticket | none | `TaskUpsert` |
 

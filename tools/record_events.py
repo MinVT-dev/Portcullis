@@ -147,37 +147,11 @@ async def snapshot(amp: AmpClient, shard_ids: list[str]) -> dict[str, Any]:
     return data
 
 
-# Other ways to call JoinShard, tried once when the plain call fails, so the server's error messages
-# show which argument shape it expects. SignalR names arity and type mismatches in its errors.
-JOIN_VARIANTS: tuple[tuple[str, Any], ...] = (
-    ("uppercase id", lambda sid, name: [sid.upper()]),
-    ("object {shardId}", lambda sid, name: [{"shardId": sid}]),
-    ("shard name", lambda sid, name: [name]),
-    ("no arguments", lambda sid, name: []),
-    ("two arguments", lambda sid, name: [sid, None]),
-)
-
-
 def shard_state_label(snap: dict[str, Any], sid: str) -> str:
     state = (snap.get("shards", {}).get(sid) or {}).get("state")
     if not isinstance(state, dict) or "error" in state:
         return "state unknown"
     return state_from(state)[0].label.lower()
-
-
-async def try_join_variants(conn: HubConnection, sid: str, name: str, recorder: Recorder) -> None:
-    for label, build in JOIN_VARIANTS:
-        args = build(sid, name)
-        try:
-            result = await conn.invoke("JoinShard", *args)
-        except HubError as exc:
-            recorder.on_lifecycle("shard", "join-variant-failed", {"variant": label, "arguments": args,
-                                                                   "error": str(exc)})
-        else:
-            recorder.on_lifecycle("shard", "join-variant-ok", {"variant": label, "arguments": args,
-                                                               "result": result})
-            with contextlib.suppress(HubError):
-                await conn.send("LeaveShard", *args)
 
 
 PANEL_SCRIPT = re.compile(r"""(?:src|href)=["']([^"']+\.js)["']""")
@@ -275,6 +249,10 @@ async def run(args: argparse.Namespace) -> int:
             return 1
         shards = await amp.shards.get_shards()
         names = {str(s.id): s.name for s in shards if s.id}
+        # The panel calls JoinShard(scope, shardId); scope is the tenant id or the spire id.
+        scopes = {str(s.id): [(k, v) for k, v in (("tenant", s.tenant_id),
+                                                  ("spire", str(s.spire_id) if s.spire_id else None)) if v]
+                  for s in shards if s.id}
         shard_ids = [s.lower() for s in args.shard] or list(names)
         unknown = [s for s in shard_ids if s not in names]
         if unknown:
@@ -295,26 +273,31 @@ async def run(args: argparse.Namespace) -> int:
 
         mode = await pick_mode(amp, args.mode, recorder)
         extra["mode"] = mode
-        variants_tried = False
+        working: list[str] = []  # the scope kind that worked, once one has
 
         async def join(conn: HubConnection) -> None:
-            nonlocal variants_tried
             failed: dict[str, str] = {}
             for sid in shard_ids:
-                recorder.on_lifecycle("shard", "join", {"shard": sid, "name": names[sid], "arguments": [sid]})
-                try:
-                    result = await conn.invoke("JoinShard", sid)
-                except HubError as exc:
-                    failed[sid] = str(exc)
-                    recorder.on_lifecycle("shard", "join-failed", {
-                        "shard": sid, "name": names[sid], "state": shard_state_label(snap, sid),
-                        "arguments": [sid], "error": str(exc)})
-                    continue
-                recorder.on_lifecycle("shard", "joined", {"shard": sid, "result": result})
-            if failed and not variants_tried:
-                variants_tried = True
-                sid = next(iter(failed))
-                await try_join_variants(conn, sid, names[sid], recorder)
+                candidates = sorted(scopes[sid], key=lambda c: c[0] not in working)
+                errors: list[str] = []
+                for kind, scope in candidates:
+                    call = [scope, sid]
+                    recorder.on_lifecycle("shard", "join", {"shard": sid, "name": names[sid], "scope": kind,
+                                                            "arguments": call})
+                    try:
+                        result = await conn.invoke("JoinShard", *call)
+                    except HubError as exc:
+                        errors.append(f"{kind}: {exc}")
+                        recorder.on_lifecycle("shard", "join-failed", {
+                            "shard": sid, "name": names[sid], "scope": kind, "state": shard_state_label(snap, sid),
+                            "arguments": call, "error": str(exc)})
+                        continue
+                    working[:] = [kind]
+                    extra["join_scope"] = kind
+                    recorder.on_lifecycle("shard", "joined", {"shard": sid, "scope": kind, "result": result})
+                    break
+                else:
+                    failed[sid] = "; ".join(errors) or "no tenant or spire id"
             if len(failed) == len(shard_ids):
                 raise HubError("no shard could be joined: " + "; ".join(
                     f"{names[s]}: {e}" for s, e in failed.items()))

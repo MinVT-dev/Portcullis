@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.fakes.amp_server import PASSWORD, SHARD_ID, USERNAME, FakeAmp, wait_for
+from tests.fakes.amp_server import PASSWORD, SHARD_ID, SPIRE_ID, TENANT, USERNAME, FakeAmp, wait_for
 from tools import record_events
 
 
@@ -69,19 +69,27 @@ async def test_recorder_gives_up_when_join_always_fails(fake: FakeAmp, base_url:
     capture = next(tmp_path.iterdir())
     records = lifecycle_of(capture)
     kinds = [r["event"] for r in records]
-    assert kinds.count("join-failed") == 3 and kinds.count("gave-up") == 1
-    failed = next(r for r in records if r["event"] == "join-failed")
-    assert failed["shard"] == SHARD_ID and failed["arguments"] == [SHARD_ID]
-    assert failed["state"] == "online" and "error on the server" in failed["error"]
-
-    # The alternative argument shapes are tried once, and their errors kept.
-    variants = {r["variant"]: r for r in records if r["event"].startswith("join-variant")}
-    assert set(variants) == {v for v, _ in record_events.JOIN_VARIANTS}
-    assert "expects 1" in variants["two arguments"]["error"]
-    assert "Error binding" in variants["object {shardId}"]["error"]
+    # Both scopes are tried on each of the 3 connects before giving up.
+    assert kinds.count("join-failed") == 6 and kinds.count("gave-up") == 1
+    failed = [r for r in records if r["event"] == "join-failed"][:2]
+    assert [r["arguments"] for r in failed] == [[TENANT, SHARD_ID], [SPIRE_ID, SHARD_ID]]
+    assert failed[0]["state"] == "online" and "error on the server" in failed[0]["error"]
 
     panel = (capture / "panel_hub_calls.txt").read_text()
-    assert "invoke('JoinShard', shardId)" in panel
+    assert "invoke(`JoinShard`,e,t)" in panel
+
+
+async def test_recorder_falls_back_to_spire_scope(fake: FakeAmp, base_url: str, tmp_path: Path,
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AMP_PASSWORD", PASSWORD)
+    fake.join_scope = SPIRE_ID
+    task = asyncio.create_task(record_events.run(recorder_args(base_url, tmp_path, duration=2.0)))
+    await wait_for(lambda: fake.joined == [SHARD_ID])
+    assert await task == 0
+    capture = next(tmp_path.iterdir())
+    joined = [r for r in lifecycle_of(capture) if r["event"] == "joined"]
+    assert joined[0]["scope"] == "spire"
+    assert "join_scope: spire" in (capture / "summary.txt").read_text()
 
 
 async def test_recorder_rejects_unknown_shard(fake: FakeAmp, base_url: str, tmp_path: Path,
