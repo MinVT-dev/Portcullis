@@ -102,6 +102,15 @@ class Recorder:
             print(f"{record['t'][11:19]} {label or event.hub}:{event.target} {preview[:160]}")
 
     def _worth_echoing(self, event: HubEvent, shard: str | None = None) -> bool:
+        first = event.arguments[0] if event.arguments else None
+        if event.target == "ConsoleLine" and isinstance(first, dict) and first.get("streamId") == "update":
+            return False  # SteamCMD download output: hundreds of lines per update
+        if event.target == "Lifecycle" and isinstance(first, dict) and first.get("kind") == 1:
+            # Task progress ticks many times a second; show each new stage once.
+            key, value = ("Lifecycle", shard or ""), f"{first.get('taskId')}:{first.get('subTask')}"
+            changed = self._last_seen.get(key) != value
+            self._last_seen[key] = value
+            return changed
         if event.target not in NOISY:
             return True
         if event.target == "Metrics":

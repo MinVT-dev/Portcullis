@@ -96,6 +96,24 @@ def test_noisy_events_are_echoed_only_when_they_change(tmp_path: Path) -> None:
     assert seen == [False, True, False, True, True, False, True, True]
 
 
+def test_update_output_and_task_progress_are_quiet(tmp_path: Path) -> None:
+    from portcullis.amp.signalr import HubEvent
+
+    rec = record_events.Recorder(tmp_path, record_events.CaptureRedactor(scrub_ips=True), echo=True)
+
+    def progress(sub: str) -> HubEvent:
+        return HubEvent("shard", "Lifecycle", [{"kind": 1, "taskId": "t1", "subTask": sub, "message": "1 B of 2 B"}])
+
+    seen = [
+        rec._worth_echoing(HubEvent("shard", "ConsoleLine", [{"streamId": "update", "text": "Downloading"}])),
+        rec._worth_echoing(progress("Configuring")),
+        rec._worth_echoing(progress("Configuring")),
+        rec._worth_echoing(progress("Start Server")),
+        rec._worth_echoing(HubEvent("shard", "Lifecycle", [{"kind": 0, "state": 25, "message": "Running"}])),
+    ]
+    assert seen == [False, True, False, True, True]
+
+
 def test_versions_are_not_mistaken_for_ip_addresses() -> None:
     r = record_events.CaptureRedactor(scrub_ips=True)
     assert r.text("agent 3.0.0.6+f3d1a77cea from 192.168.1.20") == "agent 3.0.0.6+f3d1a77cea from <ip>"
