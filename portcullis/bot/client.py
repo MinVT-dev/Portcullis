@@ -15,6 +15,7 @@ from discord import app_commands
 from portcullis.bot.base import Access, Ctx, problem_text
 from portcullis.bot.commands import DYNAMIC_ITEMS, Modules
 from portcullis.bot.notify import Notifier
+from portcullis.core.console_rules import HIDE_KEY, stored_rules
 from portcullis.core.live import LinkVerifier, LiveState, PlayerTracker
 from portcullis.core.port import AmpPort
 from portcullis.core.relay import GameHooks, Relay, RelayTarget, no_hooks
@@ -182,11 +183,13 @@ class PortcullisBot(discord.Client):
 
     async def apply_relays(self) -> None:
         rows = await self.servers.list()
-        await self.relay.apply([
-            RelayTarget(server=r.shard_id, name=r.name, game=r.template, console_channel=r.console_channel,
-                        event_channel=r.event_channel, chat_channel=r.chat_channel)
-            for r in rows
-        ])
+        targets = []
+        for r in rows:
+            hide = stored_rules(await self.ctx.settings.get(HIDE_KEY, scope=r.shard_id)) if r.console_channel else ()
+            targets.append(RelayTarget(server=r.shard_id, name=r.name, game=r.template,
+                                       console_channel=r.console_channel, event_channel=r.event_channel,
+                                       chat_channel=r.chat_channel, hide=hide))
+        await self.relay.apply(targets)
 
     async def _refresh_loop(self) -> None:
         while True:

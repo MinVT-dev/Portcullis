@@ -45,6 +45,14 @@ from portcullis.bot.server import (
     quick_commands,
     valid_address,
 )
+from portcullis.core.console_rules import (
+    DENY_KEY,
+    HIDE_KEY,
+    parse_denylist,
+    parse_hide_rules,
+    stored_denylist,
+    stored_rules,
+)
 from portcullis.core.relay import escape
 from portcullis.db.repos import ServerRow
 
@@ -184,6 +192,10 @@ class SetupModule(Module):
         operators = id_list(commands.get(SERVER_OPERATORS))
         embed.add_field(name="Server operators (can do everything on this server)",
                         value=", ".join(role_mention(r) for r in operators) or "none", inline=False)
+        hide = stored_rules(commands.get(HIDE_KEY))
+        deny = sorted(stored_denylist(commands.get(DENY_KEY)))
+        embed.add_field(name="Hidden console lines", value=f"{len(hide)} rule(s)" if hide else "none")
+        embed.add_field(name="Blocked console commands", value=", ".join(code(w) for w in deny)[:1000] or "none")
         embed.set_footer(text="Pick a channel below to change a relay. This panel works for 15 minutes.")
         return embed
 
@@ -282,6 +294,26 @@ class SetupModule(Module):
                 await self.ctx.settings.set(key, value, scope=scope, by=by)
         await self.ctx.settings.set(WELCOME_KEY, yes(welcome), scope=scope, by=by)
         await self.ctx.audit.record("setup.server.options", actor_id=by, shard_id=scope)
+        return None
+
+    async def save_console_rules(self, interaction: discord.Interaction, row: ServerRow, hide_text: str,
+                                 deny_text: str) -> str | None:
+        """Store hide rules and blocked command words. Returns a problem to show, or None."""
+        rules, problem = parse_hide_rules(hide_text)
+        if problem:
+            return problem
+        words, problem = parse_denylist(deny_text)
+        if problem:
+            return problem
+        scope, by = row.shard_id, interaction.user.id
+        for key, value in ((HIDE_KEY, rules), (DENY_KEY, words)):
+            if value:
+                await self.ctx.settings.set(key, value, scope=scope, by=by)
+            else:
+                await self.ctx.settings.delete(key, scope=scope)
+        await self.ctx.audit.record("setup.server.console_rules", actor_id=by, shard_id=scope,
+                                    detail={"hide": len(rules), "blocked": words})
+        await self.ctx.relay_changed()
         return None
 
     async def set_server_operators(self, interaction: discord.Interaction, row: ServerRow, roles: list[Any]) -> str:
@@ -569,6 +601,11 @@ class ServerPanel(AdminView):
         values = await self.module.ctx.settings.all(scope=self.row.shard_id)
         await interaction.response.send_modal(ServerOptionsModal(self, values))
 
+    @discord.ui.button(label="Console rules", style=discord.ButtonStyle.primary, row=4)
+    async def console_rules(self, interaction: discord.Interaction, button: discord.ui.Button[ServerPanel]) -> None:
+        values = await self.module.ctx.settings.all(scope=self.row.shard_id)
+        await interaction.response.send_modal(ConsoleRulesModal(self, values))
+
     @discord.ui.button(label="Server operators (owners)", style=discord.ButtonStyle.secondary, row=4)
     async def operators(self, interaction: discord.Interaction, button: discord.ui.Button[ServerPanel]) -> None:
         if not self.module.ctx.access.is_owner(interaction.user):
@@ -594,6 +631,28 @@ class ModerationModal(discord.ui.Modal, title="Moderation commands"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         problem = await self.panel.module.save_mod_commands(interaction, self.panel.row,
                                                             {k: v.value for k, v in self.inputs.items()})
+        await self.panel.refresh(interaction, problem or "Saved.")
+
+
+class ConsoleRulesModal(discord.ui.Modal, title="Console rules"):
+    def __init__(self, panel: ServerPanel, values: dict[str, Any]) -> None:
+        super().__init__()
+        self.panel = panel
+        self.hide: discord.ui.TextInput[ConsoleRulesModal] = discord.ui.TextInput(
+            label="Hidden console lines (one rule per line)", style=discord.TextStyle.paragraph,
+            default="\n".join(stored_rules(values.get(HIDE_KEY))),
+            placeholder="Text to hide anywhere in a line, e.g. Saving chunks\nre:\\d+\\.\\d+\\.\\d+\\.\\d+ hides IPs",
+            required=False, max_length=4000)
+        self.deny: discord.ui.TextInput[ConsoleRulesModal] = discord.ui.TextInput(
+            label="Blocked console commands (owners may still)", style=discord.TextStyle.paragraph,
+            default=" ".join(sorted(stored_denylist(values.get(DENY_KEY)))), placeholder="op deop stop ban-ip",
+            required=False, max_length=1000)
+        self.add_item(self.hide)
+        self.add_item(self.deny)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        problem = await self.panel.module.save_console_rules(interaction, self.panel.row, self.hide.value,
+                                                             self.deny.value)
         await self.panel.refresh(interaction, problem or "Saved.")
 
 

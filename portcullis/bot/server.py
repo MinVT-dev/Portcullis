@@ -15,6 +15,7 @@ from discord import app_commands
 from portcullis.assets import game_art
 from portcullis.bot.backups import BackupView
 from portcullis.bot.base import NONE, Ctx, Module, card, code, fill, reply, short_error, state_text, valid_line
+from portcullis.core.console_rules import DENY_KEY, HIDE_KEY, blocked_word, hider, stored_denylist, stored_rules
 from portcullis.core.relay import console_safe, escape
 from portcullis.core.types import PowerAction, ServerState, ServerStatus
 from portcullis.db.repos import ServerRow
@@ -470,6 +471,13 @@ class ServerModule(Module):
             line = fill(template, message=text)
         else:
             line = text
+            word = blocked_word(text, stored_denylist(await self.ctx.settings.get(DENY_KEY, scope=row.shard_id)))
+            if word and not self.ctx.access.is_owner(interaction.user):
+                await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id,
+                                            target=word, result="denied")
+                await reply(interaction, f"`{word}` is blocked on {escape(row.name)}. An admin can change the "
+                                         "blocked commands in `/setup server` → Console rules.")
+                return
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             await self.ctx.port.send_console(row.shard_id, line)
@@ -516,7 +524,8 @@ class ServerModule(Module):
         except Exception as exc:  # noqa: BLE001
             await reply(interaction, f"Couldn't read the console of {escape(row.name)}: {escape(short_error(exc))}")
             return
-        history = [t for t in history if t.strip()]
+        hide = hider(stored_rules(await self.ctx.settings.get(HIDE_KEY, scope=row.shard_id)))
+        history = [t for t in history if t.strip() and not (hide and hide(t))]
         if not history:
             await reply(interaction, f"{escape(row.name)} has no recent console output.")
             return
