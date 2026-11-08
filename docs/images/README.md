@@ -14,6 +14,9 @@ To replace a placeholder, save the real screenshot as a PNG under **the same fil
 | `server-offline.png` | A status card for an offline server |
 | `backups.png` | `/backups` with the Make a backup confirmation |
 | `alerts.png` | The reply after saving an alert rule |
+| `setup-server.png` | The `/setup server` panel for one server |
+| `setup-bot.png` | The `/setup bot` panel |
+| `help-v3.png` | `/help v3:` suggesting old V3 commands as you type |
 | `server-banner-dark.png`, `server-banner-light.png` | Real output from the bot's own `/server banner` renderer (`portcullis/bot/banners.py`), drawn with example servers |
 
 ## Screenshots still to take
@@ -23,10 +26,7 @@ To replace a placeholder, save the real screenshot as a PNG under **the same fil
 | `live-board.png` | The live server board message in its channel, with a few servers listed | Yes |
 | `console-relay.png` | A console relay channel with a few batches of console lines | Yes |
 | `whitelist-request.png` | A whitelist request in the requests channel, with its Approve and Deny buttons | Yes |
-| `setup-server.png` | The `/setup server` panel: the relay pickers and the buttons below them | Yes |
-| `setup-bot.png` | The `/setup bot` panel | Not yet |
 | `events-polls.png` | An event with Going and Cancel, or a poll with its buttons | Not yet |
-| `help-v3.png` | `/help v3:` for an old Gatekeeper V3 command | Not yet |
 
 ## Tips
 
