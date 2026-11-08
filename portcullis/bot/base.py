@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -18,7 +19,8 @@ from portcullis.core.port import AmpPort
 from portcullis.core.relay import STATE_ICONS, escape
 from portcullis.core.types import ServerState
 from portcullis.db.database import Database
-from portcullis.db.features import LinkCodeRepo, PlayerRepo, PollRepo, WhitelistRepo
+from portcullis.db.features import LinkCodeRepo, NotifyRepo, PlayerRepo, PollRepo, WhitelistRepo
+from portcullis.db.ops import AlertRuleRepo, EventRepo, WatchlistRepo, WhitelistEntryRepo
 from portcullis.db.repos import AuditRepo, ServerRepo, ServerRow, SettingsRepo, UserRepo
 
 log = logging.getLogger(__name__)
@@ -26,10 +28,99 @@ log = logging.getLogger(__name__)
 # Player names go into console commands (whitelist), so anything that could end or chain a command is refused.
 _NAME = re.compile(r"^[^\x00-\x1f\x7f;|&`\"'\\$<>{}]{1,48}$")
 _LINE = re.compile(r"^[^\x00-\x1f\x7f]{1,500}$")
+_REASON = re.compile(r"^[^\x00-\x1f\x7f;|&`\"'\\$<>{}]{1,100}$")
+
+
+# What a granted role may do. Full operators (PORTCULLIS_OPERATOR_ROLE_IDS) may do all of it.
+GROUPS = {
+    "power": "Start, stop and restart",
+    "console": "Console commands, quick commands, console view",
+    "whitelist": "Whitelist decisions and changes",
+    "moderation": "Kick and ban, watchlist, /user",
+    "polls": "Polls",
+    "events": "Events calendar",
+    "backups": "Backup list",
+}
+# Audit node prefix -> group. The first match wins.
+NODE_GROUPS = (
+    ("server.power", "power"), ("server.send", "console"), ("server.console", "console"),
+    ("server.quick", "console"), ("whitelist", "whitelist"), ("player.moderate", "moderation"),
+    ("watch", "moderation"), ("user", "moderation"), ("poll", "polls"), ("event", "events"),
+    ("backup", "backups"), ("schedule", "backups"),
+)
+ROLE_GRANTS = "role_grants"  # bot scope: {group: [role ids]}
+SERVER_OPERATORS = "operator_roles"  # server scope: [role ids] that may do everything on that server
+# Only owners may change these, here and through /admin import: they hand out operator powers.
+OWNER_ONLY_KEYS = frozenset({ROLE_GRANTS, SERVER_OPERATORS})
+
+# Bot-wide channels and roles set in /setup bot.
+ALERT_CHANNEL, ALERT_ROLE = "alert_channel", "alert_role"  # outages, crashes, high load, old backups
+MOD_CHANNEL = "mod_channel"  # watchlist and name-check notes, never pinged
+AUDIT_CHANNEL = "audit_channel"  # a live copy of the audit log
+SUMMARY_CHANNEL = "summary_channel"  # daily summary and play-time milestones
+COUNT_CHANNEL = "count_channel"  # a channel renamed to "N online"
+
+
+def group_for(node: str) -> str | None:
+    for prefix, group in NODE_GROUPS:
+        if node == prefix or node.startswith(prefix + "."):
+            return group
+    return None
+
+
+def role_ids(user: Any) -> set[int]:
+    return {r.id for r in getattr(user, "roles", ())}
+
+
+def as_id(value: object) -> int | None:
+    """A stored Discord id, or None if it's missing or malformed (settings can come from an import)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def id_list(value: object) -> list[int]:
+    """A stored list of Discord ids, ignoring anything malformed."""
+    if not isinstance(value, list):
+        return []
+    return [int(v) for v in value if isinstance(v, int) and not isinstance(v, bool)]
 
 
 def valid_name(name: str) -> bool:
     return bool(_NAME.match(name.strip())) and name.strip() == name
+
+
+# A role that Portcullis hands out or pings must not carry any of these.
+RISKY_PERMISSIONS = ("administrator", "manage_guild", "manage_roles", "manage_channels", "manage_webhooks",
+                     "manage_messages", "kick_members", "ban_members", "moderate_members", "mention_everyone")
+
+
+def role_problem(role: Any, guild: Any, access: Access, *, handed_out: bool) -> str | None:
+    """Why ``role`` can't be used for this, or None. ``handed_out``: Portcullis gives it to members."""
+    if role.is_default():
+        return "@everyone can't be used here."
+    if not handed_out:
+        return None
+    if getattr(role, "managed", False):
+        return "That role belongs to a bot or integration, so it can't be handed out."
+    risky = [p for p in RISKY_PERMISSIONS if getattr(role.permissions, p, False)]
+    if risky:
+        return f"That role has moderator permissions ({', '.join(risky)}). Pick a role without them."
+    if role.id in access.operator_role_ids:
+        return "That's an operator role. Pick a role without operator powers."
+    me = getattr(guild, "me", None)
+    if me is not None and getattr(me, "top_role", None) is not None and role >= me.top_role:
+        return "That role is above Portcullis's own role, so Discord won't let it hand the role out."
+    return None
+
+
+def valid_reason(text: str) -> bool:
+    """A kick or ban reason. It goes into a console command, so it gets the same limits as names."""
+    return bool(_REASON.match(text))
 
 
 def valid_line(text: str) -> bool:
@@ -79,6 +170,8 @@ class Ctx:
     on_relay_changed: Callable[[], Awaitable[None]] | None = None
     has_chat: Callable[[str | None], bool] = lambda game: False
     client: discord.Client | None = None
+    board: Any = None  # StatusBoard, set by Modules (it imports this module)
+    expected_offline: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.servers = ServerRepo(self.db)
@@ -89,6 +182,86 @@ class Ctx:
         self.whitelist = WhitelistRepo(self.db)
         self.links = LinkCodeRepo(self.db)
         self.polls = PollRepo(self.db)
+        self.notify = NotifyRepo(self.db)
+        self.whitelisted = WhitelistEntryRepo(self.db)
+        self.watchlist = WatchlistRepo(self.db)
+        self.events = EventRepo(self.db)
+        self.alert_rules = AlertRuleRepo(self.db)
+
+    async def allowed(self, user: Any, node: str, shard_id: str | None = None) -> bool:
+        """Full operators, a role granted the node's group, or one of the server's own operator roles."""
+        if self.access.is_mod(user):
+            return True
+        roles = role_ids(user)
+        if not roles:
+            return False
+        group = group_for(node)
+        if group is not None:
+            grants = await self.settings.get(ROLE_GRANTS, {})
+            if isinstance(grants, dict) and roles & set(id_list(grants.get(group))):
+                return True
+        if shard_id is not None:
+            return bool(roles & set(id_list(await self.settings.get(SERVER_OPERATORS, scope=shard_id))))
+        return False
+
+    async def is_staff(self, user: Any) -> bool:
+        """Anyone with some operator power, anywhere. Decides what /help lists."""
+        if self.access.is_mod(user):
+            return True
+        roles = role_ids(user)
+        if not roles:
+            return False
+        grants = await self.settings.get(ROLE_GRANTS, {})
+        if isinstance(grants, dict) and any(roles & set(id_list(v)) for v in grants.values()):
+            return True
+        for row in await self.servers.list():
+            if roles & set(id_list(await self.settings.get(SERVER_OPERATORS, scope=row.shard_id))):
+                return True
+        return False
+
+    async def sees_hidden(self, user: Any, shard_id: str) -> bool:
+        if self.access.is_mod(user):
+            return True
+        return bool(role_ids(user) & set(id_list(await self.settings.get(SERVER_OPERATORS, scope=shard_id))))
+
+    def expect_offline(self, shard_id: str) -> None:
+        """A stop or restart Portcullis asked for: the offline alert stays quiet for it."""
+        self.expected_offline[shard_id.lower()] = time.monotonic()
+
+    def offline_expected(self, shard_id: str, within: float = 600.0) -> bool:
+        at = self.expected_offline.get(shard_id.lower())
+        return at is not None and time.monotonic() - at < within
+
+    async def post(self, key: str, content: str | None = None, *, embed: discord.Embed | None = None,
+                   ping_role: int | None = None, view: discord.ui.View | None = None) -> bool:
+        """Post in the bot-wide channel stored under ``key``. Only ``ping_role`` can be mentioned."""
+        channel_id = as_id(await self.settings.get(key))
+        if channel_id is None:
+            return False
+        return await self.post_to(channel_id, content, embed=embed, ping_role=ping_role, view=view, label=key)
+
+    async def post_to(self, channel_id: int, content: str | None = None, *, embed: discord.Embed | None = None,
+                      ping_role: int | None = None, view: discord.ui.View | None = None,
+                      label: str = "channel") -> bool:
+        """Post in one channel. Only ``ping_role`` can be mentioned, and never @everyone."""
+        if self.client is None:
+            return False
+        mentions = NONE
+        if ping_role == self.guild_id:
+            ping_role = None  # the @everyone role: never ping it
+        if ping_role:
+            content = f"<@&{ping_role}> {content or ''}".rstrip()
+            mentions = discord.AllowedMentions(everyone=False, users=False, roles=[discord.Object(id=ping_role)])
+        extra: dict[str, Any] = {"embed": embed} if embed is not None else {}
+        if view is not None:
+            extra["view"] = view
+        try:
+            channel = await self.channel(channel_id)
+            await channel.send(content, allowed_mentions=mentions, **extra)
+        except Exception as exc:  # noqa: BLE001 - a missing channel must not break the caller
+            log.warning("could not post in the %s (%s): %s", label, channel_id, exc)
+            return False
+        return True
 
     async def relay_changed(self) -> None:
         if self.on_relay_changed is not None:
@@ -98,6 +271,27 @@ class Ctx:
         if self.client is None:
             raise RuntimeError("no Discord client")
         return self.client.get_channel(channel_id) or await self.client.fetch_channel(channel_id)
+
+
+def code(text: str) -> str:
+    """``text`` as inline code. Markdown escapes would show up literally there, so only the
+    backtick (which would end the span) and mentions are neutralised."""
+    return "`" + text.replace("`", "ˋ").replace("@", "@​") + "`"
+
+
+INFO, GOOD, WARN, BAD = 0x5865F2, 0x2ECC71, 0xF1C40F, 0xE74C3C  # embed colours; text always says it too
+
+
+def card(**kwargs: Any) -> discord.Embed:
+    """An embed in the house style: blurple unless the caller picks a colour."""
+    kwargs.setdefault("colour", INFO)
+    return discord.Embed(**kwargs)
+
+
+def problem_text(ref: str) -> str:
+    """What a member sees when a command broke on our side. The ref matches a line in the bot's log."""
+    return (f"Something went wrong on my side, and I may not have finished. Try again in a minute. "
+            f"If it keeps happening, tell an admin and give them this code: `{ref}`.")
 
 
 def short_error(exc: BaseException) -> str:
@@ -159,7 +353,7 @@ class Module:
         return False
 
     async def require_mod(self, interaction: discord.Interaction, node: str, shard_id: str | None = None) -> bool:
-        if self.ctx.access.is_mod(interaction.user):
+        if await self.ctx.allowed(interaction.user, node, shard_id):
             return True
         await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=shard_id, result="denied")
         await reply(interaction, "You need an operator role for that.")
@@ -175,7 +369,7 @@ class Module:
     async def server(self, interaction: discord.Interaction, name: str) -> ServerRow | None:
         """Find a server the caller may see, or reply that it doesn't exist."""
         row = await self.ctx.servers.find(name)
-        if row is None or (row.hidden and not self.ctx.access.is_mod(interaction.user)):
+        if row is None or (row.hidden and not await self.ctx.sees_hidden(interaction.user, row.shard_id)):
             await reply(interaction, f"I don't know a server called {escape(name)}. "
                                      "Pick one from the list as you type.")
             return None
@@ -183,10 +377,13 @@ class Module:
 
     async def autocomplete_server(self, interaction: discord.Interaction,
                                   current: str) -> list[app_commands.Choice[str]]:
-        rows = await self.ctx.servers.list(include_hidden=self.ctx.access.is_mod(interaction.user))
+        rows = await self.ctx.servers.list()
         needle = current.lower()
-        return [app_commands.Choice(name=r.name[:100], value=r.shard_id)
-                for r in rows if needle in r.name.lower()][:25]
+        out = []
+        for r in rows:
+            if needle in r.name.lower() and (not r.hidden or await self.ctx.sees_hidden(interaction.user, r.shard_id)):
+                out.append(app_commands.Choice(name=r.name[:100], value=r.shard_id))
+        return out[:25]
 
     async def autocomplete_player(self, interaction: discord.Interaction,
                                   current: str) -> list[app_commands.Choice[str]]:

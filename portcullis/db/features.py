@@ -63,6 +63,21 @@ class PlayerRepo:
                 (at or now_iso(), shard_id.lower()))
         return cur.rowcount
 
+    async def seen_on(self, shard_id: str, name: str) -> bool:
+        async with self.db.conn.execute(
+            "SELECT 1 FROM player_sessions WHERE shard_id = ? AND player_name = ? COLLATE NOCASE LIMIT 1",
+            (shard_id.lower(), name),
+        ) as cur:
+            return await cur.fetchone() is not None
+
+    async def tracked_since(self, shard_id: str) -> str | None:
+        """When Portcullis first saw anyone on this server, or None if it never has."""
+        async with self.db.conn.execute(
+            "SELECT MIN(joined_at) AS first FROM player_sessions WHERE shard_id = ?", (shard_id.lower(),)
+        ) as cur:
+            row = await cur.fetchone()
+        return row["first"] if row else None
+
     async def online(self, shard_id: str) -> list[str]:
         async with self.db.conn.execute(
             "SELECT player_name FROM player_sessions WHERE shard_id = ? AND left_at IS NULL ORDER BY joined_at",
@@ -108,6 +123,41 @@ class PlayerRepo:
             totals[key] = totals.get(key, 0.0) + _seconds(r["joined_at"], r["left_at"], now)
         ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:limit]
         return [(names[k], secs) for k, secs in ranked]
+
+    async def day(self, shard_id: str, since: datetime, until: datetime) -> tuple[int, int, int]:
+        """(players, new players, peak at once) on one server between ``since`` and ``until``."""
+        start, end = since.isoformat(timespec="seconds"), until.isoformat(timespec="seconds")
+        async with self.db.conn.execute(
+            "SELECT player_name, joined_at, left_at FROM player_sessions WHERE shard_id = ? AND joined_at < ? "
+            "AND (left_at IS NULL OR left_at > ?)", (shard_id.lower(), end, start),
+        ) as cur:
+            rows = await cur.fetchall()
+        async with self.db.conn.execute(
+            "SELECT COUNT(*) AS n FROM (SELECT player_name FROM player_sessions WHERE shard_id = ? "
+            "GROUP BY player_name COLLATE NOCASE HAVING MIN(joined_at) >= ? AND MIN(joined_at) < ?)",
+            (shard_id.lower(), start, end),
+        ) as cur:
+            new = (await cur.fetchone())["n"]
+        # Sweep the joins and leaves in time order; a leave sorts before a join at the same moment.
+        edges = sorted([(max(r["joined_at"], start), 1) for r in rows] +
+                       [(r["left_at"], -1) for r in rows if r["left_at"] and r["left_at"] < end])
+        peak = online = 0
+        for _, step in edges:
+            online += step
+            peak = max(peak, online)
+        return len({r["player_name"].lower() for r in rows}), int(new), peak
+
+    async def online_everywhere(self) -> list[str]:
+        async with self.db.conn.execute(
+            "SELECT DISTINCT player_name FROM player_sessions WHERE left_at IS NULL") as cur:
+            return [r["player_name"] for r in await cur.fetchall()]
+
+    async def milestone_reached(self, name: str, hours: int) -> bool:
+        """Record a milestone. False if it was already announced."""
+        cur = await self.db.conn.execute(
+            "INSERT OR IGNORE INTO milestones (player_name, hours, reached_at) VALUES (?, ?, ?)",
+            (name, hours, now_iso()))
+        return cur.rowcount == 1
 
     async def names(self, prefix: str = "", *, limit: int = 25) -> list[str]:
         escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -308,3 +358,38 @@ async def all_settings(db: Database) -> dict[str, dict[str, Any]]:
         for r in await cur.fetchall():
             out.setdefault(r["scope"], {})[r["key"]] = json.loads(r["value"])
     return out
+
+
+class NotifyRepo:
+    """Who wants a DM when a server comes online (``/notify``)."""
+
+    LIMIT = 25  # servers per member
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    async def toggle(self, discord_id: int, shard_id: str) -> bool | None:
+        """Subscribe or unsubscribe. True = now subscribed, False = removed, None = at the limit."""
+        sid = shard_id.lower()
+        cur = await self.db.conn.execute(
+            "DELETE FROM notify_subscriptions WHERE discord_id = ? AND shard_id = ?", (discord_id, sid))
+        if cur.rowcount:
+            return False
+        if len(await self.for_member(discord_id)) >= self.LIMIT:
+            return None
+        await self.db.conn.execute(
+            "INSERT INTO notify_subscriptions (discord_id, shard_id, created_at) VALUES (?, ?, ?)",
+            (discord_id, sid, now_iso()))
+        return True
+
+    async def for_member(self, discord_id: int) -> list[str]:
+        async with self.db.conn.execute(
+            "SELECT shard_id FROM notify_subscriptions WHERE discord_id = ? ORDER BY created_at", (discord_id,)
+        ) as cur:
+            return [r["shard_id"] for r in await cur.fetchall()]
+
+    async def for_server(self, shard_id: str) -> list[int]:
+        async with self.db.conn.execute(
+            "SELECT discord_id FROM notify_subscriptions WHERE shard_id = ? ORDER BY created_at", (shard_id.lower(),)
+        ) as cur:
+            return [int(r["discord_id"]) for r in await cur.fetchall()]

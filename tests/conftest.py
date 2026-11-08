@@ -8,8 +8,8 @@ import aiohttp
 import pytest
 from aiohttp.test_utils import TestServer
 
-from portcullis.amp.auth import Credentials, TokenManager
-from tests.fakes.amp_server import PASSWORD, USERNAME, FakeAmp
+from portcullis_api.auth import Credentials, TokenManager
+from portcullis_api.testing import PASSWORD, USERNAME, FakeAmp
 
 
 @pytest.fixture

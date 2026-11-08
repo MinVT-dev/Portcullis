@@ -8,61 +8,119 @@ import io
 import json
 import logging
 import time
+from datetime import UTC, datetime, timedelta
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as dist_version
 from typing import Any
 
 import discord
 from discord import app_commands
 
-from portcullis.bot.base import Module, reply, short_error, state_text, when
+from portcullis.bot.base import (
+    OWNER_ONLY_KEYS,
+    Module,
+    card,
+    code,
+    duration,
+    reply,
+    short_error,
+    state_text,
+    when,
+)
+from portcullis.bot.v3map import STATUS_LABELS, lookup, search
 from portcullis.core.relay import escape
 from portcullis.db.features import all_settings
 from portcullis.db.repos import ServerRepo
 
 log = logging.getLogger(__name__)
 
+
+def version(dist: str) -> str:
+    try:
+        return dist_version(dist)
+    except PackageNotFoundError:
+        return "unknown"
+
+STARTED = time.monotonic()
+STATS_DAYS = 30
 EXPORT_VERSION = 1
 MAX_IMPORT_BYTES = 1_000_000
 
 # (command, who, what) for /help. "who" is everyone, mod or admin.
 HELP = [
-    ("/server list", "everyone", "Every server and whether it's online"),
-    ("/server status", "everyone", "One server's state and who is online"),
+    ("/server list", "everyone", "Every server and whether it's online (players: names who's on)"),
+    ("/server status", "everyone", "One server's state, who is online and its address"),
+    ("/server banner", "everyone", "A status picture of one server or all of them"),
     ("/player lookup", "everyone", "When a player was last seen, and their play time"),
     ("/player top", "everyone", "Who has played the most"),
+    ("/player id", "everyone", "Steam ID formats, or a Minecraft name's UUID and back"),
     ("/whitelist request", "everyone", "Ask to be whitelisted on a server"),
     ("/link", "everyone", "Prove which in-game name is yours"),
+    ("/notify", "everyone", "Get a DM when a server comes online"),
+    ("/event list", "everyone", "Events coming up"),
     ("/help", "everyone", "This list"),
-    ("/server power", "mod", "Start, stop or restart a server"),
+    ("/server power", "mod", "Start, stop, restart, or restart with a warning in game chat"),
+    ("/server power-all", "mod", "Start, stop or restart every server, or every server with a tag"),
     ("/server send", "mod", "Send a console command or chat message"),
-    ("/backups", "mod", "A server's backups"),
-    ("/whitelist add · remove", "mod", "Change a server's whitelist"),
+    ("/server console", "mod", "A server's latest console lines"),
+    ("/backups", "mod", "A server's backups, with Make a backup and (for admins) Restore and Delete"),
+    ("/schedule list", "mod", "A server's AMP schedules: Run now, On and Off, run history, Delete (admins)"),
+    ("/whitelist add · remove · list", "mod", "Change or see a server's whitelist"),
+    ("/player moderate", "mod", "Kick, ban or unban a player"),
+    ("/player watch · watchlist", "mod", "Get a quiet note when a player joins"),
     ("/poll create · list", "mod", "Community polls"),
+    ("/event create", "mod", "Announce an event with a Going button and a reminder"),
     ("/user (or right-click → Apps → Portcullis user)", "mod", "A member's links and flags"),
     ("/setup relay · server · bot", "admin", "Relays, server settings, bot settings"),
-    ("/audit", "admin", "Who did what through Portcullis"),
+    ("/alert create · list", "admin", "Your own alerts: CPU, memory, player count or offline, held for N minutes"),
+    ("/audit", "admin", "Who did what through Portcullis (stats: counts for 30 days)"),
     ("/admin diagnostics · export · import", "admin", "Health check and settings backup"),
+    ("/admin bot", "owner", "Bot status, re-sync the commands, or stop the bot"),
 ]
 
 
 class AdminModule(Module):
     # ---------------------------------------------------------------- /help
 
-    async def help(self, interaction: discord.Interaction) -> None:
+    async def help(self, interaction: discord.Interaction, v3: str | None = None) -> None:
+        if v3:
+            await self.help_v3(interaction, v3)
+            return
         access = self.ctx.access
         allowed = {"everyone"}
-        if access.is_mod(interaction.user):
+        if await self.ctx.is_staff(interaction.user):
             allowed.add("mod")
         if access.is_admin(interaction.user):
             allowed.add("admin")
+        if access.is_owner(interaction.user):
+            allowed.add("owner")
         lines = [f"`{cmd}` · {what}" for cmd, who, what in HELP if who in allowed]
-        embed = discord.Embed(title="Portcullis", description="\n".join(lines))
+        embed = card(title="Portcullis", description="\n".join(lines))
         embed.set_footer(text="Only the commands you can use are listed.")
         await reply(interaction, embed=embed)
+
+    async def help_v3(self, interaction: discord.Interaction, name: str) -> None:
+        """Where a Gatekeeper V3 command went (docs/V3_PARITY.md)."""
+        found = lookup(name)
+        if found is None:
+            await reply(interaction, f"Gatekeeper V3 had no command called {code(name[:100])}. "
+                                     "Pick one from the list as you type.")
+            return
+        title = "Where it went" if found.status in ("same", "moved") else STATUS_LABELS[found.status]
+        embed = card(title=f"{found.v3} in Portcullis")
+        embed.add_field(name=title, value=found.home, inline=False)
+        embed.set_footer(text="Every V3 command is listed in docs/V3_PARITY.md.")
+        await reply(interaction, embed=embed)
+
+    async def autocomplete_v3(self, interaction: discord.Interaction,
+                              current: str) -> list[app_commands.Choice[str]]:
+        return [app_commands.Choice(name=n, value=n) for n in search(current)]
 
     # ---------------------------------------------------------------- /audit
 
     async def audit(self, interaction: discord.Interaction, member: Any | None = None, server: str | None = None,
-                    action: str | None = None, result: str | None = None, export: bool = False) -> None:
+                    action: str | None = None, result: str | None = None, export: bool = False,
+                    stats: bool = False) -> None:
         if not await self.in_guild(interaction) or not await self.require_admin(interaction, "audit.view"):
             return
         shard_id = None
@@ -71,6 +129,9 @@ class AdminModule(Module):
             if row is None:
                 return
             shard_id = row.shard_id
+        if stats:
+            await self.audit_stats(interaction, shard_id, server)
+            return
         entries = await self.ctx.audit.query(actor_id=member.id if member else None, shard_id=shard_id,
                                              action_prefix=action, result=result, limit=1000 if export else 25)
         if export:
@@ -89,7 +150,83 @@ class AdminModule(Module):
             what = f" · {escape(e.target)}" if e.target else ""
             mark = "" if e.result == "ok" else f" · **{e.result}**"
             lines.append(f"{when(e.at)} {who} `{e.action}`{where}{what}{mark}")
-        await reply(interaction, embed=discord.Embed(title="Audit log", description="\n".join(lines)[:4000]))
+        await reply(interaction, embed=card(title="Audit log", description="\n".join(lines)[:4000]))
+
+    async def audit_stats(self, interaction: discord.Interaction, shard_id: str | None, server: str | None) -> None:
+        """V3's /audit stats: what happened most in the last 30 days."""
+        since = (datetime.now(UTC) - timedelta(days=STATS_DAYS)).isoformat()
+        counts = await self.ctx.audit.stats(since=since, shard_id=shard_id)
+        if not counts["result"]:
+            await reply(interaction, f"Nothing in the audit log for the last {STATS_DAYS} days.")
+            return
+        total = sum(n for _, n in counts["result"])
+        title = f"Audit log, last {STATS_DAYS} days" + (f" on {server}" if shard_id and server else "")
+        embed = card(title=title, description=f"{total} action(s) in total.")
+        embed.add_field(name="Most common", value="\n".join(f"`{a}` · {n}" for a, n in counts["action"]),
+                        inline=False)
+        embed.add_field(name="Most active", value="\n".join(
+            f"{f'<@{a}>' if a else 'Portcullis itself'} · {n}" for a, n in counts["actor"]), inline=False)
+        embed.add_field(name="Results", value=" · ".join(f"{r}: {n}" for r, n in counts["result"]), inline=False)
+        await reply(interaction, embed=embed)
+
+    # ---------------------------------------------------------------- /admin bot (owners)
+
+    async def bot_action(self, interaction: discord.Interaction, action: str) -> None:
+        """V3's /bot utils ping, status, sync, restart and disconnect, for the bot's owners."""
+        node = f"admin.bot.{action}"
+        if not self.ctx.access.is_owner(interaction.user):
+            await self.ctx.audit.record(node, actor_id=interaction.user.id, result="denied")
+            await reply(interaction, "Only the bot's owners (PORTCULLIS_OWNER_IDS) can do that.")
+            return
+        client = self.ctx.client
+        if action == "status":
+            await reply(interaction, embed=await self.bot_status())
+        elif action == "sync":
+            tree = getattr(client, "tree", None)
+            if tree is None:
+                await reply(interaction, "There's no command tree to sync.")
+                return
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            guild = discord.Object(id=self.ctx.guild_id)
+            tree.copy_global_to(guild=guild)
+            synced = await tree.sync(guild=guild)
+            await self.ctx.audit.record(node, actor_id=interaction.user.id, target=str(len(synced)))
+            await reply(interaction, f"Synced {len(synced)} command(s) to this Discord server.")
+        elif action == "stop":
+            from portcullis.bot.server import Confirm
+
+            async def stop(confirmed: discord.Interaction) -> None:
+                await self.ctx.audit.record(node, actor_id=confirmed.user.id)
+                await confirmed.response.edit_message(content="Stopping. If Portcullis runs as a service or in "
+                                                              "AMP, it will start again by itself.", view=None)
+                log.warning("stopped from Discord by %s", confirmed.user.id)
+                if client is not None:
+                    asyncio.get_running_loop().call_later(1, lambda: asyncio.ensure_future(client.close()))
+
+            await reply(interaction, "Stop Portcullis? Relays, alerts and commands stop until it is started "
+                                     "again.", view=Confirm(interaction.user.id, stop, "Stop it"))
+        else:
+            await reply(interaction, "Choose status, sync or stop.")
+
+    async def bot_status(self) -> discord.Embed:
+        import platform
+
+        import portcullis_api
+
+        client = self.ctx.client
+        embed = card(title="Portcullis")
+        embed.add_field(name="Running for", value=duration(time.monotonic() - STARTED))
+        if client is not None:
+            embed.add_field(name="Discord latency", value=f"{client.latency * 1000:.0f} ms")
+        summary = self.ctx.live.summary()
+        embed.add_field(name="AMP", value="reachable" if summary.reachable else "not reachable")
+        embed.add_field(name="Servers", value=summary.text())
+        embed.add_field(name="Versions", value=f"Portcullis {version('portcullis')} · portcullis-api "
+                                               f"{portcullis_api.__version__} (AMP spec {portcullis_api.SPEC_BUILD})"
+                                               f" · discord.py {discord.__version__} · Python "
+                                               f"{platform.python_version()}", inline=False)
+        embed.add_field(name="Database", value=f"schema version {self.ctx.db.version}")
+        return embed
 
     # ---------------------------------------------------------------- /admin diagnostics
 
@@ -97,7 +234,7 @@ class AdminModule(Module):
         if not await self.in_guild(interaction) or not await self.require_admin(interaction, "admin.diagnostics"):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        embed = discord.Embed(title="Diagnostics")
+        embed = card(title="Diagnostics")
         started = time.perf_counter()
         try:
             servers = await asyncio.wait_for(self.ctx.port.list_servers(), 10)
@@ -115,6 +252,7 @@ class AdminModule(Module):
                 lines.append(f"❌ {escape(info.name)} · {escape(short_error(exc))[:150]}")
         if lines:
             embed.add_field(name="Servers", value="\n".join(lines)[:1024], inline=False)
+        embed.add_field(name="AMP account permissions", value=await self.permission_text(), inline=False)
         rows = await self.ctx.servers.list()
         relays = sum(1 for r in rows if r.console_channel or r.event_channel or r.chat_channel)
         embed.add_field(name="Relays", value=f"{relays} server(s) with a relay channel")
@@ -126,6 +264,27 @@ class AdminModule(Module):
             embed.add_field(name="Discord latency", value=f"{self.ctx.client.latency * 1000:.0f} ms")
         embed.add_field(name="Database", value=f"schema version {self.ctx.db.version}")
         await reply(interaction, embed=embed)
+
+    async def permission_text(self) -> str:
+        """What the bot's AMP account may do, from ``GET /api/me/permissions``."""
+        try:
+            grants = await asyncio.wait_for(self.ctx.port.permissions(), 8)
+        except Exception as exc:  # noqa: BLE001
+            return f"❌ couldn't read them: {escape(short_error(exc))[:200]}"
+        if ">" in grants:
+            return ("⚠️ Everything (an admin account). It works, but if the bot's password leaks, so does the "
+                    "whole panel. docs/SETUP.md lists a smaller role.")
+        if not grants:
+            return "❌ None. Give the bot's AMP account a role (docs/SETUP.md)."
+        wanted = ("view", "power.start", "power.stop", "power.restart", "console.read", "console.send")
+        text = " ".join(grants)
+        missing = [w for w in wanted if w not in text]
+        shown = ", ".join(code(g) for g in grants[:20]) + (f" and {len(grants) - 20} more"
+                                                            if len(grants) > 20 else "")
+        if missing:
+            shown += ("\nNot found in that list: " + ", ".join(code(m) for m in missing) +
+                      ". AMP's grant format isn't fully mapped yet, so check the role in AMP before changing it.")
+        return shown[:1024]
 
     # ---------------------------------------------------------------- /admin export, import
 
@@ -145,8 +304,9 @@ class AdminModule(Module):
         await reply(interaction, "Portcullis settings. Keep this file: `/admin import` restores it.",
                     file=discord.File(io.BytesIO(data), filename="portcullis-settings.json"))
 
-    async def import_data(self, data: Any, by: int) -> tuple[int, int, list[str]]:
-        """Apply an export. Returns (servers updated, settings written, problems)."""
+    async def import_data(self, data: Any, by: int, *, owner: bool = False) -> tuple[int, int, list[str]]:
+        """Apply an export. Returns (servers updated, settings written, problems).
+        Operator role settings are only imported for owners: a file mustn't hand out powers."""
         if not isinstance(data, dict) or data.get("portcullis_export") != EXPORT_VERSION:
             return 0, 0, ["This isn't a Portcullis settings export (Gatekeeper V3 databases can't be imported yet)."]
         problems: list[str] = []
@@ -165,6 +325,9 @@ class AdminModule(Module):
             if not isinstance(values, dict):
                 continue
             for key, value in values.items():
+                if key in OWNER_ONLY_KEYS and not owner:
+                    problems.append(f"skipped {key} ({scope}): only owners can import operator roles")
+                    continue
                 await self.ctx.settings.set(str(key), value, scope=str(scope), by=by)
                 written += 1
         return updated, written, problems
@@ -180,7 +343,8 @@ class AdminModule(Module):
         except ValueError:
             await reply(interaction, "That file isn't JSON.")
             return
-        updated, written, problems = await self.import_data(data, interaction.user.id)
+        updated, written, problems = await self.import_data(data, interaction.user.id,
+                                                            owner=self.ctx.access.is_owner(interaction.user))
         await self.ctx.audit.record("admin.import", actor_id=interaction.user.id,
                                     detail={"servers": updated, "settings": written, "problems": problems[:20]})
         await self.ctx.relay_changed()
@@ -192,24 +356,34 @@ class AdminModule(Module):
     def register(self, tree: app_commands.CommandTree) -> None:
         @app_commands.command(name="help", description="What Portcullis can do for you")
         @app_commands.guild_only()
-        async def help_(interaction: discord.Interaction) -> None:
-            await self.help(interaction)
+        @app_commands.describe(v3="A Gatekeeper V3 command, to see where it is now")
+        @app_commands.autocomplete(v3=self.autocomplete_v3)
+        async def help_(interaction: discord.Interaction, v3: str | None = None) -> None:
+            await self.help(interaction, v3)
 
         @app_commands.command(name="audit", description="Who did what through Portcullis (admins)")
         @app_commands.guild_only()
         @app_commands.default_permissions(manage_guild=True)
         @app_commands.describe(member="Only this member", server="Only this server",
                                action="Only actions starting with this, e.g. server.power",
-                               result="Only this result", export="Send everything that matches as a JSON file")
+                               result="Only this result", export="Send everything that matches as a JSON file",
+                               stats="Counts for the last 30 days instead of a list")
         @app_commands.autocomplete(server=self.autocomplete_server)
         @app_commands.choices(result=[app_commands.Choice(name=r, value=r) for r in ("ok", "denied", "failed")])
         async def audit(interaction: discord.Interaction, member: discord.Member | None = None,
                         server: str | None = None, action: str | None = None, result: str | None = None,
-                        export: bool = False) -> None:
-            await self.audit(interaction, member, server, action, result, export)
+                        export: bool = False, stats: bool = False) -> None:
+            await self.audit(interaction, member, server, action, result, export, stats)
 
         group = app_commands.Group(name="admin", description="Health check and settings backup (admins)",
                                    guild_only=True, default_permissions=discord.Permissions(manage_guild=True))
+
+        @group.command(name="bot", description="Bot status, re-sync the commands, or stop the bot (owners)")
+        @app_commands.choices(action=[app_commands.Choice(name="Status", value="status"),
+                                      app_commands.Choice(name="Sync commands", value="sync"),
+                                      app_commands.Choice(name="Stop", value="stop")])
+        async def bot_(interaction: discord.Interaction, action: str) -> None:
+            await self.bot_action(interaction, action)
 
         @group.command(name="diagnostics", description="Check the connection to AMP and every server")
         async def diagnostics(interaction: discord.Interaction) -> None:

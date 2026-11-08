@@ -18,6 +18,8 @@ from portcullis.core.types import (
     PlayerJoined,
     PlayerLeft,
     PowerAction,
+    Schedule,
+    ScheduleRun,
     ServerEvent,
     ServerId,
     ServerInfo,
@@ -38,6 +40,7 @@ class FakeServer:
     players: list[Player] = field(default_factory=list)
     console: list[str] = field(default_factory=list)
     backups: list[Backup] = field(default_factory=list)
+    schedules: list[Schedule] = field(default_factory=list)
 
 
 def _now() -> datetime:
@@ -46,9 +49,13 @@ def _now() -> datetime:
 
 class FakeAmpPort:
     def __init__(self) -> None:
+        self.grants: list[str] = [">"]
         self.servers: dict[ServerId, FakeServer] = {}
         self.sent: list[tuple[ServerId, str]] = []
         self.power_calls: list[tuple[ServerId, PowerAction]] = []
+        self.backup_calls: list[tuple[str, ServerId, str]] = []
+        self.schedule_calls: list[tuple[str, ServerId, str]] = []
+        self.schedule_runs: dict[str, list[ScheduleRun]] = {}
         self._subs: dict[ServerId, set[asyncio.Queue[ServerEvent]]] = {}
 
     # ------------------------------------------------------------------ setup helpers
@@ -133,3 +140,44 @@ class FakeAmpPort:
 
     async def list_backups(self, server: ServerId) -> list[Backup]:
         return list(self._get(server).backups)
+
+    async def create_backup(self, server: ServerId, name: str) -> None:
+        srv = self._get(server)
+        if not srv.backups:
+            raise FakeAmpError("there is no earlier backup to copy the settings from")
+        self.backup_calls.append(("create", server, name))
+        srv.backups.append(Backup(f"b{len(srv.backups)}", name, _now()))
+
+    async def restore_backup(self, server: ServerId, backup_id: str) -> None:
+        self._get(server)
+        self.backup_calls.append(("restore", server, backup_id))
+
+    async def delete_backup(self, server: ServerId, backup_id: str) -> None:
+        srv = self._get(server)
+        self.backup_calls.append(("delete", server, backup_id))
+        srv.backups = [b for b in srv.backups if b.id != backup_id]
+
+    async def list_schedules(self, server: ServerId) -> list[Schedule]:
+        return list(self._get(server).schedules)
+
+    async def run_schedule(self, server: ServerId, schedule_id: str) -> None:
+        self._get(server)
+        self.schedule_calls.append(("run", server, schedule_id))
+
+    async def set_schedule_enabled(self, server: ServerId, schedule_id: str, enabled: bool) -> None:
+        srv = self._get(server)
+        self.schedule_calls.append(("enabled" if enabled else "disabled", server, schedule_id))
+        srv.schedules = [Schedule(s.id, s.name, enabled, s.next_fire) if s.id == schedule_id else s
+                         for s in srv.schedules]
+
+    async def delete_schedule(self, server: ServerId, schedule_id: str) -> None:
+        srv = self._get(server)
+        self.schedule_calls.append(("delete", server, schedule_id))
+        srv.schedules = [s for s in srv.schedules if s.id != schedule_id]
+
+    async def schedule_history(self, server: ServerId, schedule_id: str, limit: int = 10) -> list[ScheduleRun]:
+        self._get(server)
+        return list(self.schedule_runs.get(schedule_id, []))[:limit]
+
+    async def permissions(self) -> list[str]:
+        return list(self.grants)

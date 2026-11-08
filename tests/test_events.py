@@ -7,8 +7,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from portcullis.amp.events import parse_hub_event, state_from
-from portcullis.amp.signalr import HubEvent
 from portcullis.core.types import ConsoleLine, OtherEvent, PlayerJoined, PlayerLeft, ServerState, StateChanged
+from portcullis_api.signalr import HubEvent
 
 SID = "7d4b6a52-9a7e-4e0e-9a38-1d1f0d3c2b11"
 OTHER = "aaaaaaaa-9a7e-4e0e-9a38-1d1f0d3c2b11"

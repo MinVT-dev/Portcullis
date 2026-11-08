@@ -27,6 +27,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+from portcullis.core.console_rules import hider
 from portcullis.core.port import AmpPort
 from portcullis.core.types import (
     ConsoleLine,
@@ -95,6 +96,7 @@ class RelayTarget:
     console_channel: int | None = None
     event_channel: int | None = None
     chat_channel: int | None = None
+    hide: tuple[str, ...] = ()  # console hide rules (core.console_rules); only the console relay skips them
 
     @property
     def active(self) -> bool:
@@ -272,7 +274,8 @@ class Relay:
             if target.chat_channel:
                 out.append((target.chat_channel, "text", f"💬 **{escape(event.player)}**: {escape(event.text)}"))
         elif isinstance(event, ConsoleLine):
-            if target.console_channel:
+            hide = hider(target.hide)
+            if target.console_channel and not (hide and hide(event.text)):
                 out.append((target.console_channel, "console", console_safe(event.text)))
         elif isinstance(event, PlayerJoined | PlayerLeft) and target.event_channel:
             verb, icon = ("joined", "➡️") if isinstance(event, PlayerJoined) else ("left", "⬅️")

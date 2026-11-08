@@ -13,24 +13,26 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
-from portcullis.amp import models as m
-from portcullis.amp.client import AmpClient
-from portcullis.amp.errors import MissingCapability
 from portcullis.amp.events import parse_hub_event, state_from, to_int
-from portcullis.amp.signalr import HubConnection, HubEvent, Mode
 from portcullis.core.types import (
     Backup,
     Player,
     PowerAction,
+    Schedule,
+    ScheduleRun,
     ServerEvent,
     ServerId,
     ServerInfo,
     ServerStatus,
 )
+from portcullis_api import models as m
+from portcullis_api.client import AmpClient
+from portcullis_api.errors import MissingCapability
+from portcullis_api.live import leave_shard, shard_tenant
+from portcullis_api.signalr import HubConnection, HubEvent, Mode
 
 log = logging.getLogger(__name__)
 
-DEFAULT_TENANT = "_root"  # the only tenant on a single-install AMP 3; used if a shard reports none
 
 
 def _float(value: Any) -> float | None:
@@ -65,8 +67,7 @@ class ShardEvents:
 
     async def _tenant(self, sid: str) -> str:
         if sid not in self._tenants:
-            shard = await self._client.shards.get_shards_by_id(sid)
-            self._tenants[sid] = shard.tenant_id or DEFAULT_TENANT
+            self._tenants[sid] = await shard_tenant(self._client, sid)
         return self._tenants[sid]
 
     def _open(self, sid: str) -> None:
@@ -92,9 +93,8 @@ class ShardEvents:
             return
         conn, task = entry
         tenant = self._tenants.get(sid)
-        if tenant is not None and conn.connected:
-            with contextlib.suppress(Exception):
-                await conn.send("LeaveShard", tenant, sid)
+        if tenant is not None:
+            await leave_shard(conn, sid, tenant)
         await conn.close()
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -203,6 +203,56 @@ class AmpServerPort:
         oldest = datetime.min.replace(tzinfo=UTC)
         out.sort(key=lambda b: b.created_at or oldest, reverse=True)
         return out
+
+    async def create_backup(self, server: ServerId, name: str) -> None:
+        """Take a snapshot shaped like the newest existing one.
+
+        The spec doesn't document the integer values for a snapshot's kind and content, so they're
+        copied from a backup AMP already made rather than guessed. AMP may stop or pause the server
+        while it captures.
+        """
+        graph = await self.client.files_backups.get_shards_snapshots(server)
+        usable = [n for n in graph.nodes or [] if n.kind is not None and n.content is not None]
+        if not usable:
+            raise ValueError("there is no earlier backup to copy the settings from; make the first one in AMP")
+        latest = max(usable, key=lambda n: n.created_at or datetime.min.replace(tzinfo=UTC))
+        await self.client.files_backups.post_shards_snapshots(server, {
+            "kind": latest.kind.root, "content": latest.content.root, "name": name,
+            "description": "Made from Discord", "sticky": False})
+
+    async def restore_backup(self, server: ServerId, backup_id: str) -> None:
+        await self.client.files_backups.post_shards_snapshots_restore(server, backup_id)
+
+    async def delete_backup(self, server: ServerId, backup_id: str) -> None:
+        await self.client.files_backups.delete_shards_snapshots_by_snapshot_id(server, backup_id)
+
+    async def list_schedules(self, server: ServerId) -> list[Schedule]:
+        out = []
+        for dto in await self.client.scheduling.get_shards_schedules(server):
+            d = dto.definition
+            out.append(Schedule(id=str(d.id), name=d.name or str(d.id), enabled=bool(d.enabled),
+                                next_fire=dto.next_fire_time))
+        return out
+
+    async def run_schedule(self, server: ServerId, schedule_id: str) -> None:
+        await self.client.scheduling.post_shards_schedules_run(server, schedule_id)
+
+    async def set_schedule_enabled(self, server: ServerId, schedule_id: str, enabled: bool) -> None:
+        await self.client.scheduling.post_shards_schedules_enabled(server, schedule_id, {"enabled": enabled})
+
+    async def delete_schedule(self, server: ServerId, schedule_id: str) -> None:
+        await self.client.scheduling.delete_shards_schedules_by_schedule_id(server, schedule_id)
+
+    async def schedule_history(self, server: ServerId, schedule_id: str, limit: int = 10) -> list[ScheduleRun]:
+        runs = await self.client.scheduling.get_shards_schedules_history(server, schedule_id, limit=limit)
+        return [ScheduleRun(started_at=r.started_at or r.queued_at, finished_at=r.completed_at,
+                            status=r.status.value if r.status is not None else None, error=r.error_message)
+                for r in runs]
+
+    async def permissions(self) -> list[str]:
+        """The bot account's grant strings. ``">"`` means everything (seen on an admin account)."""
+        mine = await self.client.my_account.get_me_permissions()
+        return list(mine.grants)
 
     async def close(self) -> None:
         await self.hub.close()

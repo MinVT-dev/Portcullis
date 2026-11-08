@@ -10,12 +10,12 @@ from datetime import timedelta
 
 import pytest
 
-from portcullis.amp.auth import Credentials
-from portcullis.amp.client import AmpClient
 from portcullis.amp.port import AmpServerPort
 from portcullis.core.port import AmpPort
 from portcullis.core.types import ConsoleLine, PlayerJoined, PowerAction, ServerId, ServerState, StateChanged
-from tests.fakes.amp_server import PASSWORD, SHARD_ID, TENANT, USERNAME, FakeAmp, wait_for
+from portcullis_api.auth import Credentials
+from portcullis_api.client import AmpClient
+from portcullis_api.testing import PASSWORD, SHARD_ID, TENANT, USERNAME, FakeAmp, wait_for
 
 SID = ServerId(SHARD_ID)
 

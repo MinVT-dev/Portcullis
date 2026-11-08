@@ -246,10 +246,20 @@ All 71 nodes **[V]**:
 | `/hubs/tasks` | **[V]** 200 with a fresh ticket | none | `TaskUpsert` |
 
 - **Live event shapes [V]** (AMP 3.0.0.6): `Metrics` is `[shardId, sample]` every ~3 s. `UserRoster` is `[shardId, [users]]` every ~10 s. `ShardStateChanged` is `[tenantId, shardId, ShardState]` every ~9 s, even when nothing changed. A one-argument `JoinShard(shardId)` fails with SignalR's generic "error on the server", because AMP runs without detailed errors.
-- `ConsoleLine`, `UserJoined` and `UserLeft` have not been captured yet. The REST twins show their likely shapes:
-  - `ConsoleLine` ≈ [ConsoleLineDto](#schema-consolelinedto): `{streamId, text, timestamp, seq, kind, state, code, params, level, origin}`. `seq` is a per-shard sequence that merges history with the live feed.
-  - `Metrics` ≈ [ShardMetricsSample](#schema-shardmetricssample).
-  - `ShardStateChanged` ≈ [ShardState](#schema-shardstate).
+- **`ConsoleLine` [V]:** `[ {streamId, text, timestamp, seq, kind, state, success, code, params, level, origin} ]`, with **no shard id**. `seq` counts across every shard, so the shard has to come from the connection: open one connection per shard. Streams seen:
+  - `main`: the game's own output. This is what a console relay shows, and where chat appears.
+  - `agent`: AMP's shard agent (`[agent:stdout] ...`), including RCON connect attempts.
+  - `update`: SteamCMD output during an update, often hundreds of lines.
+  - `system`: AMP's own notes. `kind` is `marker` (a lifecycle step, with a numeric `state` and sometimes a `code` such as `shards.msg.launchingAgent`), `info` (an update stage, `code: shards.console.marker.stageOf` with `params: {index, total}`) or `notice` (e.g. `agent.msg.forciblyKilled`).
+  - The panel hides `input`. No `input` line was ever seen on the hub.
+  - **Unturned:** AMP sends every `main` line **twice**, with consecutive `seq`. The second copy can arrive minutes later, along with the next output. Arma Reforger lines are not doubled.
+- **`UserJoined` [V]** (Unturned): `[shardId, {name, id, sessionId, endpoint, joinedAt, idKind}]`, where `idKind` is `steam64`. The next `UserRoster` lists the same object. `UserLeft` is not captured yet; it is presumably the same shape.
+- **Player tracking depends on the game.** Unturned: works. Arma Reforger: the roster stays empty with a player in game, and the console has no names or chat.
+- **`Lifecycle` [V]:** `[ {eventId, shardId, tenantId, kind, state, message, ...} ]`.
+  - `kind: 0` is a state step, with `state` such as 3 (launching container), 15 (starting) or 25 (running).
+  - `kind: 1` is task progress, with `taskId`, `stageIndex`, `totalStages`, `subTask` and `progressPercent`. It arrives many times a second during an update.
+- **Cross-shard state [V]:** every connection receives `ShardStateChanged` for **all** shards in the tenant, not only the joined one. Filter on the shard id.
+- REST twins: `Metrics` ≈ [ShardMetricsSample](#schema-shardmetricssample), `ShardStateChanged` ≈ [ShardState](#schema-shardstate).
 - **REST fallbacks [V]:**
   - `GET /api/Shards/{id}/console/history?limit=N`
   - `GET /api/Shards/{id}/users` (current roster)

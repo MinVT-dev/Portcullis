@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+import logging
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,6 +13,8 @@ from portcullis.core.types import ServerId, ServerInfo
 from portcullis.db.database import Database, now_iso
 
 BOT_SCOPE = "bot"
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -27,6 +30,7 @@ class ServerRow:
     discord_role: int | None
     prefix: str | None
     gone_at: str | None
+    tags: tuple[str, ...] = ()
 
     @property
     def name(self) -> str:
@@ -47,7 +51,7 @@ class ServerRepo:
             shard_id=ServerId(r["shard_id"]), amp_name=r["amp_name"], display_name=r["display_name"],
             template=r["template"], hidden=bool(r["hidden"]), console_channel=r["console_channel"],
             chat_channel=r["chat_channel"], event_channel=r["event_channel"], discord_role=r["discord_role"],
-            prefix=r["prefix"], gone_at=r["gone_at"],
+            prefix=r["prefix"], gone_at=r["gone_at"], tags=tuple(json.loads(r["tags"] or "[]")),
         )
 
     async def sync(self, servers: Iterable[ServerInfo]) -> tuple[list[ServerId], list[ServerId]]:
@@ -67,11 +71,12 @@ class ServerRepo:
         try:
             for sid, info in seen.items():
                 await conn.execute(
-                    "INSERT INTO servers (shard_id, amp_name, template, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?) "
+                    "INSERT INTO servers (shard_id, amp_name, template, tags, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(shard_id) DO UPDATE SET amp_name = excluded.amp_name, "
-                    "template = excluded.template, gone_at = NULL, updated_at = excluded.updated_at",
-                    (sid, info.name, info.template, stamp, stamp),
+                    "template = excluded.template, tags = excluded.tags, gone_at = NULL, "
+                    "updated_at = excluded.updated_at",
+                    (sid, info.name, info.template, json.dumps(list(info.tags)), stamp, stamp),
                 )
             for sid in gone:
                 await conn.execute("UPDATE servers SET gone_at = ?, updated_at = ? WHERE shard_id = ?",
@@ -259,6 +264,7 @@ class AuditRepo:
 
     def __init__(self, db: Database) -> None:
         self.db = db
+        self.listeners: list[Callable[[AuditEntry], None]] = []  # e.g. the audit log channel
 
     async def record(self, action: str, *, actor_id: int | None = None, shard_id: str | None = None,
                      target: str | None = None, result: str = "ok", detail: Any = None) -> int:
@@ -269,7 +275,30 @@ class AuditRepo:
             (now_iso(), actor_id, action, shard_id.lower() if shard_id else None, target, result,
              json.dumps(detail) if detail is not None else None),
         )
-        return int(cur.lastrowid or 0)
+        entry_id = int(cur.lastrowid or 0)
+        if self.listeners:
+            entry = AuditEntry(entry_id, now_iso(), actor_id, action, shard_id.lower() if shard_id else None, target,
+                               result, detail)
+            for listener in self.listeners:
+                try:
+                    listener(entry)
+                except Exception:  # a broken listener must never block the action being audited
+                    log.exception("audit listener failed")
+        return entry_id
+
+    async def stats(self, *, since: str, shard_id: str | None = None) -> dict[str, list[tuple[Any, int]]]:
+        """Counts since ``since`` (ISO): by action, by member and by result, biggest first."""
+        where, args = "at >= ?", [since]
+        if shard_id is not None:
+            where += " AND shard_id = ?"
+            args.append(shard_id.lower())
+        out: dict[str, list[tuple[Any, int]]] = {}
+        for name, column in (("action", "action"), ("actor", "actor_id"), ("result", "result")):
+            sql = (f"SELECT {column} AS k, COUNT(*) AS n FROM audit WHERE {where} "
+                   f"GROUP BY {column} ORDER BY n DESC, k LIMIT 10")
+            async with self.db.conn.execute(sql, args) as cur:
+                out[name] = [(r["k"], r["n"]) for r in await cur.fetchall()]
+        return out
 
     async def query(self, *, actor_id: int | None = None, shard_id: str | None = None,
                     action_prefix: str | None = None, result: str | None = None, since: str | None = None,

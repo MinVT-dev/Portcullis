@@ -130,6 +130,10 @@ async def test_status_embed_and_power_buttons_for_mods_only(h: Harness) -> None:
     assert [b.label for b in view.children] == ["Start", "Stop", "Restart"]
     press = FakeInteraction(operator())
     await view.children[1].callback(press)
+    assert h.port.power_calls == []  # a player is online, so it asks first
+    assert "1 player is online" in press.text
+    confirm = FakeInteraction(operator())
+    await press.replies[-1]["view"].children[0].callback(confirm)
     assert h.port.power_calls == [(SURVIVAL, PowerAction.STOP)]
 
 
@@ -177,8 +181,8 @@ async def test_power_failure_and_bad_action(h: Harness) -> None:
     await h.m.server.server_power(i, "Survival", "restart")
     assert "AMP didn't restart Survival" in i.text
     i = FakeInteraction(owner())
-    await h.m.server.server_power(i, "Survival", "update")
-    assert "Choose start, stop or restart" in i.text
+    await h.m.server.server_power(i, "Survival", "explode")
+    assert "Choose one of the actions in the list" in i.text
 
 
 async def test_send_console_and_chat(h: Harness) -> None:
@@ -271,7 +275,8 @@ async def test_setup_bot_whitelist_channel(h: Harness) -> None:
     await h.m.setup.set_whitelist_channel(FakeInteraction(admin()), REQUESTS)
     assert await h.ctx.settings.get(WHITELIST_CHANNEL) == REQUESTS
     embed = await h.m.setup.bot_embed()
-    assert f"<#{REQUESTS}>" in embed.fields[0].value and f"<@&{OPERATOR_ROLE}>" in embed.fields[1].value
+    fields = {f.name: f.value for f in embed.fields}
+    assert f"<#{REQUESTS}>" in fields["Whitelist requests go to"] and f"<@&{OPERATOR_ROLE}>" in fields["Operator roles"]
 
 
 # ------------------------------------------------------------------------------ /whitelist
@@ -387,8 +392,8 @@ async def test_player_tracking_lookup_and_top(h: Harness) -> None:
     await tracker(PlayerJoined(server=sid, at=t0, player=Player("Alice", id="7656")))
     await tracker(PlayerJoined(server=sid, at=t0, player=Player("Alice")))  # duplicate join
     await tracker(PlayerLeft(server=sid, at=t0 + timedelta(hours=2), player=Player("Alice")))
-    await tracker(PlayerJoined(server=sid, at=t0 + timedelta(hours=1), player=Player("Bob")))
-    await tracker(StateChanged(server=sid, at=t0, state=ServerState.STOPPED))  # closes Bob's session
+    await tracker(PlayerJoined(server=sid, at=t0 + timedelta(hours=2), player=Player("Bob")))  # 1h, under Alice
+    await tracker(StateChanged(server=sid, at=t0, state=ServerState.STOPPED))  # closes Bob's session at now
 
     i = FakeInteraction(member())
     await h.m.community.player_lookup(i, "alice")
@@ -563,10 +568,10 @@ def test_command_tree() -> None:
     client = discord.Client(intents=intents())
     tree = app_commands.CommandTree(client)
     ctx = SimpleNamespace(access=Access())
-    from portcullis.bot import admin, community, polls, server, setup
+    from portcullis.bot import admin, community, events, notify, polls, server, setup
 
     for cls in (server.ServerModule, setup.SetupModule, community.CommunityModule, polls.PollModule,
-                admin.AdminModule):
+                notify.NotifyModule, events.EventModule, admin.AdminModule):
         module = cls.__new__(cls)
         module.ctx = ctx  # type: ignore[assignment]
         module.register(tree)
@@ -574,10 +579,11 @@ def test_command_tree() -> None:
     for c in tree.get_commands():
         names[c.name] = sorted(x.name for x in getattr(c, "commands", []))
     assert names == {
-        "server": ["list", "power", "send", "status"], "backups": [], "setup": ["bot", "relay", "server"],
-        "whitelist": ["add", "remove", "request"], "link": [], "player": ["lookup", "top"], "user": [],
-        "Portcullis user": [], "poll": ["create", "list"], "help": [], "audit": [],
-        "admin": ["diagnostics", "export", "import"],
+        "server": ["banner", "console", "list", "power", "power-all", "send", "status"], "backups": [],
+        "setup": ["bot", "relay", "server"], "whitelist": ["add", "list", "remove", "request"], "link": [],
+        "player": ["id", "lookup", "moderate", "top", "watch", "watchlist"], "user": [], "Portcullis user": [],
+        "poll": ["create", "list"], "notify": [], "event": ["create", "list"], "help": [], "audit": [],
+        "admin": ["bot", "diagnostics", "export", "import"],
     }
     groups = {c.name: c for c in tree.get_commands()}
     for admin_only in ("setup", "admin", "audit"):
@@ -597,4 +603,4 @@ def test_discord_code_never_imports_amp() -> None:
              root / "portcullis/core/live.py"]
     for path in paths:
         imports = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.startswith(("from ", "import "))]
-        assert not [ln for ln in imports if "portcullis.amp" in ln], path
+        assert not [ln for ln in imports if "portcullis.amp" in ln or "portcullis_api" in ln], path

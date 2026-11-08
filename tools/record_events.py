@@ -46,12 +46,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from portcullis.amp import AmpClient, Credentials  # noqa: E402
-from portcullis.amp.errors import AmpError, AuthFailed, LoginNotSupported  # noqa: E402
 from portcullis.amp.events import state_from  # noqa: E402
-from portcullis.amp.port import DEFAULT_TENANT  # noqa: E402
-from portcullis.amp.redact import RedactingFilter, Redactor  # noqa: E402
-from portcullis.amp.signalr import MODES, HubConnection, HubError, HubEvent, HubGaveUp  # noqa: E402
 from portcullis.config import load_env_file  # noqa: E402
+from portcullis_api.errors import AmpError, AuthFailed, LoginNotSupported  # noqa: E402
+from portcullis_api.live import DEFAULT_TENANT  # noqa: E402
+from portcullis_api.redact import RedactingFilter, Redactor  # noqa: E402
+from portcullis_api.signalr import MODES, HubConnection, HubError, HubEvent, HubGaveUp  # noqa: E402
 
 log = logging.getLogger("recorder")
 # Not followed by "+": AMP versions look like "3.0.0.6+f3d1a77cea".
@@ -102,6 +102,15 @@ class Recorder:
             print(f"{record['t'][11:19]} {label or event.hub}:{event.target} {preview[:160]}")
 
     def _worth_echoing(self, event: HubEvent, shard: str | None = None) -> bool:
+        first = event.arguments[0] if event.arguments else None
+        if event.target == "ConsoleLine" and isinstance(first, dict) and first.get("streamId") == "update":
+            return False  # SteamCMD download output: hundreds of lines per update
+        if event.target == "Lifecycle" and isinstance(first, dict) and first.get("kind") == 1:
+            # Task progress ticks many times a second; show each new stage once.
+            key, value = ("Lifecycle", shard or ""), f"{first.get('taskId')}:{first.get('subTask')}"
+            changed = self._last_seen.get(key) != value
+            self._last_seen[key] = value
+            return changed
         if event.target not in NOISY:
             return True
         if event.target == "Metrics":
