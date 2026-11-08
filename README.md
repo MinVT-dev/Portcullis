@@ -7,5 +7,6 @@ What exists so far: the AMP 3 client, a live-event recorder, the database layer,
 - [Setup guide](docs/SETUP.md): install it, create the AMP bot user and the Discord application, run the bot, and record live events from your panel.
 - [Plan and design](docs/DESIGN.md)
 - [Ideas list](docs/IDEAS.md)
+- [Gatekeeper V3 commands in Portcullis](docs/V3_PARITY.md): where each of V3's 117 commands went (also `/help v3:` in Discord)
 - [Developer notes](docs/DEVELOPING.md)
 - [Game art](docs/GAME_ASSETS.md): banners and logos for the 229 games AMP can run
