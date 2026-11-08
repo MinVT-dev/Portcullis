@@ -6,9 +6,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from portcullis.amp.events import parse_hub_event
-from portcullis.amp.signalr import HubEvent
 from portcullis.core.games import ARMA_REFORGER, GENERIC, UNTURNED, LineDeduper, profile_for
 from portcullis.core.types import ConsoleLine, PlayerJoined
+from portcullis_api.signalr import HubEvent
 
 SID = "6366e687-3bbd-46fa-9195-5e789b3a91aa"
 AT = datetime(2026, 11, 7, 19, 11, tzinfo=UTC)

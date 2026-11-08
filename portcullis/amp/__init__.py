@@ -1,24 +1,30 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The only package that knows AMP URLs, auth and wire formats (DESIGN.md section 6).
+"""Portcullis's adapter onto the AMP 3 client in ``packages/portcullis-api`` (import name ``portcullis_api``).
 
-Nothing outside ``portcullis.amp`` should import the generated ``models`` or ``api`` modules.
+The generic client (auth, REST, SignalR, generated models) lives in that package so anyone can build
+on it. This folder holds only the parts that map AMP onto Portcullis's own types: ``port.py``
+(``AmpServerPort``) and ``events.py`` (hub events to ``portcullis.core.types``). Discord code still
+never imports either (DESIGN.md section 6).
 """
 
-from portcullis.amp.auth import Credentials, HubTicket, TokenManager
-from portcullis.amp.client import AmpClient
-from portcullis.amp.errors import (
+from portcullis_api import (
+    AmpClient,
     AmpError,
     AuthExpired,
     AuthFailed,
     BadRequest,
     Conflict,
+    Credentials,
+    HubConnection,
+    HubEvent,
+    HubTicket,
     LoginNotSupported,
     MissingCapability,
     NotFound,
     RateLimited,
+    TokenManager,
     Unreachable,
 )
-from portcullis.amp.signalr import HubConnection, HubEvent
 
 __all__ = [
     "AmpClient",

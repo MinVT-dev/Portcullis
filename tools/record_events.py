@@ -46,12 +46,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from portcullis.amp import AmpClient, Credentials  # noqa: E402
-from portcullis.amp.errors import AmpError, AuthFailed, LoginNotSupported  # noqa: E402
 from portcullis.amp.events import state_from  # noqa: E402
-from portcullis.amp.port import DEFAULT_TENANT  # noqa: E402
-from portcullis.amp.redact import RedactingFilter, Redactor  # noqa: E402
-from portcullis.amp.signalr import MODES, HubConnection, HubError, HubEvent, HubGaveUp  # noqa: E402
 from portcullis.config import load_env_file  # noqa: E402
+from portcullis_api.errors import AmpError, AuthFailed, LoginNotSupported  # noqa: E402
+from portcullis_api.live import DEFAULT_TENANT  # noqa: E402
+from portcullis_api.redact import RedactingFilter, Redactor  # noqa: E402
+from portcullis_api.signalr import MODES, HubConnection, HubError, HubEvent, HubGaveUp  # noqa: E402
 
 log = logging.getLogger("recorder")
 # Not followed by "+": AMP versions look like "3.0.0.6+f3d1a77cea".

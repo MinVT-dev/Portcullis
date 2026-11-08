@@ -264,7 +264,9 @@ Player names are checked before they go into a console command: names with line 
 When AMP ships a new build, copy its `data/versions/<version>/webapi/webapi.json` off the AMP host and run:
 
 ```powershell
-.\.venv\Scripts\python.exe -m tools.spec_diff path\to\webapi.json
+cd packages\portcullis-api
+..\..\.venv\Scripts\python.exe -m codegen.spec_diff path\to\webapi.json
+cd ..\..
 ```
 
 It lists breaking, changed and added API operations against the spec Portcullis is built on. Exit code 1 means something breaking. Add `--markdown` for a table you can paste into an issue. Updating the pinned spec is covered in [DEVELOPING.md](DEVELOPING.md#when-amp-ships-a-new-build).

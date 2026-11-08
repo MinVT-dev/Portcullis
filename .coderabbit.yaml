@@ -2,8 +2,8 @@
 # generated from it are reviewed by diffing (tools/spec_diff.py, generate_client --check), not by eye.
 reviews:
   path_filters:
-    - "!portcullis/amp/spec/**"
-    - "!portcullis/amp/models.py"
-    - "!portcullis/amp/api/*.py"
+    - "!packages/portcullis-api/src/portcullis_api/spec/**"
+    - "!packages/portcullis-api/src/portcullis_api/models.py"
+    - "!packages/portcullis-api/src/portcullis_api/api/*.py"
     - "!docs/amp3-api/API_REFERENCE.md"
     - "!docs/branding/*.png"

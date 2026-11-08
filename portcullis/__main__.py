@@ -13,12 +13,12 @@ import sys
 import discord
 
 from portcullis.amp import AmpClient, Credentials
-from portcullis.amp.errors import AuthFailed
 from portcullis.amp.port import AmpServerPort
 from portcullis.bot import Access, PortcullisBot
 from portcullis.config import ConfigError, Settings, load, setup_logging
 from portcullis.core.games import game_hooks
 from portcullis.db.database import Database
+from portcullis_api.errors import AuthFailed
 
 log = logging.getLogger("portcullis")
 

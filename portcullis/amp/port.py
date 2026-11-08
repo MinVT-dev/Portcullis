@@ -13,11 +13,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
-from portcullis.amp import models as m
-from portcullis.amp.client import AmpClient
-from portcullis.amp.errors import MissingCapability
 from portcullis.amp.events import parse_hub_event, state_from, to_int
-from portcullis.amp.signalr import HubConnection, HubEvent, Mode
 from portcullis.core.types import (
     Backup,
     Player,
@@ -28,10 +24,14 @@ from portcullis.core.types import (
     ServerInfo,
     ServerStatus,
 )
+from portcullis_api import models as m
+from portcullis_api.client import AmpClient
+from portcullis_api.errors import MissingCapability
+from portcullis_api.live import leave_shard, shard_tenant
+from portcullis_api.signalr import HubConnection, HubEvent, Mode
 
 log = logging.getLogger(__name__)
 
-DEFAULT_TENANT = "_root"  # the only tenant on a single-install AMP 3; used if a shard reports none
 
 
 def _float(value: Any) -> float | None:
@@ -66,8 +66,7 @@ class ShardEvents:
 
     async def _tenant(self, sid: str) -> str:
         if sid not in self._tenants:
-            shard = await self._client.shards.get_shards_by_id(sid)
-            self._tenants[sid] = shard.tenant_id or DEFAULT_TENANT
+            self._tenants[sid] = await shard_tenant(self._client, sid)
         return self._tenants[sid]
 
     def _open(self, sid: str) -> None:
@@ -93,9 +92,8 @@ class ShardEvents:
             return
         conn, task = entry
         tenant = self._tenants.get(sid)
-        if tenant is not None and conn.connected:
-            with contextlib.suppress(Exception):
-                await conn.send("LeaveShard", tenant, sid)
+        if tenant is not None:
+            await leave_shard(conn, sid, tenant)
         await conn.close()
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):

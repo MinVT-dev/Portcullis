@@ -603,4 +603,4 @@ def test_discord_code_never_imports_amp() -> None:
              root / "portcullis/core/live.py"]
     for path in paths:
         imports = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.startswith(("from ", "import "))]
-        assert not [ln for ln in imports if "portcullis.amp" in ln], path
+        assert not [ln for ln in imports if "portcullis.amp" in ln or "portcullis_api" in ln], path

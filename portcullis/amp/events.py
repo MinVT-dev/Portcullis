@@ -25,8 +25,6 @@ from collections.abc import Collection, Mapping
 from datetime import UTC
 from typing import Any
 
-from portcullis.amp.auth import parse_instant
-from portcullis.amp.signalr import HubEvent
 from portcullis.core.types import (
     ConsoleLine,
     OtherEvent,
@@ -38,6 +36,8 @@ from portcullis.core.types import (
     ServerState,
     StateChanged,
 )
+from portcullis_api.auth import parse_instant
+from portcullis_api.signalr import HubEvent
 
 log = logging.getLogger(__name__)
 

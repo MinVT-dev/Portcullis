@@ -30,11 +30,14 @@ dev = [
     "pillow>=10",
 ]
 
+# The AMP client lives in packages/portcullis-api so others can use it on its own. Installing this
+# project installs it too (one `pip install -e .`), from the same source folder.
 [tool.setuptools.packages.find]
-include = ["portcullis*"]
+where = [".", "packages/portcullis-api/src"]
+include = ["portcullis", "portcullis.*", "portcullis_api", "portcullis_api.*"]
 
 [tool.setuptools.package-data]
-"portcullis.amp" = ["spec/*"]
+"portcullis_api" = ["spec/*", "py.typed"]
 "portcullis.db" = ["migrations/*.sql"]
 "portcullis.assets" = ["games.json", "fallback/*.png"]
 
@@ -46,11 +49,14 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-extend-exclude = ["portcullis/amp/models.py", "portcullis/amp/api/"]
+extend-exclude = ["packages/portcullis-api/src/portcullis_api/models.py", "packages/portcullis-api/src/portcullis_api/api/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "ASYNC"]
 ignore = ["ASYNC109"]  # explicit per-call timeouts are part of the API
+
+[tool.ruff.lint.isort]
+known-first-party = ["portcullis", "portcullis_api", "tests", "tools"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ASYNC240"]

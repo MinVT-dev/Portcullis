@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from portcullis.amp.redact import RedactingFilter, Redactor
+from portcullis_api.redact import RedactingFilter, Redactor
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 

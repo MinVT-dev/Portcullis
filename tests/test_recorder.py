@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.fakes.amp_server import PASSWORD, SHARD_ID, TENANT, USERNAME, FakeAmp, wait_for
+from portcullis_api.testing import PASSWORD, SHARD_ID, TENANT, USERNAME, FakeAmp, wait_for
 from tools import record_events
 
 
@@ -79,7 +79,7 @@ async def test_recorder_gives_up_when_join_always_fails(fake: FakeAmp, base_url:
 
 
 def test_noisy_events_are_echoed_only_when_they_change(tmp_path: Path) -> None:
-    from portcullis.amp.signalr import HubEvent
+    from portcullis_api.signalr import HubEvent
 
     rec = record_events.Recorder(tmp_path, record_events.CaptureRedactor(scrub_ips=True), echo=True)
     state = {"status": 25, "isRunning": True, "revision": 1}
@@ -97,7 +97,7 @@ def test_noisy_events_are_echoed_only_when_they_change(tmp_path: Path) -> None:
 
 
 def test_update_output_and_task_progress_are_quiet(tmp_path: Path) -> None:
-    from portcullis.amp.signalr import HubEvent
+    from portcullis_api.signalr import HubEvent
 
     rec = record_events.Recorder(tmp_path, record_events.CaptureRedactor(scrub_ips=True), echo=True)
 
