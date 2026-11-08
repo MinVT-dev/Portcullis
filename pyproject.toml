@@ -14,6 +14,8 @@ dependencies = [
     "pydantic>=2.6,<3",
     "aiosqlite>=0.20,<1",
     "discord.py>=2.5,<3",
+    # Status banners (/server banner and the image board). Pillow's licence (HPND) is AGPL-compatible.
+    "pillow>=10.1",
 ]
 
 [project.optional-dependencies]
@@ -26,8 +28,6 @@ dev = [
     "black==26.10.1",
     "isort==8.0.1",
     "pip-audit>=2.7",
-    # tools/build_game_assets.py reads image sizes; the bot itself does not need it.
-    "pillow>=10",
 ]
 
 # The AMP client lives in packages/portcullis-api so others can use it on its own. Installing this

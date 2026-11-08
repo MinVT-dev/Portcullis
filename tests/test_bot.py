@@ -579,7 +579,7 @@ def test_command_tree() -> None:
     for c in tree.get_commands():
         names[c.name] = sorted(x.name for x in getattr(c, "commands", []))
     assert names == {
-        "server": ["console", "list", "power", "power-all", "send", "status"], "backups": [],
+        "server": ["banner", "console", "list", "power", "power-all", "send", "status"], "backups": [],
         "setup": ["bot", "relay", "server"], "whitelist": ["add", "list", "remove", "request"], "link": [],
         "player": ["lookup", "moderate", "top", "watch", "watchlist"], "user": [], "Portcullis user": [],
         "poll": ["create", "list"], "notify": [], "event": ["create", "list"], "help": [], "audit": [],

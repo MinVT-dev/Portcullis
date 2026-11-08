@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import re
 import time
@@ -14,6 +15,7 @@ from discord import app_commands
 
 from portcullis.assets import game_art
 from portcullis.bot.backups import BackupView
+from portcullis.bot.banners import MAX_CARDS, THEMES, card_from, render_banner
 from portcullis.bot.base import NONE, Ctx, Module, card, code, fill, reply, short_error, state_text, valid_line
 from portcullis.core.console_rules import DENY_KEY, HIDE_KEY, blocked_word, hider, stored_denylist, stored_rules
 from portcullis.core.relay import console_safe, escape
@@ -220,6 +222,42 @@ class ServerModule(Module):
 
         lines = await asyncio.gather(*(one(r) for r in rows))
         await reply(interaction, embed=card(title="Servers", description="\n".join(lines)[:4000]))
+
+    async def server_banner(self, interaction: discord.Interaction, server: str | None = None, theme: str = "dark",
+                            public: bool = False) -> None:
+        """A status image of one server, or of every server the caller can see."""
+        if not await self.in_guild(interaction):
+            return
+        if server:
+            row = await self.server(interaction, server)
+            if row is None:
+                return
+            rows = [row]
+        else:
+            rows = await self.ctx.servers.list(include_hidden=False)
+        note = None
+        if public and not await self.ctx.allowed(interaction.user, "server.banner",
+                                                 rows[0].shard_id if server else None):
+            public, note = False, "Only operators can post the banner for everyone, so here it is just for you."
+        await interaction.response.defer(ephemeral=not public, thinking=True)
+
+        async def one(row: ServerRow) -> ServerStatus:
+            try:
+                return await asyncio.wait_for(self.ctx.port.get_status(row.shard_id), STATUS_TIMEOUT)
+            except Exception as exc:  # noqa: BLE001 - shown as Unknown on the banner
+                log.warning("status for %s failed: %s", row.name, exc)
+                return ServerStatus(id=row.shard_id, state=ServerState.UNKNOWN)
+
+        shown = rows[:MAX_CARDS]
+        statuses = await asyncio.gather(*(one(r) for r in shown))
+        addresses = [await self.ctx.settings.get(CONNECT_KEY, scope=r.shard_id) for r in shown]
+        cards = [card_from(r.name, s, a if isinstance(a, str) else None) for r, s, a in zip(shown, statuses, addresses,
+                                                                                             strict=True)]
+        png = await asyncio.to_thread(render_banner, cards, theme=theme if theme in THEMES else "dark")
+        if len(rows) > MAX_CARDS:
+            extra = f"Showing the first {MAX_CARDS} of {len(rows)} servers."
+            note = f"{note} {extra}" if note else extra
+        await reply(interaction, note, ephemeral=not public, file=discord.File(io.BytesIO(png), "servers.png"))
 
     async def server_status(self, interaction: discord.Interaction, server: str) -> None:
         if not await self.in_guild(interaction):
@@ -623,6 +661,16 @@ class ServerModule(Module):
         @app_commands.autocomplete(server=auto)
         async def server_status(interaction: discord.Interaction, server: str) -> None:
             await self.server_status(interaction, server)
+
+        @group.command(name="banner", description="A status picture of one server or all of them")
+        @app_commands.describe(server="One game server (leave out for all)", theme="Dark or light",
+                               public="Post it for everyone in this channel (operators)")
+        @app_commands.autocomplete(server=auto)
+        @app_commands.choices(theme=[app_commands.Choice(name="Dark", value="dark"),
+                                     app_commands.Choice(name="Light", value="light")])
+        async def server_banner(interaction: discord.Interaction, server: str | None = None, theme: str = "dark",
+                                public: bool = False) -> None:
+            await self.server_banner(interaction, server, theme, public)
 
         @group.command(name="power", description="Start, stop or restart a server (operators)")
         @app_commands.describe(server="The game server", action="What to do")
