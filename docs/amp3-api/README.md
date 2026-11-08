@@ -10,6 +10,6 @@ These docs map the AMP 3 API that Portcullis will talk to. They cover the 3.0.0 
 
 **This applies to one preview build.** The build expires on 7 Dec 2026 (`/api/Health/status`), and the API may change between previews. Re-check against `webapi.json` on each new build.
 
-**Licence note:** the spec, and the descriptions quoted from it in API_REFERENCE.md, are CubeCoders' material, not ours under AGPL. This repo is private. Remove these files, or get CubeCoders' permission, before making the repo public.
+**Licence note:** the spec, and the descriptions quoted from it in API_REFERENCE.md, are CubeCoders' material, not ours to license under AGPL (the bot) or MIT (`portcullis-api`). This repo is private. Remove these files, or get CubeCoders' permission, before making the repo public.
 
 No passwords, tokens, licence keys, SSH keys or test-VM addresses are stored here.

@@ -2,8 +2,8 @@
 
 This guide covers what exists today:
 
-- the **Discord bot**, with a first set of slash commands (server list and status, start/stop/restart) and a relay of live console lines, player joins and leaves, and state changes into Discord channels (section 8);
-- the AMP 3 client library, with its tests;
+- the **Discord bot**: server control, live relays, whitelist, players, polls, events, backups, schedules, alerts, setup panels and the audit log (section 8);
+- the AMP 3 client, [`portcullis-api`](../packages/portcullis-api/README.md), which you can also use on its own;
 - the **event recorder**, which logs in to your AMP 3 panel and saves live server events, so the bot's event handling can be built from real data;
 - the **spec-diff tool**, which tells you what changed in a new AMP build's API.
 
@@ -286,13 +286,15 @@ It lists breaking, changed and added API operations against the spec Portcullis 
 |---|---|
 | `.env` | Your settings. Git ignores it. |
 | `captures\` | Recorder output. Git ignores it. |
-| `portcullis\amp\` | The AMP 3 client: login and renewal, API calls, the live event hub. |
-| `portcullis\amp\spec\` | The pinned AMP 3 API spec the client is generated from. |
-| `portcullis\core\` | The bot's own types and the event relay, independent of AMP and Discord. |
-| `portcullis\bot\` | The Discord side: slash commands and the client. It never talks to AMP directly. |
+| `packages\portcullis-api\` | The AMP 3 client as its own package (MIT): login and renewal, API calls, the live event hub, a fake panel for tests. |
+| `packages\portcullis-api\src\portcullis_api\spec\` | The pinned AMP 3 API spec the client is generated from. |
+| `portcullis\amp\` | The adapter between the bot and `portcullis-api`. |
+| `portcullis\core\` | The bot's own types, live state, the event relay and console rules, independent of AMP and Discord. |
+| `portcullis\bot\` | The Discord side: slash commands, buttons and panels. It never talks to AMP directly. |
+| `portcullis\assets\` | The game art registry and fallback images. |
 | `portcullis\db\` | The database code and its migrations. The bot keeps its file at `PORTCULLIS_DB` (default `data\portcullis.db`) and saves a `.bak` copy before each schema upgrade. |
 | `data\` | The bot's database. Git ignores it. |
-| `tools\` | The recorder, spec-diff and the client generator. |
+| `tools\` | The live-event recorder and the game art tools. Spec-diff and the client generator are in `packages\portcullis-api\codegen\`. |
 | `docs\` | The design ([DESIGN.md](DESIGN.md)), developer notes ([DEVELOPING.md](DEVELOPING.md)) and API notes. |
 
 ## 11. Known gaps
