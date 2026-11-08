@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Repositories for the whitelist record, the watchlist and the events calendar (migration 0004)."""
+"""Repositories for the whitelist record, the watchlist and the events calendar (migration 0004), and
+admin-defined alert rules (migration 0006)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from portcullis.db.database import Database, now_iso
@@ -163,3 +165,64 @@ class EventRepo:
             "SELECT discord_id FROM event_rsvps WHERE event_id = ? ORDER BY created_at", (event_id,)
         ) as cur:
             return [int(r["discord_id"]) for r in await cur.fetchall()]
+
+
+@dataclass(frozen=True)
+class AlertRule:
+    id: int
+    shard_id: str | None
+    metric: str
+    threshold: int
+    minutes: int
+    channel_id: int | None
+    role_id: int | None
+    muted_until: str | None
+    created_by: int
+    created_at: str
+    last_fired_at: str | None
+
+    def muted(self, now: datetime) -> bool:
+        return self.muted_until is not None and datetime.fromisoformat(self.muted_until) > now
+
+
+class AlertRuleRepo:
+    LIMIT = 50
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    @staticmethod
+    def _row(r: Any) -> AlertRule:
+        return AlertRule(r["id"], r["shard_id"], r["metric"], r["threshold"], r["minutes"], r["channel_id"],
+                         r["role_id"], r["muted_until"], r["created_by"], r["created_at"], r["last_fired_at"])
+
+    async def add(self, *, metric: str, threshold: int, minutes: int, by: int, shard_id: str | None = None,
+                  channel_id: int | None = None, role_id: int | None = None) -> int | None:
+        """The new rule's id, or None when the list is full."""
+        if len(await self.all()) >= self.LIMIT:
+            return None
+        cur = await self.db.conn.execute(
+            "INSERT INTO alert_rules (shard_id, metric, threshold, minutes, channel_id, role_id, created_by, "
+            "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (shard_id.lower() if shard_id else None, metric, threshold, minutes, channel_id, role_id, by, now_iso()))
+        return int(cur.lastrowid or 0)
+
+    async def get(self, rule_id: int) -> AlertRule | None:
+        async with self.db.conn.execute("SELECT * FROM alert_rules WHERE id = ?", (rule_id,)) as cur:
+            r = await cur.fetchone()
+        return self._row(r) if r else None
+
+    async def all(self) -> list[AlertRule]:
+        async with self.db.conn.execute("SELECT * FROM alert_rules ORDER BY id") as cur:
+            return [self._row(r) for r in await cur.fetchall()]
+
+    async def delete(self, rule_id: int) -> bool:
+        cur = await self.db.conn.execute("DELETE FROM alert_rules WHERE id = ?", (rule_id,))
+        return cur.rowcount > 0
+
+    async def mute(self, rule_id: int, until: datetime | None) -> None:
+        await self.db.conn.execute("UPDATE alert_rules SET muted_until = ? WHERE id = ?",
+                                   (until.isoformat() if until else None, rule_id))
+
+    async def fired(self, rule_id: int) -> None:
+        await self.db.conn.execute("UPDATE alert_rules SET last_fired_at = ? WHERE id = ?", (now_iso(), rule_id))

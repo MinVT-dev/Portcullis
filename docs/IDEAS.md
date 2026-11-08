@@ -43,7 +43,7 @@ The design budget is about 25 slash commands (DESIGN.md, Appendix B), so most ne
 | High CPU or memory alert | Posts when a server stays above a threshold for N minutes. | ✅ Built |
 | Player count in a channel name | A voice channel named "Survival: 5 online". | ✅ Built. Renames at most every 5.5 minutes, so the number lags. |
 | Daily summary | One post a day: uptime, peak players, new players. | ✅ Built. Posts yesterday's players, new players and peak at midnight in the bot's time zone. |
-| `/alert` thresholds | Admin-defined alerts from AMP's own triggers. | 🟡 Waits on the scheduler payloads. |
+| `/alert` thresholds | Admin-defined alerts: CPU, memory, player count or offline, held for N minutes, with their own channel and role. | ✅ Built as `/alert create` and `/alert list` (mute and delete buttons). Portcullis checks them itself once a minute; AMP's own triggers wait on the scheduler payloads. |
 
 ## 3. Players and community
 

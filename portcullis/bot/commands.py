@@ -22,6 +22,7 @@ from portcullis.bot.events import EventCancel, EventGoing, EventModule
 from portcullis.bot.joins import JoinWatch
 from portcullis.bot.notify import NotifyModule
 from portcullis.bot.polls import PollClose, PollModule, PollVote
+from portcullis.bot.rules import AlertRuleModule
 from portcullis.bot.server import ServerModule
 from portcullis.bot.setup import SetupModule
 
@@ -46,6 +47,7 @@ class Modules:
         self.events = EventModule(ctx)
         self.schedules = ScheduleModule(ctx)
         self.alerts = Alerts(ctx)
+        self.rules = AlertRuleModule(ctx)
         self.joins = JoinWatch(ctx)
         self.digest = Digest(ctx)
         self.audit_feed = AuditFeed(ctx)
@@ -53,12 +55,12 @@ class Modules:
 
     def all(self) -> list[Module]:
         return [self.server, self.setup, self.community, self.polls, self.notify, self.events, self.schedules,
-                self.admin]
+                self.rules, self.admin]
 
     async def tick(self) -> None:
-        """Once a minute: event reminders, load and backup alerts, the daily summary and milestones."""
+        """Once a minute: event reminders, load and backup alerts, alert rules, the daily summary and milestones."""
         for name, job in (("events", self.events.tick), ("alerts", self.alerts.tick),
-                          ("digest", self.digest.tick)):
+                          ("alert rules", self.rules.tick), ("digest", self.digest.tick)):
             try:
                 await job()
             except Exception:  # one failing job must not stop the others

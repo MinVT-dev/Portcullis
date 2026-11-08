@@ -210,12 +210,14 @@ Three levels: **everyone** in the server; **operators** (members with a role in 
 | `/event list` | everyone | Upcoming events. |
 | `/user <member>`, or right-click a member → **Apps → Portcullis user** | operators | Linked names, flags and recent actions, with buttons to mark them as a donator, block them from whitelist requests, or remove their links. |
 | `/setup relay`, `/setup server <server>`, `/setup bot` | admins | Relay channels, per-server settings, and bot-wide settings (8.6). |
+| `/alert create <metric> [threshold] [minutes] [server] [channel] [role]` | admins | Your own alert: CPU or memory at or above a percentage, more or fewer players than a number, or offline, for `minutes` (default 5, 0 = at once). Leave out `server` to watch every server, and `channel` to post in the alert channel. It fires once, pings only `role`, and posts again when it clears. Up to 50 rules. These are Portcullis's own checks, once a minute, not AMP triggers. |
+| `/alert list` | admins | Your alert rules, with **Mute 1 hour**, **Unmute** and **Delete**. |
 | `/audit [member] [server] [action] [result] [export]` | admins | Who did what through Portcullis, refused attempts included. `export` sends it all as a JSON file. |
 | `/admin diagnostics` | admins | Checks the connection to AMP and every server, and shows the relays and the bot's status. A server line with a 403 names the AMP permission the bot lacks. It also lists what the bot's AMP account may do, and warns if it is a full admin account. |
 | `/admin export` / `/admin import <file>` | admins | Download all Portcullis settings as a file, and restore them. Gatekeeper V3 databases can't be imported yet. |
 | `/help` | everyone | Lists the commands you can use. |
 
-Not built: creating schedules and custom alert rules (the scheduler's step and trigger formats haven't been checked on a real panel), a Discord-to-game chat bridge (it needs a privileged Discord intent, and `/server send as:chat` covers it), and giveaways, vote-to-restart and managing AMP accounts from Discord (not game-server features, or too easy to abuse).
+Not built: creating schedules (the scheduler's step and trigger formats haven't been checked on a real panel), a Discord-to-game chat bridge (it needs a privileged Discord intent, and `/server send as:chat` covers it), and giveaways, vote-to-restart and managing AMP accounts from Discord (not game-server features, or too easy to abuse).
 
 **Coming from Gatekeeper V3?** `/help v3:<old command>` says where any of V3's 117 commands went, and [V3_PARITY.md](V3_PARITY.md) lists them all.
 
@@ -291,7 +293,7 @@ It lists breaking, changed and added API operations against the spec Portcullis 
 ## 11. Known gaps
 
 - **In-memory restart warnings.** A warned restart counts down inside the bot; restarting Portcullis during the countdown cancels it.
-- **Not every planned command exists.** Creating schedules, custom alert rules and deleting backups are still to come (see 8.4).
+- **Not every planned command exists.** Creating schedules and deleting backups are still to come (see 8.4).
 - **Unverified AMP actions.** Update, sleep, wake, making and restoring backups, and the schedule buttons use routes from the API spec that haven't run on a real panel.
 - **Play time starts now.** `/player` only knows what the bot has seen since it started recording. Sessions still open when the bot stops are closed at its next start, so a long restart can count a little extra time.
 - **Leaves are not verified.** AMP's player-left event hasn't been captured yet for any game; if it never arrives, a player's session ends when the server stops.
