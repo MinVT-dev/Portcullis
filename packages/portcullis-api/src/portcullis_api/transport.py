@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """HTTP transport for the AMP 3 REST API: auth header, one retry after a 401, retries for safe calls,
 a concurrency cap, typed parsing and redacted logging."""
 

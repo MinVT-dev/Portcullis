@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Live events for one shard over the ``/hubs/shard`` SignalR hub.
 
 What was verified on a real AMP 3.0.0.6 panel (2026-11-07):

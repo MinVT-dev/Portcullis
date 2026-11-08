@@ -7,7 +7,7 @@ name = "portcullis-api"
 version = "0.1.0"
 description = "Async, typed Python client for the CubeCoders AMP 3 web API (REST and SignalR)"
 readme = "README.md"
-license = "AGPL-3.0-or-later"
+license = "MIT"
 requires-python = ">=3.11"
 keywords = ["amp", "cubecoders", "game server", "signalr", "asyncio"]
 classifiers = [

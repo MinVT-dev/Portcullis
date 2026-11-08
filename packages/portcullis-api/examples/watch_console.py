@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Print one server's console and player joins as they happen. Ctrl+C to stop.
 
     python examples/watch_console.py <shard id>

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Async Python client for the CubeCoders AMP 3 web API.
 
     from portcullis_api import AmpClient, Credentials

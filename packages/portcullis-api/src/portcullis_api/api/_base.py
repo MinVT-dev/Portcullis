@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Base class for the generated API groups. Hand-written; the other modules here are generated."""
 
 from __future__ import annotations

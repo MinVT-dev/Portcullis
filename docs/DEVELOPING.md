@@ -91,4 +91,4 @@ Add a new file `portcullis/db/migrations/NNNN_what_it_does.sql` with the next nu
 
 ## Licence note
 
-The spec in `packages/portcullis-api/src/portcullis_api/spec/` and the generated `models.py` and `api/` contain CubeCoders' descriptions. They are not AGPL code of ours. The repo is private, so this is fine for now. Before the repo goes public, either get CubeCoders' permission or stop committing the spec and generated files and generate them at install time instead.
+The spec in `packages/portcullis-api/src/portcullis_api/spec/` and the generated `models.py` and `api/` contain CubeCoders' descriptions. They are not our code, under either licence. The bot is AGPL-3.0-or-later; the `portcullis-api` package (everything under `packages/portcullis-api/` except those files) is MIT, so others can build closed or open tools on it. The repo is private, so this is fine for now. Before the repo goes public, either get CubeCoders' permission or stop committing the spec and generated files and generate them at install time instead.

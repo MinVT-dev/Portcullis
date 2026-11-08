@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Signing in to AMP 3, keeping the session alive, and issuing SignalR hub tickets.
 
 What AMP 3 does (docs/amp3-api/API_REFERENCE.md section 5):

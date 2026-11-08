@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """A small SignalR client for AMP 3's hubs (JSON protocol over WebSockets).
 
 Why our own client instead of a library: AMP's hub tickets are single-use, last 60-90 seconds and

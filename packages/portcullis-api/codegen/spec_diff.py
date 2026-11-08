@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Compare two AMP 3 OpenAPI specs and say what changed for a client.
 
     python -m codegen.spec_diff OLD.json NEW.json           # report, exit 1 if anything breaking changed

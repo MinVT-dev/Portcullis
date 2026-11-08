@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Hub connection: fresh ticket per connect, re-join after reconnect, recovery from every kind of drop."""
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """``AmpClient``: one object that holds the HTTP session, the token manager, the typed API groups and
 a factory for hub connections.
 

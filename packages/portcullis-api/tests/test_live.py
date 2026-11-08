@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """watch_shard: joins with the tenant, filters other shards' events, leaves when the caller stops."""
 
 from __future__ import annotations

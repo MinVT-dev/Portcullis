@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Token refresh: login, renew ahead of expiry, fall back to login, single-use hub tickets."""
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """List every server on a panel with its state and player count.
 
     AMP_URL=https://panel.example:8443 AMP_USERNAME=bot AMP_PASSWORD=... python examples/list_servers.py

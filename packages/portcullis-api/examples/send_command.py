@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Send one console command to a server, then show the last console lines.
 
     python examples/send_command.py <shard id> "say Hello from Python"

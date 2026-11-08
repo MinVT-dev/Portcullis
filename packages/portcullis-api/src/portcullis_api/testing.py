@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """An in-process fake of the parts of AMP 3 that auth and realtime depend on.
 
 It follows the documented behaviour (docs/amp3-api/API_REFERENCE.md sections 5 and 8): username and

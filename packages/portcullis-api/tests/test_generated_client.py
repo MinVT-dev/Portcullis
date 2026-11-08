@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """The generated API groups build the right requests and parse responses into models."""
 
 from __future__ import annotations

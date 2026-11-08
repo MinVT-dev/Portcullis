@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 """Errors raised by the AMP client.
 
 AMP 3 returns three error body shapes (API_REFERENCE.md section 6): RFC 9110 ProblemDetails,

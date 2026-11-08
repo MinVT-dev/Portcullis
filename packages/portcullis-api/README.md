@@ -123,4 +123,4 @@ ruff check .
 
 ## Licence
 
-AGPL-3.0-or-later, the same as Portcullis. The spec and the generated `models.py` and `api/` contain CubeCoders' API descriptions; see the main repo's `docs/DEVELOPING.md`.
+MIT, so you can use it in your own projects, closed or open. The Portcullis bot itself is AGPL-3.0-or-later. The pinned spec and the generated `models.py` and `api/` contain CubeCoders' API descriptions, which aren't ours to license; see the main repo's `docs/DEVELOPING.md`.
