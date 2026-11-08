@@ -1,27 +1,32 @@
 # Images for the READMEs
 
-The main [README](../../README.md) uses the pictures in this folder. Most of them are **placeholders** that say "Screenshot coming soon".
+The main [README](../../README.md) uses the pictures in this folder. Some are real captures from a running panel; the rest are **placeholders** that say "Screenshot coming soon".
 
 To replace a placeholder, save the real screenshot as a PNG under **the same file name**. The READMEs pick it up without any changes.
 
-## Screenshots to take
+## Real screenshots
+
+| File | Shows |
+|---|---|
+| `server-list.png` | `/server list` with six servers |
+| `help.png` | `/help` for an admin |
+| `server-status.png` | A status card for a running server |
+| `server-offline.png` | A status card for an offline server |
+| `backups.png` | `/backups` with the Make a backup confirmation |
+| `alerts.png` | The reply after saving an alert rule |
+| `setup-server.png` | The `/setup server` panel for one server |
+| `setup-bot.png` | The `/setup bot` panel |
+| `help-v3.png` | `/help v3:` suggesting old V3 commands as you type |
+| `server-banner-dark.png`, `server-banner-light.png` | Real output from the bot's own `/server banner` renderer (`portcullis/bot/banners.py`), drawn with example servers |
+
+## Screenshots still to take
 
 | File | What to capture | Shown in the README |
 |---|---|---|
-| `server-status.png` | `/server status` on a running server: the embed with state, players, CPU, memory and uptime, and the Start, Stop and Restart buttons plus a quick command | Yes |
 | `live-board.png` | The live server board message in its channel, with a few servers listed | Yes |
 | `console-relay.png` | A console relay channel with a few batches of console lines | Yes |
 | `whitelist-request.png` | A whitelist request in the requests channel, with its Approve and Deny buttons | Yes |
-| `setup-server.png` | The `/setup server` panel: the relay pickers and the buttons below them | Yes |
-| `alerts.png` | An alert rule firing in its channel, or `/alert list` with Mute, Unmute and Delete | Yes |
-| `server-list.png` | `/server list players:True` with several servers and player names | Not yet |
-| `setup-bot.png` | The `/setup bot` panel | Not yet |
 | `events-polls.png` | An event with Going and Cancel, or a poll with its buttons | Not yet |
-| `help-v3.png` | `/help v3:` for an old Gatekeeper V3 command | Not yet |
-
-## Real images, not placeholders
-
-- **`server-banner-dark.png` and `server-banner-light.png`** are real output from the bot's own `/server banner` renderer (`portcullis/bot/banners.py`), drawn with example servers. You can replace them with a capture from your own panel.
 
 ## Tips
 

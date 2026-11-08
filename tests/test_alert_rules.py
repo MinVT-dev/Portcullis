@@ -184,3 +184,12 @@ async def test_status_fetched_once_per_server(h: Harness) -> None:
     assert SURVIVAL in calls and len(calls) == len(set(calls))  # once per server, however many rules
     assert CREATIVE not in calls  # stopped, so it isn't asked
     assert h.ctx.live.states[ServerId(CREATIVE)] is ServerState.STOPPED
+
+
+async def test_list_with_no_rules_sends_no_view(h: Harness) -> None:
+    # Regression: discord.py posts the message, then calls view.is_finished(), so view=None crashed
+    # right after "No alert rules yet" (seen on a real panel, 2026-11-08).
+    i = FakeInteraction(admin())
+    await h.m.rules.list_rules(i)
+    assert "No alert rules yet" in i.text
+    assert "view" not in i.replies[-1] and "embed" not in i.replies[-1]

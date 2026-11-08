@@ -74,6 +74,7 @@ class FakeResponse:
 
     async def send_message(self, content: str | None = None, **kwargs: Any) -> None:
         assert not self._done, "responded twice"
+        assert kwargs.get("view", ...) is not None, "discord.py fails on view=None for a new message"
         self._done = True
         self._i.replies.append({"content": content, **kwargs})
 
@@ -99,6 +100,7 @@ class FakeFollowup:
 
     async def send(self, content: str | None = None, **kwargs: Any) -> None:
         assert self._i.response.is_done(), "followup before the first response"
+        assert kwargs.get("view", ...) is not None, "discord.py fails on view=None for a new message"
         self._i.replies.append({"content": content, **kwargs})
 
 

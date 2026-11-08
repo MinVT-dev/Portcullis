@@ -514,7 +514,7 @@ class SetupModule(Module):
     async def setup_bot(self, interaction: discord.Interaction) -> None:
         if not await self.in_guild(interaction) or not await self.require_admin(interaction, "setup.bot"):
             return
-        await reply(interaction, embed=await self.bot_embed(), view=BotPanel(self))
+        await reply(interaction, embed=await self.bot_embed(), view=await BotPanel(self).sync())
 
     async def set_whitelist_channel(self, interaction: discord.Interaction, channel_id: int | None) -> None:
         if channel_id is None:
@@ -806,6 +806,12 @@ class QuickModal(discord.ui.Modal, title="Quick commands"):
 
 
 class BotPanel(AdminView):
+    async def sync(self) -> BotPanel:
+        """Grey out an "off" button when that feature is already off."""
+        self.whitelist_off.disabled = not await self.module.ctx.settings.get(WHITELIST_CHANNEL)
+        self.board_off.disabled = not await self.module.ctx.settings.get(BOARD_CHANNEL)
+        return self
+
     @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="Channel for whitelist requests…",
                        channel_types=[discord.ChannelType.text], min_values=1, max_values=1, row=0)
     async def whitelist_channel(self, interaction: discord.Interaction,
@@ -813,10 +819,11 @@ class BotPanel(AdminView):
         channel_id = select.values[0].id
         if can_post(interaction, channel_id) is False:
             await interaction.response.edit_message(content=f"I can't post in <#{channel_id}>.",
-                                                    embed=await self.module.bot_embed(), view=self)
+                                                    embed=await self.module.bot_embed(), view=await self.sync())
             return
         await self.module.set_whitelist_channel(interaction, channel_id)
-        await interaction.response.edit_message(content="Saved.", embed=await self.module.bot_embed(), view=self)
+        await interaction.response.edit_message(content="Saved.", embed=await self.module.bot_embed(),
+                                                view=await self.sync())
 
     @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="Channel for the live server board…",
                        channel_types=[discord.ChannelType.text], min_values=1, max_values=1, row=1)
@@ -825,24 +832,24 @@ class BotPanel(AdminView):
         channel_id = select.values[0].id
         if can_post(interaction, channel_id) is False:
             await interaction.response.edit_message(content=f"I can't post in <#{channel_id}>.",
-                                                    embed=await self.module.bot_embed(), view=self)
+                                                    embed=await self.module.bot_embed(), view=await self.sync())
             return
         await interaction.response.defer()
         await self.module.set_board_channel(interaction, channel_id)
         await interaction.edit_original_response(content=f"The server board is now in <#{channel_id}>.",
-                                                 embed=await self.module.bot_embed(), view=self)
+                                                 embed=await self.module.bot_embed(), view=await self.sync())
 
     @discord.ui.button(label="Turn whitelist requests off", style=discord.ButtonStyle.danger, row=2)
     async def whitelist_off(self, interaction: discord.Interaction, button: discord.ui.Button[BotPanel]) -> None:
         await self.module.set_whitelist_channel(interaction, None)
         await interaction.response.edit_message(content="Whitelist requests are off.",
-                                                embed=await self.module.bot_embed(), view=self)
+                                                embed=await self.module.bot_embed(), view=await self.sync())
 
     @discord.ui.button(label="Turn the server board off", style=discord.ButtonStyle.danger, row=2)
     async def board_off(self, interaction: discord.Interaction, button: discord.ui.Button[BotPanel]) -> None:
         await self.module.set_board_channel(interaction, None)
         await interaction.response.edit_message(content="The server board is off. You can delete its old message.",
-                                                embed=await self.module.bot_embed(), view=self)
+                                                embed=await self.module.bot_embed(), view=await self.sync())
 
     @discord.ui.button(label="Alert and log channels", style=discord.ButtonStyle.primary, row=3)
     async def channels(self, interaction: discord.Interaction, button: discord.ui.Button[BotPanel]) -> None:
