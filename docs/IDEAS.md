@@ -36,6 +36,7 @@ The design budget is about 25 slash commands (DESIGN.md, Appendix B), so most ne
 |---|---|---|
 | Profile status | "2/4 servers online · 5 players" on the bot's profile. | ✅ Built |
 | Live server board | One self-updating message with every server's state. | ✅ Built |
+| Status banners | A picture with a card per server, like Gatekeeper V3's banners. | ✅ Built as `/server banner`, and the board can show it instead of the embed (`/setup bot` → Options → board style). Drawn with a built-in font; no game art is downloaded. |
 | `/notify` | Members get a DM when a server comes online. | ✅ Built |
 | Offline alert with role ping | Pings a chosen role when a server goes offline without anyone using `/server power`. | ✅ Built. A stop from AMP's own panel also alerts. The crash alert uses the Failed state, which hasn't been seen on a real crash yet. |
 | Crash alert | Pings a role when a server enters the Failed state. | ✅ Built (see above). Failed hasn't been seen on a real crash. |

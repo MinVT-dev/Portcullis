@@ -33,7 +33,7 @@ from portcullis.bot.base import (
     role_problem,
     valid_line,
 )
-from portcullis.bot.board import BOARD_CHANNEL
+from portcullis.bot.board import BOARD_CHANNEL, BOARD_STYLE, STYLES
 from portcullis.bot.events import TIMEZONE, valid_zone
 from portcullis.bot.joins import NAME_RULES, WELCOME_KEY, name_rules, parse_rules
 from portcullis.bot.server import (
@@ -308,7 +308,9 @@ class SetupModule(Module):
         channel = await self.ctx.settings.get(WHITELIST_CHANNEL)
         embed.add_field(name="Whitelist requests go to", value=mention(channel), inline=False)
         board = await self.ctx.settings.get(BOARD_CHANNEL)
-        embed.add_field(name="Live server board", value=mention(board), inline=False)
+        style = await self.ctx.settings.get(BOARD_STYLE) or "embed"
+        embed.add_field(name="Live server board", value=f"{mention(board)} ({style})" if board else mention(board),
+                        inline=False)
         for key, label in BOT_CHANNELS.items():
             embed.add_field(name=label, value=mention(await self.ctx.settings.get(key)), inline=False)
         for key, label in BOT_ROLES.items():
@@ -351,20 +353,26 @@ class SetupModule(Module):
         return "Saved."
 
     async def save_bot_options(self, interaction: discord.Interaction, timezone: str, backup_days: str,
-                               rules: str) -> str | None:
-        timezone, backup_days = timezone.strip(), backup_days.strip()
+                               rules: str, board_style: str = "") -> str | None:
+        timezone, backup_days, board_style = timezone.strip(), backup_days.strip(), board_style.strip().lower()
         if timezone and not valid_zone(timezone):
             return "Use a time zone name like Europe/Amsterdam or America/New_York."
         if backup_days and (not backup_days.isdigit() or not 1 <= int(backup_days) <= 365):
             return "The backup reminder needs a number of days from 1 to 365, or empty to turn it off."
+        if board_style and board_style not in STYLES:
+            return "The board style is embed or image."
         by = interaction.user.id
+        restyled = (board_style or "embed") != (await self.ctx.settings.get(BOARD_STYLE) or "embed")
         for key, value in ((TIMEZONE, timezone or None), (BACKUP_DAYS, int(backup_days) if backup_days else None),
-                           (NAME_RULES, parse_rules(rules) or None)):
+                           (NAME_RULES, parse_rules(rules) or None),
+                           (BOARD_STYLE, board_style if board_style == "image" else None)):
             if value is None:
                 await self.ctx.settings.delete(key)
             else:
                 await self.ctx.settings.set(key, value, by=by)
         await self.ctx.audit.record("setup.bot.options", actor_id=by)
+        if restyled and self.ctx.board is not None:
+            await self.ctx.board.update()
         return None
 
     async def set_grant(self, interaction: discord.Interaction, group: str, roles: list[Any]) -> str:
@@ -842,12 +850,15 @@ class BotOptionsModal(discord.ui.Modal, title="Portcullis options"):
             label="Name rules: words to flag in player names", style=discord.TextStyle.paragraph,
             default="\n".join(name_rules(settings.get(NAME_RULES))), placeholder="One word per line",
             required=False, max_length=2000)
-        for item in (self.timezone, self.backup_days, self.rules):
+        self.board_style: discord.ui.TextInput[BotOptionsModal] = discord.ui.TextInput(
+            label="Server board style (embed or image)", default=str(settings.get(BOARD_STYLE) or "embed"),
+            placeholder="embed", required=False, max_length=5)
+        for item in (self.timezone, self.backup_days, self.rules, self.board_style):
             self.add_item(item)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         problem = await self.panel.module.save_bot_options(interaction, self.timezone.value, self.backup_days.value,
-                                                           self.rules.value)
+                                                           self.rules.value, self.board_style.value)
         await interaction.response.edit_message(content=problem or "Saved.", embed=await self.panel.module.bot_embed(),
                                                 view=self.panel)
 

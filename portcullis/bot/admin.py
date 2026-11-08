@@ -27,6 +27,7 @@ MAX_IMPORT_BYTES = 1_000_000
 HELP = [
     ("/server list", "everyone", "Every server and whether it's online (players: names who's on)"),
     ("/server status", "everyone", "One server's state, who is online and its address"),
+    ("/server banner", "everyone", "A status picture of one server or all of them"),
     ("/player lookup", "everyone", "When a player was last seen, and their play time"),
     ("/player top", "everyone", "Who has played the most"),
     ("/whitelist request", "everyone", "Ask to be whitelisted on a server"),
