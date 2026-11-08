@@ -47,6 +47,7 @@ HELP = [
     ("/event create", "mod", "Announce an event with a Going button and a reminder"),
     ("/user (or right-click → Apps → Portcullis user)", "mod", "A member's links and flags"),
     ("/setup relay · server · bot", "admin", "Relays, server settings, bot settings"),
+    ("/alert create · list", "admin", "Your own alerts: CPU, memory, player count or offline, held for N minutes"),
     ("/audit", "admin", "Who did what through Portcullis"),
     ("/admin diagnostics · export · import", "admin", "Health check and settings backup"),
 ]

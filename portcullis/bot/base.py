@@ -20,7 +20,7 @@ from portcullis.core.relay import STATE_ICONS, escape
 from portcullis.core.types import ServerState
 from portcullis.db.database import Database
 from portcullis.db.features import LinkCodeRepo, NotifyRepo, PlayerRepo, PollRepo, WhitelistRepo
-from portcullis.db.ops import EventRepo, WatchlistRepo, WhitelistEntryRepo
+from portcullis.db.ops import AlertRuleRepo, EventRepo, WatchlistRepo, WhitelistEntryRepo
 from portcullis.db.repos import AuditRepo, ServerRepo, ServerRow, SettingsRepo, UserRepo
 
 log = logging.getLogger(__name__)
@@ -186,6 +186,7 @@ class Ctx:
         self.whitelisted = WhitelistEntryRepo(self.db)
         self.watchlist = WatchlistRepo(self.db)
         self.events = EventRepo(self.db)
+        self.alert_rules = AlertRuleRepo(self.db)
 
     async def allowed(self, user: Any, node: str, shard_id: str | None = None) -> bool:
         """Full operators, a role granted the node's group, or one of the server's own operator roles."""
@@ -234,8 +235,16 @@ class Ctx:
     async def post(self, key: str, content: str | None = None, *, embed: discord.Embed | None = None,
                    ping_role: int | None = None, view: discord.ui.View | None = None) -> bool:
         """Post in the bot-wide channel stored under ``key``. Only ``ping_role`` can be mentioned."""
-        channel_id = await self.settings.get(key)
-        if not channel_id or self.client is None:
+        channel_id = as_id(await self.settings.get(key))
+        if channel_id is None:
+            return False
+        return await self.post_to(channel_id, content, embed=embed, ping_role=ping_role, view=view, label=key)
+
+    async def post_to(self, channel_id: int, content: str | None = None, *, embed: discord.Embed | None = None,
+                      ping_role: int | None = None, view: discord.ui.View | None = None,
+                      label: str = "channel") -> bool:
+        """Post in one channel. Only ``ping_role`` can be mentioned, and never @everyone."""
+        if self.client is None:
             return False
         mentions = NONE
         if ping_role == self.guild_id:
@@ -247,10 +256,10 @@ class Ctx:
         if view is not None:
             extra["view"] = view
         try:
-            channel = await self.channel(int(channel_id))
+            channel = await self.channel(channel_id)
             await channel.send(content, allowed_mentions=mentions, **extra)
         except Exception as exc:  # noqa: BLE001 - a missing channel must not break the caller
-            log.warning("could not post in the %s (%s): %s", key, channel_id, exc)
+            log.warning("could not post in the %s (%s): %s", label, channel_id, exc)
             return False
         return True
 
