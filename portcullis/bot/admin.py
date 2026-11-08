@@ -14,6 +14,7 @@ import discord
 from discord import app_commands
 
 from portcullis.bot.base import OWNER_ONLY_KEYS, Module, card, code, reply, short_error, state_text, when
+from portcullis.bot.v3map import STATUS_LABELS, lookup, search
 from portcullis.core.relay import escape
 from portcullis.db.features import all_settings
 from portcullis.db.repos import ServerRepo
@@ -55,7 +56,10 @@ HELP = [
 class AdminModule(Module):
     # ---------------------------------------------------------------- /help
 
-    async def help(self, interaction: discord.Interaction) -> None:
+    async def help(self, interaction: discord.Interaction, v3: str | None = None) -> None:
+        if v3:
+            await self.help_v3(interaction, v3)
+            return
         access = self.ctx.access
         allowed = {"everyone"}
         if await self.ctx.is_staff(interaction.user):
@@ -66,6 +70,23 @@ class AdminModule(Module):
         embed = card(title="Portcullis", description="\n".join(lines))
         embed.set_footer(text="Only the commands you can use are listed.")
         await reply(interaction, embed=embed)
+
+    async def help_v3(self, interaction: discord.Interaction, name: str) -> None:
+        """Where a Gatekeeper V3 command went (docs/V3_PARITY.md)."""
+        found = lookup(name)
+        if found is None:
+            await reply(interaction, f"Gatekeeper V3 had no command called {code(name[:100])}. "
+                                     "Pick one from the list as you type.")
+            return
+        title = "Where it went" if found.status in ("same", "moved") else STATUS_LABELS[found.status]
+        embed = card(title=f"{found.v3} in Portcullis")
+        embed.add_field(name=title, value=found.home, inline=False)
+        embed.set_footer(text="Every V3 command is listed in docs/V3_PARITY.md.")
+        await reply(interaction, embed=embed)
+
+    async def autocomplete_v3(self, interaction: discord.Interaction,
+                              current: str) -> list[app_commands.Choice[str]]:
+        return [app_commands.Choice(name=n, value=n) for n in search(current)]
 
     # ---------------------------------------------------------------- /audit
 
@@ -227,8 +248,10 @@ class AdminModule(Module):
     def register(self, tree: app_commands.CommandTree) -> None:
         @app_commands.command(name="help", description="What Portcullis can do for you")
         @app_commands.guild_only()
-        async def help_(interaction: discord.Interaction) -> None:
-            await self.help(interaction)
+        @app_commands.describe(v3="A Gatekeeper V3 command, to see where it is now")
+        @app_commands.autocomplete(v3=self.autocomplete_v3)
+        async def help_(interaction: discord.Interaction, v3: str | None = None) -> None:
+            await self.help(interaction, v3)
 
         @app_commands.command(name="audit", description="Who did what through Portcullis (admins)")
         @app_commands.guild_only()

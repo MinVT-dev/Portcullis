@@ -217,6 +217,8 @@ Three levels: **everyone** in the server; **operators** (members with a role in 
 
 Not built: creating schedules and custom alert rules (the scheduler's step and trigger formats haven't been checked on a real panel), a Discord-to-game chat bridge (it needs a privileged Discord intent, and `/server send as:chat` covers it), and giveaways, vote-to-restart and managing AMP accounts from Discord (not game-server features, or too easy to abuse).
 
+**Coming from Gatekeeper V3?** `/help v3:<old command>` says where any of V3's 117 commands went, and [V3_PARITY.md](V3_PARITY.md) lists them all.
+
 Discord's **Server Settings → Integrations → Portcullis** can narrow further who sees each command. It can't widen the bot's own checks.
 
 **Profile status.** The bot's profile shows a live summary such as `2/4 servers online · 5 players`, updated as servers start and stop and players come and go (at most every 15 seconds). Hidden servers aren't counted. If AMP can't be reached, the bot shows as idle with `Can't reach AMP`.
