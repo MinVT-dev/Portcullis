@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+from portcullis.bot.admin import grant_covers
 from portcullis.bot.alerts import BACKUP_DAYS, CPU_KEY, Alerts
 from portcullis.bot.base import (
     ALERT_CHANNEL,
@@ -530,11 +531,31 @@ async def test_diagnostics_shows_amp_permissions(h: Harness) -> None:
     i = FakeInteraction(admin())
     await h.m.admin.diagnostics(i)
     assert "admin account" in {f.name: f.value for f in i.embed.fields}["AMP account permissions"]
-    h.port.grants = ["shard:*:view", "shard:*:power.start"]
+    h.port.grants = ["spire.*.shard.*.view", "spire.*.shard.*.power.start"]
     i = FakeInteraction(admin())
     await h.m.admin.diagnostics(i)
     text = {f.name: f.value for f in i.embed.fields}["AMP account permissions"]
-    assert "`shard:*:view`" in text and "`power.stop`" in text and "power.start`," not in text
+    assert "`spire.*.shard.*.view`" in text and "`power.stop`" in text and "power.start`," not in text
+
+
+async def test_diagnostics_reads_wildcard_grants(h: Harness) -> None:
+    # Regression: the grants seen on a real panel (2026-11-08) cover every server node through
+    # spire.*.shard.*.>, but a substring check listed power.start and console.read as "not found".
+    h.port.grants = ["spire.*.view", "spire.*.shard.*.>", "spire.*.settings.write.>", "users.*", "roles.*"]
+    i = FakeInteraction(admin())
+    await h.m.admin.diagnostics(i)
+    assert "Not found" not in {f.name: f.value for f in i.embed.fields}["AMP account permissions"]
+
+
+def test_grant_covers() -> None:
+    assert grant_covers("spire.*.shard.*.>", "power.start")
+    assert grant_covers("spire.abc.shard.def.console.read", "console.read")
+    assert grant_covers("spire.*.shard.*.power.*", "power.stop")
+    assert grant_covers("power.start", "power.start")
+    assert not grant_covers("spire.*.view", "view")  # the spire's own view, not a server's
+    assert not grant_covers("spire.*.shard.*.power.start", "power.stop")
+    assert not grant_covers("spire.*.shard.*.console.read.>", "console.read")  # > needs one more token
+    assert not grant_covers("users.*", "view")
 
 
 async def test_help_lists_new_commands_for_granted_roles(h: Harness) -> None:

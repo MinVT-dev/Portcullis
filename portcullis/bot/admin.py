@@ -79,6 +79,31 @@ HELP = [
 ]
 
 
+
+def _nats_match(grant: list[str], subject: list[str | None]) -> bool:
+    """NATS-style match: ``*`` is one token, ``>`` is the rest (one or more). A ``None`` subject token is
+    an id we don't know, so any single grant token fits it."""
+    for i, token in enumerate(grant):
+        if token == ">":
+            return len(subject) > i
+        if i >= len(subject):
+            return False
+        if token != "*" and subject[i] is not None and token != subject[i]:
+            return False
+    return len(grant) == len(subject)
+
+
+def grant_covers(grant: str, node: str) -> bool:
+    """Whether one AMP grant covers a per-server node such as ``power.start`` on some server.
+
+    AMP 3 grants are dotted nodes with NATS wildcards (API_REFERENCE.md, permissions). Server nodes sit
+    under ``spire.<id>.shard.<id>.``; a bare node or one under a single shard also counts."""
+    parts = grant.split(".")
+    tail = node.split(".")
+    return (_nats_match(parts, ["spire", None, "shard", None, *tail])
+            or _nats_match(parts, ["shard", None, *tail])
+            or _nats_match(parts, list(tail)))
+
 class AdminModule(Module):
     # ---------------------------------------------------------------- /help
 
@@ -277,8 +302,7 @@ class AdminModule(Module):
         if not grants:
             return "❌ None. Give the bot's AMP account a role (docs/SETUP.md)."
         wanted = ("view", "power.start", "power.stop", "power.restart", "console.read", "console.send")
-        text = " ".join(grants)
-        missing = [w for w in wanted if w not in text]
+        missing = [w for w in wanted if not any(grant_covers(g, w) for g in grants)]
         shown = ", ".join(code(g) for g in grants[:20]) + (f" and {len(grants) - 20} more"
                                                             if len(grants) > 20 else "")
         if missing:

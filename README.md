@@ -95,20 +95,33 @@ Portcullis is built for **AMP 3** only. For AMP 2, use [Gatekeeper V2](https://g
 
 ## Screenshots
 
-> Pictures that say "Screenshot coming soon" are placeholders. They will be replaced with real screenshots; see [docs/images](docs/images/README.md).
+These are real captures from a running panel:
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/server-status.png" alt="/server status showing state, players, CPU, memory, uptime and power buttons"><br><sub><code>/server status</code> with power and quick-command buttons</sub></td>
+    <td width="50%"><img src="docs/images/server-list.png" alt="/server list with six servers: online, offline and suspended"><br><sub><code>/server list</code></sub></td>
+    <td width="50%"><img src="docs/images/help.png" alt="/help listing the commands this member may use"><br><sub><code>/help</code> shows only what you may use</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/server-status.png" alt="A status card: Space Engineers online with players, CPU, memory and uptime"><br><sub>A status card for a running server</sub></td>
+    <td><img src="docs/images/server-offline.png" alt="A status card for Minecraft while it is offline"><br><sub>The same card when the server is offline</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/backups.png" alt="/backups for Space Engineers with the Make a backup confirmation"><br><sub><code>/backups</code> with the confirm step</sub></td>
+    <td><img src="docs/images/alerts.png" alt="The reply after saving an alert rule"><br><sub>Saving an alert rule</sub></td>
+  </tr>
+</table>
+
+Still to come (placeholders for now, see [docs/images](docs/images/README.md)):
+
+<table>
+  <tr>
     <td width="50%"><img src="docs/images/live-board.png" alt="The live server board message in a Discord channel"><br><sub>The live server board</sub></td>
+    <td width="50%"><img src="docs/images/console-relay.png" alt="Console lines relayed into a Discord channel"><br><sub>Console relay</sub></td>
   </tr>
   <tr>
-    <td><img src="docs/images/console-relay.png" alt="Console lines relayed into a Discord channel"><br><sub>Console relay</sub></td>
     <td><img src="docs/images/whitelist-request.png" alt="A whitelist request with Approve and Deny buttons"><br><sub>A whitelist request for the moderators</sub></td>
-  </tr>
-  <tr>
     <td><img src="docs/images/setup-server.png" alt="The /setup server panel"><br><sub><code>/setup server</code></sub></td>
-    <td><img src="docs/images/alerts.png" alt="An alert rule firing in Discord"><br><sub>Alert rules</sub></td>
   </tr>
 </table>
 

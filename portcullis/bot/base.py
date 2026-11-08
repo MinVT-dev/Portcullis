@@ -328,6 +328,11 @@ NONE = discord.AllowedMentions.none()
 async def reply(interaction: discord.Interaction, content: str | None = None, *, ephemeral: bool = True,
                 **kwargs: Any) -> None:
     kwargs = {"ephemeral": ephemeral, "allowed_mentions": NONE, **kwargs}
+    # A new message has no view or embed to clear. discord.py posts the message and only then calls
+    # view.is_finished(), so view=None would fail after the member already saw the reply.
+    for key in ("view", "embed"):
+        if key in kwargs and kwargs[key] is None:
+            del kwargs[key]
     if interaction.response.is_done():
         await interaction.followup.send(content, **kwargs)
     else:
