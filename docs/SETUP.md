@@ -292,7 +292,7 @@ It lists breaking, changed and added API operations against the spec Portcullis 
 - **Play time starts now.** `/player` only knows what the bot has seen since it started recording. Sessions still open when the bot stops are closed at its next start, so a long restart can count a little extra time.
 - **Leaves are not verified.** AMP's player-left event hasn't been captured yet for any game; if it never arrives, a player's session ends when the server stops.
 - **Untested against a real AMP 3.** Everything has been tested against a fake AMP built from the API docs. Not yet checked against a real panel: whether login and the live hub work as the docs say, which connection mode works, whether joining a shard's events succeeds, what the event payloads really look like, and whether the generated models accept real responses. The recorder exists to answer these questions.
-- **Event parsing is provisional.** Until a capture exists, player join, leave and console events are parsed from guessed shapes.
+- **Player events depend on the game.** Join and chat are verified for Unturned only (AMP's own `UserJoined` event, plus a chat pattern on the console); leave has not been captured yet. Arma Reforger gives no player names or chat through AMP. Other games need a capture with a player in game before their chat can be relayed.
 - **One AMP preview build.** Portcullis is built against AMP 3.0.0.6, which expires on 7 Dec 2026. A newer build may change the API; run spec-diff on it first.
 - **Licence.** The pinned spec and generated client contain CubeCoders' text. That's fine while the repo is private. See [DEVELOPING.md](DEVELOPING.md#licence-note) before it goes public.
 
