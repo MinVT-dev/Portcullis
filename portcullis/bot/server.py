@@ -546,12 +546,14 @@ class ServerModule(Module):
             lines.append(f"**{escape(b.name or b.id)}** · {when}{size}{pin}")
         more = f"\n…and {len(items) - 15} older" if len(items) > 15 else ""
         embed = card(title=f"Backups of {row.name}", description="\n".join(lines) + more)
-        embed.set_footer(text="Making and restoring are not yet seen working on a real panel.")
+        embed.set_footer(text="Making, restoring and deleting are not yet seen working on a real panel.")
         can_make = await self.ctx.allowed(interaction.user, "backup.create", row.shard_id)
         can_restore = self.ctx.access.is_admin(interaction.user) and \
             await self.ctx.allowed(interaction.user, "backup.restore", row.shard_id)
-        view = BackupView(self, row, items, can_make=can_make, can_restore=can_restore) \
-            if can_make or can_restore else None
+        can_delete = self.ctx.access.is_admin(interaction.user) and \
+            await self.ctx.allowed(interaction.user, "backup.delete", row.shard_id)
+        view = BackupView(self, row, items, can_make=can_make, can_restore=can_restore, can_delete=can_delete) \
+            if can_make or can_restore or can_delete else None
         await reply(interaction, embed=embed, **({"view": view} if view is not None else {}))
 
     def backups_make(self, row: ServerRow):  # noqa: ANN201
@@ -571,6 +573,16 @@ class ServerModule(Module):
                                    f"Restoring {escape(row.name)} to **{escape(name)}**.",
                                    self.ctx.port.restore_backup(row.shard_id, backup_id), {"backup": name})
         return restore
+
+    def backups_delete(self, row: ServerRow, backup_id: str, name: str):  # noqa: ANN201
+        async def delete(interaction: discord.Interaction) -> None:
+            if not self.ctx.access.is_admin(interaction.user):
+                await reply(interaction, "Deleting backups needs the Manage Server permission.")
+                return
+            await self._backup_job(interaction, row, "backup.delete",
+                                   f"Deleting the backup **{escape(name)}** of {escape(row.name)}.",
+                                   self.ctx.port.delete_backup(row.shard_id, backup_id), {"backup": name})
+        return delete
 
     async def _backup_job(self, interaction: discord.Interaction, row: ServerRow, node: str, done: str,
                           call: Awaitable[None], detail: dict[str, str]) -> None:

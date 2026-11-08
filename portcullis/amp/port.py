@@ -19,6 +19,7 @@ from portcullis.core.types import (
     Player,
     PowerAction,
     Schedule,
+    ScheduleRun,
     ServerEvent,
     ServerId,
     ServerInfo,
@@ -222,6 +223,9 @@ class AmpServerPort:
     async def restore_backup(self, server: ServerId, backup_id: str) -> None:
         await self.client.files_backups.post_shards_snapshots_restore(server, backup_id)
 
+    async def delete_backup(self, server: ServerId, backup_id: str) -> None:
+        await self.client.files_backups.delete_shards_snapshots_by_snapshot_id(server, backup_id)
+
     async def list_schedules(self, server: ServerId) -> list[Schedule]:
         out = []
         for dto in await self.client.scheduling.get_shards_schedules(server):
@@ -235,6 +239,15 @@ class AmpServerPort:
 
     async def set_schedule_enabled(self, server: ServerId, schedule_id: str, enabled: bool) -> None:
         await self.client.scheduling.post_shards_schedules_enabled(server, schedule_id, {"enabled": enabled})
+
+    async def delete_schedule(self, server: ServerId, schedule_id: str) -> None:
+        await self.client.scheduling.delete_shards_schedules_by_schedule_id(server, schedule_id)
+
+    async def schedule_history(self, server: ServerId, schedule_id: str, limit: int = 10) -> list[ScheduleRun]:
+        runs = await self.client.scheduling.get_shards_schedules_history(server, schedule_id, limit=limit)
+        return [ScheduleRun(started_at=r.started_at or r.queued_at, finished_at=r.completed_at,
+                            status=r.status.value if r.status is not None else None, error=r.error_message)
+                for r in runs]
 
     async def permissions(self) -> list[str]:
         """The bot account's grant strings. ``">"`` means everything (seen on an admin account)."""

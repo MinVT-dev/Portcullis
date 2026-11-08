@@ -19,6 +19,7 @@ from portcullis.core.types import (
     PlayerLeft,
     PowerAction,
     Schedule,
+    ScheduleRun,
     ServerEvent,
     ServerId,
     ServerInfo,
@@ -54,6 +55,7 @@ class FakeAmpPort:
         self.power_calls: list[tuple[ServerId, PowerAction]] = []
         self.backup_calls: list[tuple[str, ServerId, str]] = []
         self.schedule_calls: list[tuple[str, ServerId, str]] = []
+        self.schedule_runs: dict[str, list[ScheduleRun]] = {}
         self._subs: dict[ServerId, set[asyncio.Queue[ServerEvent]]] = {}
 
     # ------------------------------------------------------------------ setup helpers
@@ -150,6 +152,11 @@ class FakeAmpPort:
         self._get(server)
         self.backup_calls.append(("restore", server, backup_id))
 
+    async def delete_backup(self, server: ServerId, backup_id: str) -> None:
+        srv = self._get(server)
+        self.backup_calls.append(("delete", server, backup_id))
+        srv.backups = [b for b in srv.backups if b.id != backup_id]
+
     async def list_schedules(self, server: ServerId) -> list[Schedule]:
         return list(self._get(server).schedules)
 
@@ -162,6 +169,15 @@ class FakeAmpPort:
         self.schedule_calls.append(("enabled" if enabled else "disabled", server, schedule_id))
         srv.schedules = [Schedule(s.id, s.name, enabled, s.next_fire) if s.id == schedule_id else s
                          for s in srv.schedules]
+
+    async def delete_schedule(self, server: ServerId, schedule_id: str) -> None:
+        srv = self._get(server)
+        self.schedule_calls.append(("delete", server, schedule_id))
+        srv.schedules = [s for s in srv.schedules if s.id != schedule_id]
+
+    async def schedule_history(self, server: ServerId, schedule_id: str, limit: int = 10) -> list[ScheduleRun]:
+        self._get(server)
+        return list(self.schedule_runs.get(schedule_id, []))[:limit]
 
     async def permissions(self) -> list[str]:
         return list(self.grants)

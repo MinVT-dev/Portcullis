@@ -4,7 +4,8 @@
 None of this has run against a real panel. Making a backup copies the settings of the newest
 existing one (the spec doesn't name the values), and AMP may pause or stop the server while it
 captures. Restoring needs Manage Server, and AMP takes a backup of the current state first.
-Creating schedules isn't here: the step and trigger formats are too involved to send blind.
+Schedules can be run, switched on and off, deleted and their run history read. Creating them isn't
+here: the step and trigger formats are too involved to send blind.
 """
 
 from __future__ import annotations
@@ -27,13 +28,15 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 UNVERIFIED = "Not yet seen working on a real panel."
+RUN_ICONS = {"Succeeded": "✅", "CompletedWithErrors": "⚠️", "Failed": "❌", "TimedOut": "⏱️", "Skipped": "⏭️",
+             "Running": "🔄", "Queued": "🕒"}
 
 
 class BackupView(discord.ui.View):
     """A Make button and a restore picker under the backup list."""
 
     def __init__(self, module: ServerModule, row: ServerRow, items: list[Backup], *, can_make: bool,
-                 can_restore: bool) -> None:
+                 can_restore: bool, can_delete: bool = False) -> None:
         super().__init__(timeout=300)
         self.module = module
         self.row = row
@@ -51,7 +54,17 @@ class BackupView(discord.ui.View):
                                                                     options=options, row=1)
             pick.callback = self._restore  # type: ignore[method-assign]
             self.add_item(pick)
-            self.names = {b.id: b.name or b.id for b in restorable}
+        self.names = {b.id: b.name or b.id for b in items}
+        self.kept = {b.id for b in items if b.sticky}
+        if can_delete and items:
+            options = [discord.SelectOption(
+                label=(b.name or b.id)[:90], value=b.id,
+                description=(b.created_at.strftime("%d %b %Y %H:%M") if b.created_at else "unknown time")
+                + (" · kept" if b.sticky else "")) for b in items[:25]]
+            drop: discord.ui.Select[BackupView] = discord.ui.Select(placeholder="Delete one of these…",
+                                                                    options=options, row=2)
+            drop.callback = self._delete  # type: ignore[method-assign]
+            self.add_item(drop)
 
     async def _make(self, interaction: discord.Interaction) -> None:
         from portcullis.bot.server import Confirm
@@ -60,16 +73,30 @@ class BackupView(discord.ui.View):
             f"{UNVERIFIED}", ephemeral=True,
             view=Confirm(interaction.user.id, self.module.backups_make(self.row), "Make it"))
 
+    def _chosen(self, row: int) -> str:
+        select = next(c for c in self.children if isinstance(c, discord.ui.Select) and c.row == row)
+        return select.values[0]
+
     async def _restore(self, interaction: discord.Interaction) -> None:
         from portcullis.bot.server import Confirm
-        select = next(c for c in self.children if isinstance(c, discord.ui.Select))
-        backup_id = select.values[0]
+        backup_id = self._chosen(1)
         name = self.names.get(backup_id, backup_id)
         await interaction.response.send_message(
             f"Restore **{escape(self.row.name)}** to **{escape(name)}**? Everything since then is rolled back "
             f"and the server may stop. AMP saves the current state first. {UNVERIFIED}", ephemeral=True,
             view=Confirm(interaction.user.id, self.module.backups_restore(self.row, backup_id, name),
                          "Restore it"))
+
+
+    async def _delete(self, interaction: discord.Interaction) -> None:
+        from portcullis.bot.server import Confirm
+        backup_id = self._chosen(2)
+        name = self.names.get(backup_id, backup_id)
+        kept = " It is marked to be kept in AMP." if backup_id in self.kept else ""
+        await interaction.response.send_message(
+            f"Delete the backup **{escape(name)}** of **{escape(self.row.name)}**? This can't be undone.{kept} "
+            f"{UNVERIFIED}", ephemeral=True,
+            view=Confirm(interaction.user.id, self.module.backups_delete(self.row, backup_id, name), "Delete it"))
 
 
 class ScheduleView(discord.ui.View):
@@ -86,7 +113,9 @@ class ScheduleView(discord.ui.View):
         self.chosen: str | None = None
         for label, action, style in (("Run now", "run", discord.ButtonStyle.primary),
                                      ("Turn on", "on", discord.ButtonStyle.success),
-                                     ("Turn off", "off", discord.ButtonStyle.secondary)):
+                                     ("Turn off", "off", discord.ButtonStyle.secondary),
+                                     ("Run history", "history", discord.ButtonStyle.secondary),
+                                     ("Delete", "delete", discord.ButtonStyle.danger)):
             button: discord.ui.Button[ScheduleView] = discord.ui.Button(label=label, style=style, row=1)
             button.callback = self._act(action)  # type: ignore[method-assign]
             self.add_item(button)
@@ -101,7 +130,13 @@ class ScheduleView(discord.ui.View):
             if self.chosen is None:
                 await reply(interaction, "Pick a schedule first.")
                 return
-            await self.module.act(interaction, self.row, self.items[self.chosen], action)
+            schedule = self.items[self.chosen]
+            if action == "history":
+                await self.module.history(interaction, self.row, schedule)
+            elif action == "delete":
+                await self.module.confirm_delete(interaction, self.row, schedule)
+            else:
+                await self.module.act(interaction, self.row, schedule, action)
         return act
 
 
@@ -143,6 +178,8 @@ class ScheduleModule(Module):
         try:
             if action == "run":
                 await self.ctx.port.run_schedule(row.shard_id, schedule.id)
+            elif action == "delete":
+                await self.ctx.port.delete_schedule(row.shard_id, schedule.id)
             else:
                 await self.ctx.port.set_schedule_enabled(row.shard_id, schedule.id, action == "on")
         except Exception as exc:  # noqa: BLE001
@@ -153,13 +190,53 @@ class ScheduleModule(Module):
             return
         await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id,
                                     detail={"schedule": schedule.name})
-        done = {"run": "Started", "on": "Turned on", "off": "Turned off"}[action]
+        done = {"run": "Started", "on": "Turned on", "off": "Turned off", "delete": "Deleted"}[action]
         await reply(interaction, f"{done}: **{escape(schedule.name)}** on {escape(row.name)}.")
+
+    async def history(self, interaction: discord.Interaction, row: ServerRow, schedule: Schedule) -> None:
+        if not await self.require_mod(interaction, "schedule.history", row.shard_id):
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            runs = await self.ctx.port.schedule_history(row.shard_id, schedule.id, limit=10)
+        except Exception as exc:  # noqa: BLE001
+            await reply(interaction, f"Couldn't read the run history: {escape(short_error(exc))}")
+            return
+        if not runs:
+            await reply(interaction, f"**{escape(schedule.name)}** hasn't run yet.")
+            return
+        lines = []
+        for run in runs:
+            at = discord.utils.format_dt(run.started_at, "f") if run.started_at else "not started"
+            took = ""
+            if run.started_at and run.finished_at:
+                took = f" · took {max(0, int((run.finished_at - run.started_at).total_seconds()))}s"
+            error = f"\n> {escape(run.error[:200])}" if run.error else ""
+            status = run.status or "unknown"
+            lines.append(f"{RUN_ICONS.get(status, '❔')} {at} · {escape(status)}{took}{error}")
+        embed = card(title=f"Last runs of {schedule.name}", description="\n".join(lines)[:4000])
+        embed.set_footer(text=UNVERIFIED)
+        await reply(interaction, embed=embed)
+
+    async def confirm_delete(self, interaction: discord.Interaction, row: ServerRow, schedule: Schedule) -> None:
+        from portcullis.bot.server import Confirm
+        if not self.ctx.access.is_admin(interaction.user):
+            await self.ctx.audit.record("schedule.delete", actor_id=interaction.user.id, shard_id=row.shard_id,
+                                        result="denied")
+            await reply(interaction, "Deleting schedules needs the Manage Server permission.")
+            return
+
+        async def delete(confirmed: discord.Interaction) -> None:
+            await self.act(confirmed, row, schedule, "delete")
+
+        await interaction.response.send_message(
+            f"Delete the schedule **{escape(schedule.name)}** from {escape(row.name)} in AMP? This can't be "
+            f"undone. {UNVERIFIED}", ephemeral=True, view=Confirm(interaction.user.id, delete, "Delete it"))
 
     def register(self, tree: app_commands.CommandTree) -> None:
         group = app_commands.Group(name="schedule", description="AMP's schedules", guild_only=True)
 
-        @group.command(name="list", description="A server's schedules, with Run and On/Off (operators)")
+        @group.command(name="list", description="A server's schedules: run, switch, history, delete (operators)")
         @app_commands.describe(server="The game server")
         @app_commands.autocomplete(server=self.autocomplete_server)
         async def schedule_list(interaction: discord.Interaction, server: str) -> None:

@@ -89,6 +89,16 @@ class Schedule:
 
 
 @dataclass(frozen=True)
+class ScheduleRun:
+    """One firing of a schedule, from AMP's run history."""
+
+    started_at: datetime | None
+    finished_at: datetime | None
+    status: str | None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
 class Backup:
     id: str
     name: str | None

@@ -667,7 +667,7 @@ async def test_schedules_list_and_act(h: Harness) -> None:
     await h.m.schedules.list_schedules(i, "Survival")
     assert "Nightly restart" in i.replies[-1]["embed"].description
     view = i.replies[-1]["view"]
-    select, run, on, off = view.children
+    select, run, on, off, _history, _delete = view.children
     select._values = ["s1"]
     await select.callback(FakeInteraction(operator()))
     await off.callback(FakeInteraction(operator()))
