@@ -186,7 +186,7 @@ class AlertRule:
 
 
 class AlertRuleRepo:
-    LIMIT = 50
+    LIMIT = 25  # /alert list picks rules from one select, which holds 25
 
     def __init__(self, db: Database) -> None:
         self.db = db

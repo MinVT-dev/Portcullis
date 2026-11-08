@@ -392,8 +392,8 @@ async def test_player_tracking_lookup_and_top(h: Harness) -> None:
     await tracker(PlayerJoined(server=sid, at=t0, player=Player("Alice", id="7656")))
     await tracker(PlayerJoined(server=sid, at=t0, player=Player("Alice")))  # duplicate join
     await tracker(PlayerLeft(server=sid, at=t0 + timedelta(hours=2), player=Player("Alice")))
-    await tracker(PlayerJoined(server=sid, at=t0 + timedelta(hours=1), player=Player("Bob")))
-    await tracker(StateChanged(server=sid, at=t0, state=ServerState.STOPPED))  # closes Bob's session
+    await tracker(PlayerJoined(server=sid, at=t0 + timedelta(hours=2), player=Player("Bob")))  # 1h, under Alice
+    await tracker(StateChanged(server=sid, at=t0, state=ServerState.STOPPED))  # closes Bob's session at now
 
     i = FakeInteraction(member())
     await h.m.community.player_lookup(i, "alice")

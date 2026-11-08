@@ -247,8 +247,7 @@ class AlertRuleModule(Module):
         if key in self.fired or clock - started < rule.minutes * 60:
             return
         if rule.muted(wall):
-            self.fired[key] = False
-            return
+            return  # not marked fired, so it alerts on the first check after the mute ends
         hold = f" for {rule.minutes} min" if rule.minutes else ""
         self.fired[key] = await self._send(rule, f"🚨 Alert {rule.id}: **{escape(name)}** has been "
                                                  f"{describe(rule)}{hold}.", ping=True)

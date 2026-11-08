@@ -105,8 +105,8 @@ class ScheduleView(discord.ui.View):
         self.module = module
         self.row = row
         self.items = {s.id: s for s in items[:25]}
-        options = [discord.SelectOption(label=s.name[:90], value=s.id, description="On" if s.enabled else "Off")
-                   for s in items[:25]]
+        options = [discord.SelectOption(label=(s.name or s.id)[:90], value=s.id,
+                                        description="On" if s.enabled else "Off") for s in items[:25]]
         pick: discord.ui.Select[ScheduleView] = discord.ui.Select(placeholder="Pick a schedule…", options=options)
         pick.callback = self._picked  # type: ignore[method-assign]
         self.add_item(pick)

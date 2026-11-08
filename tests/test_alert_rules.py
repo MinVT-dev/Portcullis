@@ -87,7 +87,7 @@ async def test_rule_limit(h: Harness) -> None:
         await h.ctx.alert_rules.add(metric="offline", threshold=0, minutes=0, by=1)
     i = FakeInteraction(admin())
     await h.m.rules.create(i, "offline", 0)
-    assert "already 50" in i.text
+    assert f"already {AlertRuleRepo.LIMIT}" in i.text
 
 
 async def test_fires_after_sustain_then_clears(h: Harness) -> None:
@@ -151,8 +151,13 @@ async def test_mute_suppresses_and_actions(h: Harness) -> None:
     await h.m.rules.tick(now=60)
     assert ch[OPS].sent == []  # muted fire, and no "cleared" for an alert never posted
 
+    busy(h, 99.0)
+    await h.m.rules.tick(now=120)  # still muted: held, not posted
+    assert ch[OPS].sent == []
     await h.m.rules.act(FakeInteraction(admin()), rule_id, "unmute")
     assert (await h.ctx.alert_rules.get(rule_id)).muted_until is None  # type: ignore[union-attr]
+    await h.m.rules.tick(now=180)  # unmuted while still high: alerts now, not after the next episode
+    assert "Alert 1" in ch[OPS].sent[-1]["content"]
     future = datetime.now(UTC) + timedelta(hours=2)
     assert not (await h.ctx.alert_rules.get(rule_id)).muted(future)  # type: ignore[union-attr]
 

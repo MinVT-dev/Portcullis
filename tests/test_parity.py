@@ -103,8 +103,8 @@ async def test_backup_delete_needs_manage_server_and_a_confirm(h: Harness) -> No
 def test_hide_rules_parse_and_match() -> None:
     from portcullis.core.console_rules import hider, parse_hide_rules
 
-    rules, problem = parse_hide_rules("Saving chunks\n\nre:\\d+\\.\\d+\\.\\d+\\.\\d+\nsaving CHUNKS")
-    assert problem is None and rules == ["Saving chunks", "re:\\d+\\.\\d+\\.\\d+\\.\\d+"]
+    rules, problem = parse_hide_rules("Saving chunks\n\nre:\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\nsaving CHUNKS")
+    assert problem is None and rules == ["Saving chunks", "re:\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}"]
     hide = hider(tuple(rules))
     assert hide is not None
     assert hide("[INFO] saving chunks for level 'world'")
@@ -116,7 +116,7 @@ def test_hide_rules_parse_and_match() -> None:
 def test_hide_rules_refuse_bad_patterns() -> None:
     from portcullis.core.console_rules import HIDE_LIMIT, parse_hide_rules, stored_rules
 
-    assert "repeats a group" in (parse_hide_rules("re:(a+)+$")[1] or "")
+    assert "repeats a part" in (parse_hide_rules("re:(a+)+$")[1] or "")
     assert "valid regular expression" in (parse_hide_rules("re:[unclosed")[1] or "")
     assert "after `re:`" in (parse_hide_rules("re:")[1] or "")
     assert "longer than" in (parse_hide_rules("x" * 201)[1] or "")
@@ -153,7 +153,7 @@ async def test_relay_skips_hidden_console_lines_but_listeners_still_see_them() -
 
     relay = Relay(port, sink, flush_interval=3600)
     relay.listeners.append(listener)
-    ip = "re:\\d+\\.\\d+\\.\\d+\\.\\d+"
+    ip = "re:\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}"
     await relay.apply([RelayTarget(server=sid, name="Survival", console_channel=7, hide=(ip,))])
     await settle()
     port.emit(line(sid, "Steve connected from 198.51.100.4"))
@@ -171,7 +171,7 @@ async def test_console_rules_panel_send_and_console_view(h: Harness) -> None:
 
     row = await h.ctx.servers.find("Survival")
     problem = await h.m.setup.save_console_rules(FakeInteraction(owner()), row, "re:(x+)+", "")
-    assert "repeats a group" in (problem or "")
+    assert "repeats a part" in (problem or "")
     assert await h.ctx.settings.get(HIDE_KEY, scope=SURVIVAL) is None
     assert await h.m.setup.save_console_rules(FakeInteraction(owner()), row, "secret token", "op stop") is None
     assert await h.ctx.settings.get(DENY_KEY, scope=SURVIVAL) == ["op", "stop"]
@@ -401,3 +401,43 @@ async def test_whitelist_rules_donator_only_require_link_bypass_and_reply(h: Har
     assert "characters" in (await h.m.setup.save_whitelist_rules(FakeInteraction(admin()), "no", "no", "x" * 501))
     assert await h.m.setup.save_whitelist_rules(FakeInteraction(admin()), "no", "no", "") is None
     assert await h.ctx.settings.get(WL_REQUIRE_LINK) is None
+
+
+# ------------------------------------------------------------------------------ review fixes
+
+
+def test_hide_rules_refuse_patterns_that_backtrack() -> None:
+    from portcullis.core.console_rules import REGEX_LIMIT, hider, parse_hide_rules
+
+    for bad in ("re:(a|aa)+$", "re:(a|a?)+$", "re:((a+))+$", r"re:(\d|\d\d)+$", r"re:(a)\1", r"re:\d*\d*\d*x",
+                r"re:\d+\.\d+\.\d+"):
+        assert parse_hide_rules(bad)[1], bad
+    for good in (r"re:\d{1,3}\.\d{1,3}", r"re:^\[INFO\] .*joined", "re:(foo|bar) logged in", "re:(?:ab)+c"):
+        assert parse_hide_rules(good)[1] is None, good
+    too_many = "\n".join(f"re:x{i}" for i in range(REGEX_LIMIT + 1))
+    assert "re:" in (parse_hide_rules(too_many)[1] or "")
+    hide = hider(("re:secret$",))
+    assert hide is not None and hide("a secret") and not hide("x" * 400 + " secret")  # long lines: first 300 only
+
+
+def test_blocked_word_sees_namespaces_and_execute() -> None:
+    from portcullis.core.console_rules import blocked_word
+
+    deny = frozenset({"op", "stop"})
+    assert blocked_word("minecraft:op Bob", deny) == "op"
+    assert blocked_word("execute as @a run op Bob", deny) == "op"
+    assert blocked_word("/OP Bob", deny) == "op"
+    assert blocked_word("say please stop", deny) is None
+    assert blocked_word("", deny) is None
+
+
+async def test_channels_panel_fits_and_clearing_turns_off(h: Harness) -> None:
+    from portcullis.bot.setup import ALERT_CHANNEL, ChannelsPanel
+
+    await h.ctx.settings.set(ALERT_CHANNEL, 123)
+    panel = ChannelsPanel(h.m.setup)  # five selects, one per row
+    select = panel.children[0]
+    select._values = []
+    i = FakeInteraction(admin())
+    await select.callback(i)
+    assert await h.ctx.settings.get(ALERT_CHANNEL) is None and ": off." in i.edits[-1]["content"]

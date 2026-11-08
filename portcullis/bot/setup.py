@@ -679,12 +679,12 @@ class ConsoleRulesModal(discord.ui.Modal, title="Console rules"):
         self.panel = panel
         self.hide: discord.ui.TextInput[ConsoleRulesModal] = discord.ui.TextInput(
             label="Hidden console lines (one rule per line)", style=discord.TextStyle.paragraph,
-            default="\n".join(stored_rules(values.get(HIDE_KEY))),
-            placeholder="Text to hide anywhere in a line, e.g. Saving chunks\nre:\\d+\\.\\d+\\.\\d+\\.\\d+ hides IPs",
+            default="\n".join(stored_rules(values.get(HIDE_KEY)))[:4000],
+            placeholder="Saving chunks\nre:\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}",
             required=False, max_length=4000)
         self.deny: discord.ui.TextInput[ConsoleRulesModal] = discord.ui.TextInput(
             label="Blocked console commands (owners may still)", style=discord.TextStyle.paragraph,
-            default=" ".join(sorted(stored_denylist(values.get(DENY_KEY)))), placeholder="op deop stop ban-ip",
+            default=" ".join(sorted(stored_denylist(values.get(DENY_KEY))))[:1000], placeholder="op deop stop ban-ip",
             required=False, max_length=1000)
         self.add_item(self.hide)
         self.add_item(self.deny)
@@ -759,7 +759,7 @@ class NamesModal(discord.ui.Modal, title="Name and visibility"):
         self.hidden: discord.ui.TextInput[NamesModal] = discord.ui.TextInput(
             label="Hide from members? (yes or no)", default="yes" if row.hidden else "no", max_length=3)
         self.donator_only: discord.ui.TextInput[NamesModal] = discord.ui.TextInput(
-            label="Whitelist requests from donators only? (yes or no)",
+            label="Whitelist requests: donators only? (yes/no)",
             default="yes" if donator_only else "no", max_length=3)
         for item in (self.display, self.prefix, self.hidden, self.donator_only):
             self.add_item(item)
@@ -846,7 +846,8 @@ class BotPanel(AdminView):
 
     @discord.ui.button(label="Alert and log channels", style=discord.ButtonStyle.primary, row=3)
     async def channels(self, interaction: discord.Interaction, button: discord.ui.Button[BotPanel]) -> None:
-        await reply(interaction, "Pick a channel for each, or turn one off.", view=ChannelsPanel(self.module))
+        await reply(interaction, "Pick a channel for each. Clear a picker to turn that one off.",
+                    view=ChannelsPanel(self.module))
 
     @discord.ui.button(label="Roles", style=discord.ButtonStyle.primary, row=3)
     async def roles(self, interaction: discord.Interaction, button: discord.ui.Button[BotPanel]) -> None:
@@ -885,18 +886,20 @@ class ChannelsPanel(AdminView):
     def __init__(self, module: SetupModule) -> None:
         super().__init__(module)
         for row, (key, label) in enumerate(BOT_CHANNELS.items()):
+            # Five selects fill all five rows, so there's no room for "turn off" buttons: clearing a
+            # select (min_values=0) turns that channel off.
             select: discord.ui.ChannelSelect[ChannelsPanel] = discord.ui.ChannelSelect(
-                placeholder=f"{label}…", min_values=1, max_values=1, row=row,
+                placeholder=f"{label}…", min_values=0, max_values=1, row=row,
                 channel_types=[discord.ChannelType.text, discord.ChannelType.voice])
             select.callback = self._picked(key, select)  # type: ignore[method-assign]
             self.add_item(select)
-            off: discord.ui.Button[ChannelsPanel] = discord.ui.Button(
-                label=f"Turn off: {label.split(' (')[0].lower()}"[:80], style=discord.ButtonStyle.danger, row=4)
-            off.callback = self._off(key)  # type: ignore[method-assign]
-            self.add_item(off)
 
     def _picked(self, key: str, select: discord.ui.ChannelSelect[ChannelsPanel]):  # noqa: ANN202
         async def picked(interaction: discord.Interaction) -> None:
+            if not select.values:
+                await self.module.set_bot_channel(interaction, key, None)
+                await interaction.response.edit_message(content=f"{BOT_CHANNELS[key]}: off.", view=self)
+                return
             channel_id = select.values[0].id
             if key == COUNT_CHANNEL:
                 if can_rename(interaction, channel_id) is False:
@@ -909,12 +912,6 @@ class ChannelsPanel(AdminView):
             await self.module.set_bot_channel(interaction, key, channel_id)
             await interaction.response.edit_message(content=f"{BOT_CHANNELS[key]}: <#{channel_id}>.", view=self)
         return picked
-
-    def _off(self, key: str):  # noqa: ANN202
-        async def off(interaction: discord.Interaction) -> None:
-            await self.module.set_bot_channel(interaction, key, None)
-            await interaction.response.edit_message(content=f"{BOT_CHANNELS[key]}: off.", view=self)
-        return off
 
 
 class RolesPanel(AdminView):
