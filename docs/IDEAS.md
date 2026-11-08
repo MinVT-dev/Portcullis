@@ -21,6 +21,7 @@ The design budget is about 25 slash commands (DESIGN.md, Appendix B), so most ne
 | `/server power` and status buttons | Start, stop and restart, publicly logged. | ✅ Built |
 | `/server send` | One console command or chat line. | ✅ Built |
 | `/server console` | The latest console lines without a relay channel. | ✅ Built |
+| Console rules | Hide noisy or private console lines (text or `re:` patterns) from the relay and `/server console`, and block risky command words in `/server send` for everyone but owners. Gatekeeper V3's console filter and denylist. | ✅ Built under `/setup server` → Console rules. |
 | Quick commands | Up to 5 admin-defined console buttons per server ("Save world"). | ✅ Built |
 | Confirm before stop | A "Stop Survival? 3 players are online" confirmation when players are on. | ✅ Built |
 | Restart with warning | Says "restarting in 5 minutes" in game chat at 5 and 1 minutes, then restarts. Uses the server's `say` command. | ✅ Built. The countdown lives in memory, so restarting Portcullis cancels it. |
@@ -51,6 +52,7 @@ The design budget is about 25 slash commands (DESIGN.md, Appendix B), so most ne
 | Idea | What it does | Status |
 |---|---|---|
 | `/player lookup`, `/player top` | Last seen, play time, most played. | ✅ Built (play time is approximate until leaves are seen). |
+| `/player id` | Turn a Steam ID, Steam profile link or Minecraft name into the other formats. Gatekeeper V3's `/steamid` and `/minecraft uuid`. | ✅ Built. Custom Steam profile links would need a Steam Web API key, so Portcullis asks for the number instead; Minecraft names are looked up on Mojang's public API. |
 | `/link` | Prove an in-game name is yours by typing a code in game chat. | ✅ Built (needs a chat pattern for the game). |
 | `/poll` | Community polls with buttons. | ✅ Built |
 | First-join welcome | "Bob joined Survival for the first time" in the events channel. | ✅ Built. It starts once Portcullis has a day of join history for the server. |
@@ -70,6 +72,7 @@ The design budget is about 25 slash commands (DESIGN.md, Appendix B), so most ne
 | Kick and ban | One command with an action option, with per-game command templates like the whitelist ones. | ✅ Built. Each game needs its commands filled in under `/setup server`. |
 | Whitelist list | Who is whitelisted on a server, from the requests Portcullis approved. | ✅ Built (Portcullis's own records, not the game's file). |
 | Auto-approve linked members | Whitelist requests from members with a verified link and a chosen role are approved without a moderator. | ✅ Built |
+| Whitelist rules | Linked names only, donators skip the moderators, donator-only servers, and an approval message. Gatekeeper V3's `require_link`, `donator_bypass`, `/server settings donator` and `/whitelist_reply`. | ✅ Built under `/setup bot` → Whitelist rules and `/setup server` → Name and visibility. |
 | Role on link | Give members a Discord role when they link a name. | ✅ Built. The bot needs the Manage Roles permission, and the role must sit below the bot's own role. |
 | Watchlist | Moderators mark a player name; a quiet post when that name joins. | ✅ Built |
 | Name checks on join | Flag joins with names that break the rules (a word list). | ✅ Built. A plain word list, so it can flag innocent names ("ass" in "Classic"). |
@@ -82,7 +85,8 @@ The design budget is about 25 slash commands (DESIGN.md, Appendix B), so most ne
 | Make a backup | A button on `/backups`. | ✅ Built on `/backups`. It copies the settings of the newest existing backup because the spec doesn't name them. Not yet seen working on a real panel. |
 | Restore a backup | With a confirmation and its own permission. | ✅ Built on `/backups` for Manage Server holders, with a confirm. AMP saves the current state first. Not yet seen working. |
 | `/schedule` | Create and list schedules on AMP's own scheduler. | 🟡 Partly built: `/schedule list` with Run now, On and Off. Creating schedules needs the step and trigger formats checked on a real panel. |
-| Schedule run history | Buttons on `/schedule list`. | 🟡 Not built; the history route is in the spec. |
+| Schedule run history and delete | Buttons on `/schedule list`. | ✅ Built (delete needs Manage Server and a confirm). Not yet seen working on a real panel. |
+| Delete a backup | A picker on `/backups`. | ✅ Built for Manage Server holders, with a confirm. Not yet seen working on a real panel. |
 | Backup reminder | Warns admins when a server's newest backup is older than N days. | ✅ Built |
 
 ## 6. Setup, admin and safety
@@ -91,6 +95,10 @@ The design budget is about 25 slash commands (DESIGN.md, Appendix B), so most ne
 |---|---|---|
 | `/setup` panels | Relays, names, game commands, quick commands, whitelist channel, board. | ✅ Built |
 | `/audit`, `/admin diagnostics`, export and import | Who did what, health check, settings backup. | ✅ Built |
+| `/audit stats` | Counts per action and member over the last 30 days. | ✅ Built |
+| `/admin bot` | Owners see the bot's version, uptime and latency, re-sync commands, or stop the bot (with a confirm). Gatekeeper V3's `/bot` group. | ✅ Built |
+| Gatekeeper V3 command map | `/help v3:<command>` says where any of V3's 117 commands lives now; `docs/V3_PARITY.md` lists them all. | ✅ Built |
+| A client others can build on | The AMP 3 client is its own package, `portcullis-api`, with its own README, tests and fake panel. | ✅ Built in `packages/portcullis-api`. |
 | Per-command operator roles | "Moderators can whitelist but not stop servers": separate roles per action. | ✅ Built |
 | Per-server operator roles | A role that can only run its own server. | ✅ Built |
 | Setup check | One button in `/setup bot` that lists what's missing: no relay, no whitelist command, a channel the bot can't post in. | ✅ Built |

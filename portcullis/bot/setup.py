@@ -66,6 +66,11 @@ KICK, BAN, UNBAN = "kick", "ban", "unban"
 MOD_KEYS = {KICK: "Kick", BAN: "Ban", UNBAN: "Unban"}  # templates with {name} and, optionally, {reason}
 AUTO_APPROVE_ROLE = "auto_approve_role"  # bot: members with it and a linked name skip the moderators
 LINK_ROLE = "link_role"  # bot: given to members once they have a linked name
+WL_REQUIRE_LINK = "whitelist_require_link"  # bot: requests only for names the member has linked
+WL_DONATOR_BYPASS = "whitelist_donator_bypass"  # bot: donators asking for their linked name skip the moderators
+WL_REPLY = "whitelist_reply"  # bot: text added to the message a member gets when they're approved
+DONATOR_ONLY = "donator_only"  # server: only donators may make whitelist requests
+REPLY_LIMIT = 500
 
 
 def can_post(interaction: discord.Interaction, channel_id: int) -> bool | None:
@@ -167,6 +172,7 @@ class SetupModule(Module):
         embed = card(title=f"Settings for {row.name}")
         embed.add_field(name="Display name", value=escape(row.display_name or f"{row.amp_name} (from AMP)"))
         embed.add_field(name="Hidden from members", value="Yes" if row.hidden else "No")
+        embed.add_field(name="Whitelist requests", value="donators only" if commands.get(DONATOR_ONLY) else "anyone")
         embed.add_field(name="Chat prefix", value=escape(row.prefix) if row.prefix else "none")
         embed.add_field(name="Console relay", value=mention(row.console_channel))
         embed.add_field(name="Events relay", value=mention(row.event_channel))
@@ -209,10 +215,14 @@ class SetupModule(Module):
         await reply(interaction, embed=await self.server_embed(row), view=ServerPanel(self, row))
 
     async def save_names(self, interaction: discord.Interaction, row: ServerRow, display: str, prefix: str,
-                         hidden: str) -> ServerRow:
+                         hidden: str, donator_only: str = "") -> ServerRow:
         hidden_flag = hidden.strip().lower() in ("yes", "y", "true", "1")
         updated = await self.ctx.servers.update(row.shard_id, display_name=display.strip() or None,
                                                 prefix=prefix.strip() or None, hidden=hidden_flag)
+        if yes(donator_only):
+            await self.ctx.settings.set(DONATOR_ONLY, True, scope=row.shard_id, by=interaction.user.id)
+        else:
+            await self.ctx.settings.delete(DONATOR_ONLY, scope=row.shard_id)
         await self.ctx.audit.record("setup.server.names", actor_id=interaction.user.id, shard_id=row.shard_id)
         await self.ctx.relay_changed()  # the relay shows the display name
         return updated
@@ -359,6 +369,10 @@ class SetupModule(Module):
         embed.add_field(name="Time zone for events", value=str(await self.ctx.settings.get(TIMEZONE) or "UTC"))
         embed.add_field(name="Backup reminder", value=f"after {days} day(s)" if days else "off")
         embed.add_field(name="Name rules", value=f"{len(rules)} word(s)" if rules else "none")
+        wl = [label for key, label in ((WL_REQUIRE_LINK, "linked names only"),
+                                       (WL_DONATOR_BYPASS, "donators skip the moderators"),
+                                       (WL_REPLY, "approval message set")) if await self.ctx.settings.get(key)]
+        embed.add_field(name="Whitelist rules", value=", ".join(wl) or "none")
         embed.set_footer(text="Per-server settings: /setup server. This panel works for 15 minutes.")
         return embed
 
@@ -405,6 +419,22 @@ class SetupModule(Module):
         await self.ctx.audit.record("setup.bot.options", actor_id=by)
         if restyled and self.ctx.board is not None:
             await self.ctx.board.update()
+        return None
+
+    async def save_whitelist_rules(self, interaction: discord.Interaction, require_link: str, donator_bypass: str,
+                                   reply_text: str) -> str | None:
+        reply_text = reply_text.strip()
+        if len(reply_text) > REPLY_LIMIT:
+            return f"Keep the approval message to {REPLY_LIMIT} characters."
+        by = interaction.user.id
+        changes = ((WL_REQUIRE_LINK, yes(require_link) or None), (WL_DONATOR_BYPASS, yes(donator_bypass) or None),
+                   (WL_REPLY, reply_text or None))
+        for key, value in changes:
+            if value is None:
+                await self.ctx.settings.delete(key)
+            else:
+                await self.ctx.settings.set(key, value, by=by)
+        await self.ctx.audit.record("setup.bot.whitelist", actor_id=by)
         return None
 
     async def set_grant(self, interaction: discord.Interaction, group: str, roles: list[Any]) -> str:
@@ -581,7 +611,8 @@ class ServerPanel(AdminView):
 
     @discord.ui.button(label="Name and visibility", style=discord.ButtonStyle.primary, row=3)
     async def names(self, interaction: discord.Interaction, button: discord.ui.Button[ServerPanel]) -> None:
-        await interaction.response.send_modal(NamesModal(self))
+        donator_only = bool(await self.module.ctx.settings.get(DONATOR_ONLY, scope=self.row.shard_id))
+        await interaction.response.send_modal(NamesModal(self, donator_only))
 
     @discord.ui.button(label="Game commands", style=discord.ButtonStyle.primary, row=3)
     async def commands(self, interaction: discord.Interaction, button: discord.ui.Button[ServerPanel]) -> None:
@@ -717,7 +748,7 @@ class OperatorsPanel(OwnerView):
 
 
 class NamesModal(discord.ui.Modal, title="Name and visibility"):
-    def __init__(self, panel: ServerPanel) -> None:
+    def __init__(self, panel: ServerPanel, donator_only: bool = False) -> None:
         super().__init__()
         self.panel = panel
         row = panel.row
@@ -727,12 +758,15 @@ class NamesModal(discord.ui.Modal, title="Name and visibility"):
             label="Chat prefix (short tag)", default=row.prefix or "", required=False, max_length=16)
         self.hidden: discord.ui.TextInput[NamesModal] = discord.ui.TextInput(
             label="Hide from members? (yes or no)", default="yes" if row.hidden else "no", max_length=3)
-        for item in (self.display, self.prefix, self.hidden):
+        self.donator_only: discord.ui.TextInput[NamesModal] = discord.ui.TextInput(
+            label="Whitelist requests from donators only? (yes or no)",
+            default="yes" if donator_only else "no", max_length=3)
+        for item in (self.display, self.prefix, self.hidden, self.donator_only):
             self.add_item(item)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await self.panel.module.save_names(interaction, self.panel.row, self.display.value, self.prefix.value,
-                                           self.hidden.value)
+                                           self.hidden.value, self.donator_only.value)
         await self.panel.refresh(interaction, "Saved.")
 
 
@@ -831,6 +865,11 @@ class BotPanel(AdminView):
         await reply(interaction, "Pick a task, then the roles that may do it (on every server). Full operator "
                                  "roles from `.env` can always do everything.", view=GrantsPanel(self.module))
 
+    @discord.ui.button(label="Whitelist rules", style=discord.ButtonStyle.primary, row=4)
+    async def whitelist_rules(self, interaction: discord.Interaction, button: discord.ui.Button[BotPanel]) -> None:
+        settings = {k: await self.module.ctx.settings.get(k) for k in (WL_REQUIRE_LINK, WL_DONATOR_BYPASS, WL_REPLY)}
+        await interaction.response.send_modal(WhitelistRulesModal(self, settings))
+
     @discord.ui.button(label="Check setup", style=discord.ButtonStyle.success, row=4)
     async def check(self, interaction: discord.Interaction, button: discord.ui.Button[BotPanel]) -> None:
         problems = await self.module.check_setup(interaction)
@@ -918,6 +957,30 @@ class BotOptionsModal(discord.ui.Modal, title="Portcullis options"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         problem = await self.panel.module.save_bot_options(interaction, self.timezone.value, self.backup_days.value,
                                                            self.rules.value, self.board_style.value)
+        await interaction.response.edit_message(content=problem or "Saved.", embed=await self.panel.module.bot_embed(),
+                                                view=self.panel)
+
+
+class WhitelistRulesModal(discord.ui.Modal, title="Whitelist rules"):
+    def __init__(self, panel: BotPanel, settings: dict[str, Any]) -> None:
+        super().__init__()
+        self.panel = panel
+        self.require_link: discord.ui.TextInput[WhitelistRulesModal] = discord.ui.TextInput(
+            label="Only names the member has linked? (yes or no)",
+            default="yes" if settings.get(WL_REQUIRE_LINK) else "no", max_length=3)
+        self.donator_bypass: discord.ui.TextInput[WhitelistRulesModal] = discord.ui.TextInput(
+            label="Donators skip the moderators? (yes or no)",
+            default="yes" if settings.get(WL_DONATOR_BYPASS) else "no", max_length=3)
+        self.reply_text: discord.ui.TextInput[WhitelistRulesModal] = discord.ui.TextInput(
+            label="Added to the approval message (optional)", style=discord.TextStyle.paragraph,
+            default=str(settings.get(WL_REPLY) or ""), placeholder="Welcome! Read #rules before you join.",
+            required=False, max_length=REPLY_LIMIT)
+        for item in (self.require_link, self.donator_bypass, self.reply_text):
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        problem = await self.panel.module.save_whitelist_rules(interaction, self.require_link.value,
+                                                               self.donator_bypass.value, self.reply_text.value)
         await interaction.response.edit_message(content=problem or "Saved.", embed=await self.panel.module.bot_embed(),
                                                 view=self.panel)
 

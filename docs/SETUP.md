@@ -191,10 +191,10 @@ Three levels: **everyone** in the server; **operators** (members with a role in 
 | `/server banner [server] [theme] [public]` | everyone | A picture with a card per server (up to 10): state in words, players, CPU, memory, uptime and address. Dark or light. Only you see it, unless an operator sets `public`. |
 | `/server power <server> <action>` | operators | Start, stop, restart, or restart with a warning (says so in game chat 5 minutes and 1 minute before, with a Cancel button). Also update the game, sleep and wake, which ask first (update and sleep) and haven't been seen working on a real panel. Stopping or restarting asks first when players are online. The reply is public, so the channel sees who did it. |
 | `/server power-all <action> [tag]` | operators | Starts or stops every server you may run, or only those with an AMP tag. Asks first. |
-| `/server send <server> <text> [as]` | operators | Sends one console command, or a chat message if the server has a chat command set (8.6). Only the command word is logged, never its arguments. |
-| `/server console <server> [lines]` | operators | The latest console lines (20 by default, up to 50) from AMP's own history, without needing a console relay. AMP's own lines can be mixed in. |
-| `/backups <server>` | operators | Lists the server's backups. Operators get a **Make a backup** button; admins also get a picker to **restore** one. Both ask first. The first backup has to be made in AMP, because the bot copies the settings of an existing one. Neither has been seen working on a real panel. |
-| `/schedule list <server>` | operators | AMP's schedules on that server, with **Run now**, **Turn on** and **Turn off**. Create them in AMP's panel. |
+| `/server send <server> <text> [as]` | operators | Sends one console command, or a chat message if the server has a chat command set (8.6). Only the command word is logged, never its arguments. Commands on the server's blocked list (8.6, Console rules) are refused for everyone but owners. |
+| `/server console <server> [lines]` | operators | The latest console lines (20 by default, up to 50) from AMP's own history, without needing a console relay. AMP's own lines can be mixed in. Lines matching the server's hide rules are left out. |
+| `/backups <server>` | operators | Lists the server's backups. Operators get a **Make a backup** button; admins also get pickers to **restore** or **delete** one. All three ask first. The first backup has to be made in AMP, because the bot copies the settings of an existing one. None of them has been seen working on a real panel. |
+| `/schedule list <server>` | operators | AMP's schedules on that server, with **Run now**, **Turn on**, **Turn off**, **Run history** (the last 10 runs, with how long each took and any error) and, for admins, **Delete** (asks first). Create them in AMP's panel. History and delete haven't been seen working on a real panel. |
 | `/whitelist request <server> [name]` | everyone | Asks the operators to whitelist you. Without `name`, your linked name is used. |
 | `/whitelist add\|remove <server> <name>` | operators | Runs the server's whitelist command (8.6). |
 | `/whitelist list <server>` | operators | Names Portcullis has whitelisted on that server. Names added in game aren't known to it. |
@@ -202,6 +202,7 @@ Three levels: **everyone** in the server; **operators** (members with a role in 
 | `/notify [server]` | everyone | Get a direct message when a server comes online; run it again to stop. Without `server`: the servers you follow. Up to 25 servers, at most one message per server every 5 minutes. |
 | `/player lookup <name>` | everyone | When a player was last seen, total play time and servers. |
 | `/player top [server]` | everyone | Most play time. |
+| `/player id <value>` | everyone | A Steam ID in all three formats (SteamID64, `STEAM_0:Y:Z`, `[U:1:N]`) from any of them or a `/profiles/` link, worked out offline. Or a Minecraft name's UUID, or a UUID's name, looked up at Mojang (one lookup every 3 seconds per member, cached for an hour). |
 | `/player moderate <server> <name> <kick\|ban\|unban> [reason]` | operators | Runs the server's moderation command (8.6). The reason goes into the command, so it has the same character limits as names. |
 | `/player watch <name> [note]` | operators | Adds a name to the watchlist, or takes it off. When it joins any server, the moderator channel gets a note. Up to 200 names. |
 | `/player watchlist` | operators | The watched names and their notes. |
@@ -213,10 +214,11 @@ Three levels: **everyone** in the server; **operators** (members with a role in 
 | `/setup relay`, `/setup server <server>`, `/setup bot` | admins | Relay channels, per-server settings, and bot-wide settings (8.6). |
 | `/alert create <metric> [threshold] [minutes] [server] [channel] [role]` | admins | Your own alert: CPU or memory at or above a percentage, more or fewer players than a number, or offline, for `minutes` (default 5, 0 = at once). Leave out `server` to watch every server, and `channel` to post in the alert channel. It fires once, pings only `role`, and posts again when it clears. Up to 50 rules. These are Portcullis's own checks, once a minute, not AMP triggers. |
 | `/alert list` | admins | Your alert rules, with **Mute 1 hour**, **Unmute** and **Delete**. |
-| `/audit [member] [server] [action] [result] [export]` | admins | Who did what through Portcullis, refused attempts included. `export` sends it all as a JSON file. |
+| `/audit [member] [server] [action] [result] [export] [stats]` | admins | Who did what through Portcullis, refused attempts included. `export` sends it all as a JSON file. `stats` shows counts for the last 30 days instead: most common actions, most active members, and results. |
 | `/admin diagnostics` | admins | Checks the connection to AMP and every server, and shows the relays and the bot's status. A server line with a 403 names the AMP permission the bot lacks. It also lists what the bot's AMP account may do, and warns if it is a full admin account. |
 | `/admin export` / `/admin import <file>` | admins | Download all Portcullis settings as a file, and restore them. Gatekeeper V3 databases can't be imported yet. |
-| `/help` | everyone | Lists the commands you can use. |
+| `/admin bot <status\|sync\|stop>` | owners | Status (uptime, Discord latency, versions, database), re-sync the slash commands to this Discord server, or stop the bot (asks first; a service manager or AMP starts it again). |
+| `/help [v3]` | everyone | Lists the commands you can use. With `v3`, says where a Gatekeeper V3 command went. |
 
 Not built: creating schedules (the scheduler's step and trigger formats haven't been checked on a real panel), a Discord-to-game chat bridge (it needs a privileged Discord intent, and `/server send as:chat` covers it), and giveaways, vote-to-restart and managing AMP accounts from Discord (not game-server features, or too easy to abuse).
 
@@ -241,13 +243,14 @@ Mentions never ping: everything the bot posts has `@everyone`, `@here`, user and
 `/setup server <server>` opens a panel for one server:
 
 - three channel pickers for the console, events and chat relays, and a **Stop all relays** button;
-- **Name and visibility**: the name shown in Discord, a short prefix, and whether members can see the server at all;
+- **Name and visibility**: the name shown in Discord, a short prefix, whether members can see the server at all, and whether only donators (marked on `/user`) may make whitelist requests for it;
 - **Game commands**: the console commands Portcullis sends for that game, with `{name}` or `{message}` where the player name or text goes. Examples: `whitelist add {name}`, `whitelist remove {name}`, `say {message}`. Each game has its own; check its console help. Whitelist commands and `/server send ... as:chat` stay off for a server until these are filled in.
 
 `/setup bot` sets the channel where whitelist requests appear, with Approve and Deny buttons for operators. Until a channel is set, whitelist requests are off. The requester gets a direct message with the decision, if they allow messages from server members.
 
 - **Moderation commands**: the kick, ban and unban commands for `/player moderate`, with `{name}` and `{reason}`, for example `kick {name} {reason}`. Each stays off until filled in.
 - **Options**: the address players connect to (shown on `/server status`), whether any member may start the server while it's stopped (once every 2 minutes, logged), whether first joins are posted in the events channel (on by default; they start once Portcullis has a day of join history), and CPU and memory alert thresholds in percent (an alert when it stays above for 5 minutes).
+- **Console rules**: **hidden console lines**, one rule per line, kept out of the console relay and `/server console`. A rule is text matched anywhere in a line, ignoring case, or a regular expression after `re:` (for example `re:\d+\.\d+\.\d+\.\d+` hides IP addresses). Up to 25. Patterns that repeat a repeating group, like `(a+)+`, are refused because they can freeze the bot. And **blocked console commands**: command words such as `op stop ban-ip` that `/server send` refuses for everyone but owners. Quick commands aren't checked, because only admins set them.
 - **Server operators (owners)**: roles that may do everything on this server and nothing elsewhere. Only owners can set them.
 - **Quick commands**: up to 5 one-click console commands, one per line as `Label = command`, for example `Save world = save`. They show as buttons under `/server status` for operators, and each press is logged with its label.
 
@@ -258,6 +261,7 @@ The rest of `/setup bot`:
 - **Daily summary and count channel**: a channel for a daily summary (yesterday's players, new players and peak) and play-time milestones, and a channel, voice channels included, renamed to the number online (needs Manage Channels, and lags a few minutes).
 - **Alert and log channels**: an **alerts** channel (a server crashes, stops without `/server power`, stays above its CPU or memory threshold, or hasn't been backed up for the set number of days; also when AMP can't be reached for 3 minutes and when it's back), a **moderator notes** channel (watchlist and name-rule joins) and an **audit log** channel (every action as it happens, at most 20 posts a minute).
 - **Roles**: a role pinged on alerts; a role whose members' whitelist requests are approved at once if they ask for a name they have linked; and a role given to members who link a name. The last two can't be `@everyone`, a role with admin-type permissions, or a role above the bot's own; the bot needs **Manage Roles** to hand one out.
+- **Whitelist rules**: whether `/whitelist request` only takes names the member has proved with `/link`; whether donators asking for their linked name are approved at once, like the auto-approve role; and an optional message (up to 500 characters) added to what an approved member is told.
 - **Options**: the time zone for `/event` times (such as `Europe/Amsterdam`), the backup age in days that triggers an alert, name rules: words that flag a joining player's name to moderators (look-alike letters such as `4` for `a` are caught too), and the live server board style: `embed` (text, the default) or `image` (the same picture as `/server banner`).
 - **Who can do what (owners)**: extra roles per task (power, console, whitelist, moderation, polls, events, backups). Only owners can change this, and `/admin import` skips it unless an owner runs the import.
 - **Check setup** lists what is missing: no relay, a game command not filled in, a channel the bot can't post in, and similar.

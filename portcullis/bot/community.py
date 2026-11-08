@@ -7,6 +7,7 @@ import contextlib
 import logging
 import re
 import secrets
+import time
 from typing import Any
 
 import discord
@@ -18,6 +19,7 @@ from portcullis.bot.base import (
     Module,
     as_id,
     card,
+    code,
     duration,
     fill,
     reply,
@@ -29,13 +31,18 @@ from portcullis.bot.base import (
     valid_reason,
     when,
 )
+from portcullis.bot.ids import MojangLookup, is_vanity_link, steam_ids
 from portcullis.bot.setup import (
     AUTO_APPROVE_ROLE,
+    DONATOR_ONLY,
     LINK_ROLE,
     MOD_KEYS,
     WHITELIST_CHANNEL,
     WL_ADD,
+    WL_DONATOR_BYPASS,
     WL_REMOVE,
+    WL_REPLY,
+    WL_REQUIRE_LINK,
 )
 from portcullis.core.relay import escape
 from portcullis.db.features import LinkCode, WhitelistRequest, links_by_name
@@ -44,6 +51,7 @@ from portcullis.db.repos import ServerRow
 log = logging.getLogger(__name__)
 
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O or 1/I
+ID_COOLDOWN = 3.0  # seconds between one member's Minecraft lookups (they reach Mojang's API)
 
 
 def platform_of(row: ServerRow) -> str:
@@ -104,6 +112,8 @@ class CommunityModule(Module):
     def __init__(self, ctx: Ctx) -> None:
         super().__init__(ctx)
         WhitelistDecision.module = self
+        self.mojang = MojangLookup()
+        self.id_asked: dict[int, float] = {}
 
     # ---------------------------------------------------------------- /whitelist
 
@@ -114,8 +124,12 @@ class CommunityModule(Module):
         if row is None:
             return
         user_id = interaction.user.id
-        if (await self.ctx.users.flags(user_id))["banned"]:
+        flags = await self.ctx.users.flags(user_id)
+        if flags["banned"]:
             await reply(interaction, "You can't make whitelist requests. Ask a moderator if you think that's wrong.")
+            return
+        if await self.ctx.settings.get(DONATOR_ONLY, scope=row.shard_id) and not flags["donator"]:
+            await reply(interaction, f"Only donators can ask to be whitelisted on {escape(row.name)}.")
             return
         if not await self.ctx.settings.get(WL_ADD, scope=row.shard_id):
             await reply(interaction, f"{escape(row.name)} doesn't take whitelist requests through Portcullis.")
@@ -138,10 +152,13 @@ class CommunityModule(Module):
         if owner is not None and owner.discord_id != user_id:
             await reply(interaction, f"{escape(name)} is linked to another member.")
             return
+        if owner is None and await self.ctx.settings.get(WL_REQUIRE_LINK):
+            await reply(interaction, f"Prove that **{escape(name)}** is yours with `/link` first, then ask again.")
+            return
         if await self.ctx.whitelist.pending_for(user_id, row.shard_id):
             await reply(interaction, f"You already have a request waiting for {escape(row.name)}.")
             return
-        if await self._auto_approve(interaction, row, name, int(channel_id)):
+        if await self._auto_approve(interaction, row, name, int(channel_id), donator=flags["donator"]):
             return
         req = await self.ctx.whitelist.create(row.shard_id, user_id, name)
         try:
@@ -158,12 +175,14 @@ class CommunityModule(Module):
                                  "I'll message you when they decide.")
 
     async def _auto_approve(self, interaction: discord.Interaction, row: ServerRow, name: str,
-                            channel_id: int) -> bool:
-        """Whitelist at once if the member has the auto-approve role and ``name`` is their verified link.
-        Returns False to fall back to asking the moderators."""
+                            channel_id: int, donator: bool = False) -> bool:
+        """Whitelist at once if ``name`` is the member's verified link and they either have the auto-approve
+        role or are a donator while donators skip the moderators. Returns False to ask the moderators."""
         role = as_id(await self.ctx.settings.get(AUTO_APPROVE_ROLE))
         user_id = interaction.user.id
-        if role is None or role not in role_ids(interaction.user):
+        by_role = role is not None and role in role_ids(interaction.user)
+        by_donation = donator and bool(await self.ctx.settings.get(WL_DONATOR_BYPASS))
+        if not by_role and not by_donation:
             return False
         owner = await self.ctx.users.find_link(platform_of(row), name)
         if owner is None or owner.discord_id != user_id:
@@ -178,17 +197,25 @@ class CommunityModule(Module):
         await self.ctx.whitelist.decide(req.id, "approved", 0)
         await self.ctx.whitelisted.add(row.shard_id, name, by=0, discord_id=user_id)
         await self.ctx.audit.record("whitelist.approve", shard_id=row.shard_id, target=name,
-                                    detail={"auto": True, "member": user_id})
+                                    detail={"auto": True, "member": user_id,
+                                            "reason": "role" if by_role else "donator"})
         decided = await self.ctx.whitelist.get(req.id)
         if decided is not None:
             with contextlib.suppress(Exception):  # the record is a courtesy; the member is already in
                 channel = await self.ctx.channel(channel_id)
-                await channel.send(embed=request_embed(decided, row.name, f"Approved by Portcullis: {name} is their "
-                                                                          f"linked name and they have <@&{role}>."),
+                why = f"they have <@&{role}>" if by_role else "they are a donator"
+                await channel.send(embed=request_embed(decided, row.name, f"Approved by Portcullis: {escape(name)} "
+                                                                          f"is their linked name and {why}."),
                                    allowed_mentions=NONE)
-        await reply(interaction, f"**{escape(name)}** is whitelisted on **{escape(row.name)}**. Your linked name "
-                                 "and role let Portcullis approve it straight away.")
+        text = (f"**{escape(name)}** is whitelisted on **{escape(row.name)}**. Your linked name "
+                f"and {'role' if by_role else 'donator status'} let Portcullis approve it straight away.")
+        await reply(interaction, await self._with_reply(text))
         return True
+
+    async def _with_reply(self, text: str) -> str:
+        """Add the admins' approval message (``/setup bot``, Whitelist rules) to ``text``."""
+        extra = await self.ctx.settings.get(WL_REPLY)
+        return f"{text}\n\n{extra}" if extra else text
 
     async def decide(self, interaction: discord.Interaction, request_id: int, action: str) -> None:
         node = f"whitelist.{action}"
@@ -220,8 +247,9 @@ class CommunityModule(Module):
         updated = await self.ctx.whitelist.get(request_id)
         assert updated is not None
         await interaction.response.edit_message(embed=request_embed(updated, server_name, note), view=None)
-        await self._dm(req.discord_id, f"Your whitelist request for **{escape(req.ingame_name)}** on "
-                                       f"**{escape(server_name)}** was {status}.")
+        text = (f"Your whitelist request for **{escape(req.ingame_name)}** on "
+                f"**{escape(server_name)}** was {status}.")
+        await self._dm(req.discord_id, await self._with_reply(text) if status == "approved" and not note else text)
 
     async def _dm(self, user_id: int, text: str) -> None:
         if self.ctx.client is None:
@@ -495,6 +523,47 @@ class CommunityModule(Module):
 
     # ---------------------------------------------------------------- registration
 
+    async def player_id(self, interaction: discord.Interaction, value: str) -> None:
+        if not await self.in_guild(interaction):
+            return
+        value = value.strip()[:200]
+        steam = steam_ids(value)
+        if steam is not None:
+            embed = card(title="Steam ID")
+            embed.add_field(name="SteamID64", value=code(steam.steam64))
+            embed.add_field(name="Steam2", value=code(steam.steam2))
+            embed.add_field(name="Steam3", value=code(steam.steam3))
+            embed.add_field(name="Profile", value=steam.profile, inline=False)
+            await reply(interaction, embed=embed)
+            return
+        if is_vanity_link(value):
+            await reply(interaction, "That's a custom profile link. Open it in Steam and copy the number from "
+                                     "the page's /profiles/ address, or ask the player for their SteamID64.")
+            return
+        if not MojangLookup.wants(value):
+            await reply(interaction, "Give a Steam ID (any format, or a steamcommunity.com/profiles/ link), or a "
+                                     "Minecraft name or UUID.")
+            return
+        now = time.monotonic()
+        if now - self.id_asked.get(interaction.user.id, -ID_COOLDOWN) < ID_COOLDOWN:
+            await reply(interaction, "One lookup every few seconds, please.")
+            return
+        self.id_asked[interaction.user.id] = now
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            profile = await self.mojang.find(value)
+        except Exception as exc:  # noqa: BLE001 - Mojang being down must not look like our bug
+            log.info("Mojang lookup failed: %s", exc)
+            await reply(interaction, "Mojang's lookup didn't answer. Try again in a minute.")
+            return
+        if profile is None:
+            await reply(interaction, f"Mojang has no Minecraft account for {code(value)}.")
+            return
+        embed = card(title="Minecraft account")
+        embed.add_field(name="Name", value=code(profile.name))
+        embed.add_field(name="UUID", value=code(profile.uuid))
+        await reply(interaction, embed=embed)
+
     def register(self, tree: app_commands.CommandTree) -> None:
         wl = app_commands.Group(name="whitelist", description="Get on a server's whitelist", guild_only=True)
 
@@ -532,6 +601,11 @@ class CommunityModule(Module):
         @app_commands.autocomplete(name=self.autocomplete_player)
         async def player_lookup(interaction: discord.Interaction, name: str) -> None:
             await self.player_lookup(interaction, name)
+
+        @player.command(name="id", description="Steam ID formats, or a Minecraft name's UUID (and back)")
+        @app_commands.describe(value="A Steam ID in any format or a /profiles/ link, or a Minecraft name or UUID")
+        async def player_id(interaction: discord.Interaction, value: str) -> None:
+            await self.player_id(interaction, value)
 
         @player.command(name="top", description="Who has played the most")
         @app_commands.describe(server="Leave out for all servers")

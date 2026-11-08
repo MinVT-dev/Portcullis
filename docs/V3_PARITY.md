@@ -7,9 +7,9 @@ Gatekeeper V3 had 117 slash commands. This table says where each one went. In Di
 Portcullis folds them into far fewer commands on purpose: settings live in `/setup` panels, actions on a thing are buttons on that thing, and choices are options. The jobs are kept; the command names mostly aren't.
 
 - **Same name:** 12
-- **Moved** (another command, option, button or panel field): 78
+- **Moved** (another command, option, button or panel field): 84
 - **Not yet** (waiting on AMP 3 data seen on a real panel): 2
-- **Dropped** (with the reason): 25
+- **Dropped** (with the reason): 19
 
 | V3 command | Status | In Portcullis |
 |---|---|---|
@@ -46,7 +46,7 @@ Portcullis folds them into far fewer commands on purpose: settings live in `/set
 | `/server settings avatar` | Dropped | Server art comes from AMP's template and the game registry. |
 | `/server settings displayname` | Moved | /setup server → Name and visibility |
 | `/server settings host` | Moved | /setup server → Options → Address players connect to |
-| `/server settings donator` | Dropped | Donator-only servers aren't carried over. The donator flag is on /user. |
+| `/server settings donator` | Moved | /setup server → Name and visibility → Whitelist requests from donators only |
 | `/server settings role` | Moved | /setup server → Server operators (owners) |
 | `/server settings prefix` | Moved | /setup server → Name and visibility → Chat prefix |
 | `/server settings hidden` | Moved | /setup server → Name and visibility → Hide from members |
@@ -88,7 +88,7 @@ Portcullis folds them into far fewer commands on purpose: settings live in `/set
 | `/bannergroup add` | Moved | /setup bot → the live server board (it lists every server that isn't hidden) |
 | `/bannergroup remove` | Moved | /setup server → Name and visibility → Hide from members |
 | `/bannergroup delete_group` | Moved | /setup bot → Turn the server board off |
-| `/banner background` | Moved | /server banner (an image card with the game's art) |
+| `/banner background` | Moved | /server banner (a status card per server; custom backgrounds aren't supported) |
 | `/banner settings` | Moved | /server banner |
 | `/banner_settings auto_update` | Moved | /setup bot → the live server board (it updates itself) |
 | `/banner_settings type` | Moved | /setup bot → board style (embed or image) |
@@ -124,9 +124,9 @@ Portcullis folds them into far fewer commands on purpose: settings live in `/set
 | `/whitelist request_channel` | Moved | /setup bot → Channel for whitelist requests |
 | `/whitelist wait_time` | Dropped | Requests wait for a moderator, or are approved at once by the auto-approve role. |
 | `/whitelist auto` | Moved | /setup bot → Roles → Auto-approve whitelist requests |
-| `/whitelist donator_bypass` | Dropped | Give donators the auto-approve role instead. |
-| `/whitelist require_link` | Dropped | Auto-approval already needs a verified link; other requests go to a moderator. |
-| `/whitelist_reply add` | Dropped | Portcullis's replies are fixed, plain-English messages. |
-| `/whitelist_reply remove` | Dropped | Portcullis's replies are fixed, plain-English messages. |
-| `/whitelist_reply list` | Dropped | Portcullis's replies are fixed, plain-English messages. |
+| `/whitelist donator_bypass` | Moved | /setup bot → Whitelist rules → Donators skip the moderators |
+| `/whitelist require_link` | Moved | /setup bot → Whitelist rules → Only names the member has linked |
+| `/whitelist_reply add` | Moved | /setup bot → Whitelist rules → Added to the approval message (one message, not a list) |
+| `/whitelist_reply remove` | Moved | /setup bot → Whitelist rules → Added to the approval message (leave it empty) |
+| `/whitelist_reply list` | Moved | /setup bot → Whitelist rules → shown on the /setup bot panel |
 | `/whitelist_request` | Moved | /whitelist request |

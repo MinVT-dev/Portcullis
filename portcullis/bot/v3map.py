@@ -24,6 +24,7 @@ PERMS = "/setup bot → Who can do what (owners)"
 BOARD = "/setup bot → the live server board"
 CONSOLE_RULES = "/setup server → Console rules"
 SCHEDULE = "/schedule list"
+WL_RULES = "/setup bot → Whitelist rules"
 DEV_MODE = "Discord's developer mode already shows role, channel and user ids (right-click → Copy ID)."
 
 
@@ -77,8 +78,8 @@ V3_COMMANDS: tuple[V3Command, ...] = (
     _e("/server settings avatar", "dropped", "Server art comes from AMP's template and the game registry."),
     _e("/server settings displayname", "moved", "/setup server → Name and visibility"),
     _e("/server settings host", "moved", "/setup server → Options → Address players connect to"),
-    _e("/server settings donator", "dropped",
-       "Donator-only servers aren't carried over. The donator flag is on /user."),
+    _e("/server settings donator", "moved",
+       "/setup server → Name and visibility → Whitelist requests from donators only"),
     _e("/server settings role", "moved", "/setup server → Server operators (owners)"),
     _e("/server settings prefix", "moved", "/setup server → Name and visibility → Chat prefix"),
     _e("/server settings hidden", "moved", "/setup server → Name and visibility → Hide from members"),
@@ -128,7 +129,7 @@ V3_COMMANDS: tuple[V3Command, ...] = (
     _e("/bannergroup add", "moved", f"{BOARD} (it lists every server that isn't hidden)"),
     _e("/bannergroup remove", "moved", "/setup server → Name and visibility → Hide from members"),
     _e("/bannergroup delete_group", "moved", "/setup bot → Turn the server board off"),
-    _e("/banner background", "moved", "/server banner (an image card with the game's art)"),
+    _e("/banner background", "moved", "/server banner (a status card per server; custom backgrounds aren't supported)"),
     _e("/banner settings", "moved", "/server banner"),
     _e("/banner_settings auto_update", "moved", f"{BOARD} (it updates itself)"),
     _e("/banner_settings type", "moved", "/setup bot → board style (embed or image)"),
@@ -173,12 +174,11 @@ V3_COMMANDS: tuple[V3Command, ...] = (
     _e("/whitelist wait_time", "dropped",
        "Requests wait for a moderator, or are approved at once by the auto-approve role."),
     _e("/whitelist auto", "moved", "/setup bot → Roles → Auto-approve whitelist requests"),
-    _e("/whitelist donator_bypass", "dropped", "Give donators the auto-approve role instead."),
-    _e("/whitelist require_link", "dropped",
-       "Auto-approval already needs a verified link; other requests go to a moderator."),
-    _e("/whitelist_reply add", "dropped", "Portcullis's replies are fixed, plain-English messages."),
-    _e("/whitelist_reply remove", "dropped", "Portcullis's replies are fixed, plain-English messages."),
-    _e("/whitelist_reply list", "dropped", "Portcullis's replies are fixed, plain-English messages."),
+    _e("/whitelist donator_bypass", "moved", f"{WL_RULES} → Donators skip the moderators"),
+    _e("/whitelist require_link", "moved", f"{WL_RULES} → Only names the member has linked"),
+    _e("/whitelist_reply add", "moved", f"{WL_RULES} → Added to the approval message (one message, not a list)"),
+    _e("/whitelist_reply remove", "moved", f"{WL_RULES} → Added to the approval message (leave it empty)"),
+    _e("/whitelist_reply list", "moved", f"{WL_RULES} → shown on the /setup bot panel"),
     _e("/whitelist_request", "moved", "/whitelist request"),
 )
 

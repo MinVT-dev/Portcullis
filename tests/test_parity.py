@@ -1,14 +1,25 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # ruff: noqa: F811  (pytest fixtures db and h are imported from test_bot)
-"""Gatekeeper V3 parity: schedule history and delete, backup delete."""
+"""Gatekeeper V3 parity: schedules, backups, console rules, bot admin, player ids and whitelist rules."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from portcullis.bot.setup import DONATOR_ONLY, WL_DONATOR_BYPASS, WL_REQUIRE_LINK
 from portcullis.core.types import Backup, Schedule, ScheduleRun, ServerId
 from tests.fakes.discord import FakeInteraction
-from tests.test_bot import SURVIVAL, Harness, db, h, member, operator, owner  # noqa: F401
+from tests.test_bot import (  # noqa: F401
+    SURVIVAL,
+    Harness,
+    admin,
+    db,
+    h,
+    member,
+    operator,
+    owner,
+    whitelist_ready,
+)
 
 NOW = datetime.now(UTC)
 
@@ -189,3 +200,204 @@ async def test_console_rules_panel_send_and_console_view(h: Harness) -> None:
     await h.m.setup.setup_server(i, "Survival")
     fields = {f.name: f.value for f in i.replies[-1]["embed"].fields}
     assert fields["Hidden console lines"] == "1 rule(s)" and "`op`" in fields["Blocked console commands"]
+
+
+# ------------------------------------------------------------------------------ /admin bot, /audit stats
+
+
+async def test_admin_bot_is_for_owners(h: Harness) -> None:
+    from tests.test_bot import admin
+
+    i = FakeInteraction(admin())
+    await h.m.admin.bot_action(i, "status")
+    assert "Only the bot's owners" in i.text
+    assert (await h.ctx.audit.query(action_prefix="admin.bot"))[0].result == "denied"
+
+    i = FakeInteraction(owner())
+    await h.m.admin.bot_action(i, "status")
+    fields = {f.name: f.value for f in i.replies[-1]["embed"].fields}
+    assert "portcullis-api" in fields["Versions"] and "3.0.0.6" in fields["Versions"]
+    assert fields["Discord latency"] == "50 ms"
+
+    synced: list[object] = []
+
+    class Tree:
+        def copy_global_to(self, *, guild: object) -> None:
+            synced.append(("copy", guild.id))
+
+        async def sync(self, *, guild: object) -> list[object]:
+            synced.append(("sync", guild.id))
+            return [object(), object()]
+
+    h.client.tree = Tree()  # type: ignore[attr-defined]
+    i = FakeInteraction(owner())
+    await h.m.admin.bot_action(i, "sync")
+    assert "Synced 2 command(s)" in i.text and synced[-1][0] == "sync"
+
+    closed: list[bool] = []
+
+    async def close() -> None:
+        closed.append(True)
+
+    h.client.close = close  # type: ignore[attr-defined]
+    i = FakeInteraction(owner())
+    await h.m.admin.bot_action(i, "stop")
+    assert "Stop Portcullis?" in i.text and not closed
+    confirm = FakeInteraction(owner())
+    await i.replies[-1]["view"].children[0].callback(confirm)
+    assert "Stopping" in confirm.edits[-1]["content"]
+    import asyncio
+
+    await asyncio.sleep(1.1)
+    assert closed == [True]
+
+
+async def test_audit_stats(h: Harness) -> None:
+    from tests.test_bot import admin
+
+    for node, result in (("server.power.start", "ok"), ("server.power.start", "ok"), ("server.send.console", "denied")):
+        await h.ctx.audit.record(node, actor_id=20, shard_id=SURVIVAL, result=result)
+    await h.ctx.audit.record("setup.server.names", actor_id=30, shard_id=SURVIVAL)
+    i = FakeInteraction(admin())
+    await h.m.admin.audit(i, stats=True)
+    embed = i.replies[-1]["embed"]
+    fields = {f.name: f.value for f in embed.fields}
+    assert "4 action(s)" in embed.description
+    assert fields["Most common"].splitlines()[0] == "`server.power.start` · 2"
+    assert fields["Most active"].splitlines()[0] == "<@20> · 3"
+    assert "denied: 1" in fields["Results"]
+
+    i = FakeInteraction(admin())
+    await h.m.admin.audit(i, server="Creative", stats=True)
+    assert "Nothing in the audit log" in i.text
+
+
+# ------------------------------------------------------------------------------ /player id
+
+
+def test_steam_id_formats() -> None:
+    from portcullis.bot.ids import is_vanity_link, steam_ids
+
+    want = ("76561197960287930", "STEAM_0:0:11101", "[U:1:22202]")
+    for value in ("76561197960287930", "STEAM_0:0:11101", "STEAM_1:0:11101", "[U:1:22202]", "U:1:22202",
+                  "https://steamcommunity.com/profiles/76561197960287930/"):
+        ids = steam_ids(value)
+        assert ids is not None and (ids.steam64, ids.steam2, ids.steam3) == want, value
+    for bad in ("7656119796028793", "STEAM_0:2:1", "[U:1:0]", "hello", "76561197960287930; rm"):
+        assert steam_ids(bad) is None, bad
+    assert is_vanity_link("https://steamcommunity.com/id/gabelogannewell")
+
+
+class FakeResponse:
+    def __init__(self, status: int, data: dict | None = None) -> None:
+        self.status, self.data = status, data
+
+    async def __aenter__(self) -> FakeResponse:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    async def json(self, content_type: object = None) -> dict | None:
+        return self.data
+
+
+class FakeSession:
+    calls: list[str] = []
+    answers: dict[str, FakeResponse] = {}
+
+    def __init__(self, **kwargs: object) -> None:
+        pass
+
+    async def __aenter__(self) -> FakeSession:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    def get(self, url: str, **kwargs: object) -> FakeResponse:
+        FakeSession.calls.append(url)
+        for part, answer in FakeSession.answers.items():
+            if part in url:
+                return answer
+        return FakeResponse(404)
+
+
+async def test_player_id_command(h: Harness) -> None:
+    from portcullis.bot.ids import MojangLookup
+
+    FakeSession.calls = []
+    FakeSession.answers = {"/minecraft/Notch": FakeResponse(200, {"id": "069a79f444e94726a5befca90e38aaf5",
+                                                                    "name": "Notch"}),
+                           "/minecraft/Broken": FakeResponse(500)}
+    h.m.community.mojang = MojangLookup(session_factory=FakeSession)  # type: ignore[arg-type]
+
+    i = FakeInteraction(member())
+    await h.m.community.player_id(i, "STEAM_0:0:11101")
+    assert {f.name: f.value for f in i.replies[-1]["embed"].fields}["SteamID64"] == "`76561197960287930`"
+
+    i = FakeInteraction(member())
+    await h.m.community.player_id(i, "Notch")
+    fields = {f.name: f.value for f in i.replies[-1]["embed"].fields}
+    assert fields["UUID"] == "`069a79f4-44e9-4726-a5be-fca90e38aaf5`"
+
+    i = FakeInteraction(member())
+    await h.m.community.player_id(i, "Notch")
+    assert "One lookup every few seconds" in i.text  # per-member cooldown
+    h.m.community.id_asked.clear()
+    i = FakeInteraction(member())
+    await h.m.community.player_id(i, "notch")
+    assert len(FakeSession.calls) == 1  # names ignore case, so this came from the cache
+    assert "069a79f4" in i.replies[-1]["embed"].fields[1].value
+
+    h.m.community.id_asked.clear()
+    i = FakeInteraction(member())
+    await h.m.community.player_id(i, "Broken")
+    assert "didn't answer" in i.text
+
+    h.m.community.id_asked.clear()
+    i = FakeInteraction(member())
+    await h.m.community.player_id(i, "../../evil?x=1")
+    assert "Give a Steam ID" in i.text
+    assert not any("evil" in c for c in FakeSession.calls)
+
+
+# ------------------------------------------------------------------------------ whitelist rules
+
+
+async def test_whitelist_rules_donator_only_require_link_bypass_and_reply(h: Harness) -> None:
+    await whitelist_ready(h)
+    await h.ctx.settings.set(DONATOR_ONLY, True, scope=SURVIVAL)
+    i = FakeInteraction(member(70))
+    await h.m.community.whitelist_request(i, "Survival", "Frank")
+    assert "Only donators" in i.text and h.port.sent == []
+
+    await h.ctx.users.set_flags(70, donator=True)
+    await h.ctx.settings.set(WL_REQUIRE_LINK, True)
+    i = FakeInteraction(member(70))
+    await h.m.community.whitelist_request(i, "Survival", "Frank")
+    assert "/link" in i.text and h.port.sent == []
+
+    await h.ctx.users.add_link(70, "unturned", "Frank")
+    i = FakeInteraction(member(70))
+    await h.m.community.whitelist_request(i, "Survival", "Frank")
+    assert "Asked the moderators" in i.text and h.port.sent == []  # no bypass yet
+
+    await h.ctx.users.add_link(71, "unturned", "Gina")
+    await h.ctx.users.set_flags(71, donator=True)
+    i = FakeInteraction(admin())
+    assert await h.m.setup.save_whitelist_rules(i, "yes", "yes", "Welcome! Read the rules.") is None
+    assert await h.ctx.settings.get(WL_DONATOR_BYPASS) is True
+    i = FakeInteraction(member(71))
+    await h.m.community.whitelist_request(i, "Survival")
+    assert "donator status" in i.text and "Welcome! Read the rules." in i.text
+    assert h.port.sent[-1] == (SURVIVAL, "whitelist add Gina")
+    assert "they are a donator" in str(h.requests.sent[-1]["embed"].fields)
+
+    press = FakeInteraction(operator())
+    await h.m.community.decide(press, 1, "approve")  # Frank's request, decided by hand
+    assert any("Welcome! Read the rules." in dm for dm in h.client.get_user(70).dms)
+
+    assert "characters" in (await h.m.setup.save_whitelist_rules(FakeInteraction(admin()), "no", "no", "x" * 501))
+    assert await h.m.setup.save_whitelist_rules(FakeInteraction(admin()), "no", "no", "") is None
+    assert await h.ctx.settings.get(WL_REQUIRE_LINK) is None

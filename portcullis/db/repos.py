@@ -286,6 +286,20 @@ class AuditRepo:
                     log.exception("audit listener failed")
         return entry_id
 
+    async def stats(self, *, since: str, shard_id: str | None = None) -> dict[str, list[tuple[Any, int]]]:
+        """Counts since ``since`` (ISO): by action, by member and by result, biggest first."""
+        where, args = "at >= ?", [since]
+        if shard_id is not None:
+            where += " AND shard_id = ?"
+            args.append(shard_id.lower())
+        out: dict[str, list[tuple[Any, int]]] = {}
+        for name, column in (("action", "action"), ("actor", "actor_id"), ("result", "result")):
+            sql = (f"SELECT {column} AS k, COUNT(*) AS n FROM audit WHERE {where} "
+                   f"GROUP BY {column} ORDER BY n DESC, k LIMIT 10")
+            async with self.db.conn.execute(sql, args) as cur:
+                out[name] = [(r["k"], r["n"]) for r in await cur.fetchall()]
+        return out
+
     async def query(self, *, actor_id: int | None = None, shard_id: str | None = None,
                     action_prefix: str | None = None, result: str | None = None, since: str | None = None,
                     limit: int = 50) -> list[AuditEntry]:

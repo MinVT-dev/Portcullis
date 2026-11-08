@@ -581,9 +581,9 @@ def test_command_tree() -> None:
     assert names == {
         "server": ["banner", "console", "list", "power", "power-all", "send", "status"], "backups": [],
         "setup": ["bot", "relay", "server"], "whitelist": ["add", "list", "remove", "request"], "link": [],
-        "player": ["lookup", "moderate", "top", "watch", "watchlist"], "user": [], "Portcullis user": [],
+        "player": ["id", "lookup", "moderate", "top", "watch", "watchlist"], "user": [], "Portcullis user": [],
         "poll": ["create", "list"], "notify": [], "event": ["create", "list"], "help": [], "audit": [],
-        "admin": ["diagnostics", "export", "import"],
+        "admin": ["bot", "diagnostics", "export", "import"],
     }
     groups = {c.name: c for c in tree.get_commands()}
     for admin_only in ("setup", "admin", "audit"):
