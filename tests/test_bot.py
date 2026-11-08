@@ -279,6 +279,21 @@ async def test_setup_bot_whitelist_channel(h: Harness) -> None:
     assert f"<#{REQUESTS}>" in fields["Whitelist requests go to"] and f"<@&{OPERATOR_ROLE}>" in fields["Operator roles"]
 
 
+
+async def test_setup_bot_greys_out_off_buttons_when_already_off(h: Harness) -> None:
+    # Min's /setup bot capture (2026-11-08) offered "Turn ... off" for features that were already off.
+    i = FakeInteraction(admin())
+    await h.m.setup.setup_bot(i)
+    panel = i.replies[-1]["view"]
+    assert panel.whitelist_off.disabled and panel.board_off.disabled
+    await h.ctx.settings.set(WHITELIST_CHANNEL, REQUESTS)
+    press = FakeInteraction(admin())
+    await panel.board_off.callback(press)  # any edit re-checks the settings
+    assert not panel.whitelist_off.disabled and panel.board_off.disabled
+    press = FakeInteraction(admin())
+    await panel.whitelist_off.callback(press)
+    assert panel.whitelist_off.disabled and press.edits[-1]["content"] == "Whitelist requests are off."
+
 # ------------------------------------------------------------------------------ /whitelist
 
 
