@@ -194,13 +194,19 @@ class PortcullisBot(discord.Client):
     async def _refresh_loop(self) -> None:
         while True:
             await asyncio.sleep(self.refresh_every if self.live.reachable else min(self.refresh_every, RETRY_EVERY))
-            await self.refresh()
+            try:
+                await self.refresh()
+            except Exception:  # noqa: BLE001 - one bad pass (a locked database, say) must not end refreshing for good
+                log.exception("refresh failed; trying again next time")
 
     async def _tick_loop(self) -> None:
         while True:
             await asyncio.sleep(TICK_EVERY)
             if self.is_ready():
-                await self.modules.tick()
+                try:
+                    await self.modules.tick()
+                except Exception:  # noqa: BLE001 - keep reminders and alerts running
+                    log.exception("tick failed; trying again next minute")
 
     # ---------------------------------------------------------------- profile status and server board
 

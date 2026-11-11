@@ -120,6 +120,7 @@ class TokenManager:
         refresh_margin: timedelta = timedelta(minutes=30),
         clock: Clock = utcnow,
         timeout: float = 30.0,
+        login_cooldown: timedelta = timedelta(seconds=60),
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self._session = session
@@ -132,6 +133,11 @@ class TokenManager:
         self._current: SessionToken | None = None
         self._stale = False
         self._lock = asyncio.Lock()
+        # After AMP refuses the login, the same error is raised without asking again for this long.
+        # Every caller (each REST call, each hub reconnect) would otherwise retry the login, and AMP
+        # answers repeated failed logins with 429 and can lock the account out.
+        self.login_cooldown = login_cooldown
+        self._refused: tuple[datetime, AuthFailed] | None = None
         # Counters, handy for /admin diagnostics and for tests.
         self.logins = 0
         self.renewals = 0
@@ -158,7 +164,7 @@ class TokenManager:
         try:
             async with self._session.post(url, json=json_body, headers=headers, timeout=self._timeout) as resp:
                 return resp.status, await resp.text()
-        except (aiohttp.ClientConnectionError, TimeoutError) as exc:
+        except (aiohttp.ClientError, TimeoutError) as exc:
             raise Unreachable(f"AMP did not answer: {type(exc).__name__}", method="POST", path=path) from exc
 
     def _session_from(self, body: Any, path: str) -> SessionToken:
@@ -172,7 +178,7 @@ class TokenManager:
                 body=self.redactor.data(body),
             )
         token = body["token"]
-        self.redactor.add(token)
+        self.redactor.add(token, short_lived=True)
         expires = parse_instant(body.get("expiration")) or jwt_expiry(token)
         if expires is None:
             log.warning("AMP gave no usable expiry for the session token; assuming one hour")
@@ -187,6 +193,12 @@ class TokenManager:
             "password": self._credentials.password,
             "rememberMe": False,
         }
+        if self._refused is not None:
+            until, refused = self._refused
+            if self._clock() < until:
+                raise AuthFailed(refused.message, status=refused.status, code=refused.code,
+                                 method="POST", path=LOGIN_PATH)
+            self._refused = None
         status, text = await self._post(LOGIN_PATH, json_body=body)
         if status == 200:
             self._current = self._session_from(_json_or_none(text), LOGIN_PATH)
@@ -197,10 +209,12 @@ class TokenManager:
             return self._current
         err = AmpError.from_response(status, self.redactor.text(text), "POST", LOGIN_PATH)
         if status in (400, 401):
-            raise AuthFailed(
+            refused = AuthFailed(
                 f"AMP refused the login for {self._credentials.username!r}: {err.message}",
                 status=status, code=err.code, method="POST", path=LOGIN_PATH,
             )
+            self._refused = (self._clock() + self.login_cooldown, refused)
+            raise refused
         raise err
 
     async def renew(self) -> SessionToken:
@@ -250,7 +264,7 @@ class TokenManager:
                     raise AmpError("hub-token response had no token", status=200, method="POST",
                                    path=HUB_TOKEN_PATH)
                 ticket = str(body["token"])
-                self.redactor.add(ticket)
+                self.redactor.add(ticket, short_lived=True)
                 expires = parse_instant(body.get("expiresAt")) or self._clock() + timedelta(seconds=60)
                 self.hub_tickets_issued += 1
                 return HubTicket(ticket, expires)

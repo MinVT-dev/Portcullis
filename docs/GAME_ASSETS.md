@@ -99,3 +99,7 @@ Images go to `game-art/<template>/<slot>.<ext>`, which is git-ignored. `GameArt.
 - Whether Discord shows every image here. Steam's CDN, GitHub, Wikimedia and the game sites are public HTTPS links and should work, but not every Discord client shows WebP and SVG. Two logos are SVG (Luanti, Minetest (Legacy)) and two are WebP (Hytale, Pre-Fortress 2).
 - The icon is Steam's community icon, which is 32×32 for every game here. It fits an embed author or footer line, not a thumbnail, so `thumbnail_url` only falls back to it when there is no logo.
 - The AMP 3 field that names a shard's template, so the lookup can use it before falling back to the image source.
+
+## Keeping the links alive
+
+The registry holds links, and Steam's paths carry a content hash, so a link dies when a publisher uploads new art. `python tools/check_game_art.py` fetches every link and lists the dead ones (all 1,037 answered on 2026-11-11). The "Game art links" workflow runs it every Monday and on any change to `games.json`. When it fails, rebuild the registry with `tools/build_game_assets.py --templates <dir> --verify`. A dead link is never fatal: Discord shows the embed without its image.

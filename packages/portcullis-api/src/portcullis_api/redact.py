@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import OrderedDict
 from collections.abc import Iterable
 from typing import Any
 
@@ -35,19 +36,42 @@ def is_secret_key(key: str) -> bool:
 
 
 class Redactor:
-    def __init__(self, secrets: Iterable[str] = ()) -> None:
+    """``add`` keeps a secret for good (a password). ``add(..., short_lived=True)`` is for session
+    tokens and hub tickets: a long-running bot sees a new one on every renewal and reconnect, so only
+    the newest ``max_short_lived`` are kept. Older ones have expired, and the JWT and query patterns
+    still mask them."""
+
+    def __init__(self, secrets: Iterable[str] = (), *, max_short_lived: int = 256) -> None:
         self._secrets: set[str] = set()
+        self._short_lived: OrderedDict[str, None] = OrderedDict()
+        self._max_short_lived = max_short_lived
+        self._ordered: tuple[str, ...] | None = ()
         for s in secrets:
             self.add(s)
 
-    def add(self, secret: str | None) -> None:
+    def add(self, secret: str | None, *, short_lived: bool = False) -> None:
         # Very short values would mangle ordinary text; they are covered by the key rules instead.
-        if secret and len(secret) >= 6:
+        if not secret or len(secret) < 6 or secret in self._secrets:
+            return
+        if short_lived:
+            self._short_lived[secret] = None
+            self._short_lived.move_to_end(secret)
+            while len(self._short_lived) > self._max_short_lived:
+                self._short_lived.popitem(last=False)
+        else:
+            self._short_lived.pop(secret, None)
             self._secrets.add(secret)
+        self._ordered = None
+
+    def _known(self) -> tuple[str, ...]:
+        # Longest first, so a secret that contains another is masked whole. Sorted once per change,
+        # not once per log line.
+        if self._ordered is None:
+            self._ordered = tuple(sorted({*self._secrets, *self._short_lived}, key=len, reverse=True))
+        return self._ordered
 
     def text(self, value: str) -> str:
-        # Longest first, so a secret that contains another is masked whole.
-        for secret in sorted(self._secrets, key=len, reverse=True):
+        for secret in self._known():
             if secret in value:
                 value = value.replace(secret, MASK)
         value = _JWT.sub(MASK, value)
@@ -75,7 +99,10 @@ class Redactor:
 
 
 class RedactingFilter(logging.Filter):
-    """Logging filter that runs every record's final message through a ``Redactor``."""
+    """Logging filter that runs every record's final message, and its traceback, through a ``Redactor``.
+
+    The traceback matters: aiohttp's errors print the request URL, and a hub URL carries its ticket as
+    ``?access_token=``."""
 
     def __init__(self, redactor: Redactor) -> None:
         super().__init__()
@@ -88,4 +115,14 @@ class RedactingFilter(logging.Filter):
             return True
         record.msg = self.redactor.text(message)
         record.args = None
+        try:
+            if record.exc_info and not record.exc_text:
+                record.exc_text = logging.Formatter().formatException(record.exc_info)  # type: ignore[arg-type]
+            if record.exc_text:
+                record.exc_text = self.redactor.text(record.exc_text)
+                record.exc_info = None  # handlers print exc_text; without this they would format it again
+            if record.stack_info:
+                record.stack_info = self.redactor.text(record.stack_info)
+        except Exception:  # noqa: BLE001 - never let logging crash the bot
+            record.exc_info, record.exc_text = None, "<traceback dropped: it could not be redacted>"
         return True

@@ -15,6 +15,7 @@ from portcullis.core.port import AmpPort
 from portcullis.core.types import ConsoleLine, PlayerJoined, PowerAction, ServerId, ServerState, StateChanged
 from portcullis_api.auth import Credentials
 from portcullis_api.client import AmpClient
+from portcullis_api.errors import AuthFailed
 from portcullis_api.testing import PASSWORD, SHARD_ID, TENANT, USERNAME, FakeAmp, wait_for
 
 SID = ServerId(SHARD_ID)
@@ -118,3 +119,24 @@ async def test_events_join_with_tenant_and_parse_live_shapes(port: AmpServerPort
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
     await wait_for(lambda: fake.left == [SHARD_ID])
+
+
+async def test_subscribers_are_told_when_the_hub_stops_for_good(port: AmpServerPort, fake: FakeAmp) -> None:
+    """A refused login ends the hub task. The subscriber must get an error to retry on, not wait forever."""
+    from portcullis.amp.port import EventStreamEnded
+
+    events = port.events(SID)
+    waiter = asyncio.create_task(anext(events))
+    await wait_for(lambda: len(fake.joined) >= 1)
+    conn, task = port.hub._conns[SID]
+
+    async def refused() -> None:
+        raise AuthFailed("AMP refused the login", status=401)
+
+    conn._ticket_source = refused  # type: ignore[assignment]
+    await fake.drop_all()
+    with pytest.raises(EventStreamEnded):
+        await asyncio.wait_for(waiter, 5)
+    assert SID not in port.hub._conns  # the next subscribe opens a fresh connection
+    with contextlib.suppress(Exception):
+        await events.aclose()

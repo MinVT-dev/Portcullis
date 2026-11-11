@@ -1,120 +1,60 @@
-# AMP 3 beta: what to capture
+# Real-panel checklist
 
-For Min and k8t, for the day the beta is running. This is the list of things I need to turn the open questions in `docs/DESIGN.md` (section 10, Q-1 to Q-12) into decisions, in priority order. Everything here is read-only: nothing needs a change to your beta install.
+What still has to be seen working on a real AMP 3 panel before a release. Everything else in Portcullis runs in tests against a fake AMP built from the pinned spec, which proves the code matches the spec, not that the spec matches the panel.
 
-## How to get it to me
+**State on 2026-11-11.** Built against AMP 3.0.0.6, a preview build that expires on 7 December 2026. The cloud test panel is gone, so these checks need a panel on your own network. An earlier version of this page asked for the API spec and the sign-in model; both are answered and written up in [amp3-api/](amp3-api/README.md) and [DESIGN.md](DESIGN.md) section 13.
 
-This cloud environment probably cannot reach a local `http://localhost` or LAN address, and it should not be pointed at a live AMP login. Realistic routes, best first:
+## Already seen working
 
-1. **A saved spec file.** Download the OpenAPI JSON and commit it, or attach it to the thread. A file works for any setup, needs no network access and can be redacted before sharing.
-2. **Screenshots or pasted text** of the pages in the list below, when there is no spec file.
-3. **A public HTTPS address** only if you are comfortable exposing it. If you do, make it a throwaway test instance with no real servers, and not behind your normal login. Never give me a working login.
+Checked on a real 3.0.0.6 panel on 2026-11-07 and 2026-11-08:
 
-## Getting the spec
+- Login with a username and password, token renewal, and single-use hub tickets.
+- The shard hub in `direct` mode, with `JoinShard(tenantId, shardId)` and one connection per shard.
+- The shapes of `Metrics`, `UserRoster`, `ShardStateChanged` and `ConsoleLine`.
+- The server list, status, start, stop and restart, sending a console line, and listing backups.
+- Unturned: `UserJoined`, and chat read from the console.
 
-**Do not assume the `/api` page is the spec.** Min says the AMP 3 `/api` page is built like the AMP 2 one, which is a guide. The AMP 2 page is a short how-to (how calls are made, how to sign in, an example) plus a handful of sign-in and setup calls when logged out. The full list only appears when logged in, or when AMP 2's discovery setting is on.
+## Still to check, most important first
 
-Treat that only as a hint about the **page format**. AMP 3 is an entirely new system with a new design, so nothing about AMP 2's calls, names, sign-in method or request style should be assumed for AMP 3. Capture what the AMP 3 page says and do not fill gaps from AMP 2.
+Tick each one on a real panel. For anything that fails, the bot's log line and the text Discord showed are enough; never paste a token, password or licence key.
 
-So for AMP 3, in this order:
+### 1. A new AMP build (do this first after any panel update)
 
-1. **Look for a download or "open API document" button.** AMP 3 has a Scalar API browser (`/scalar/v1` on the panel, for example `http://localhost:7278/scalar/v1`). Scalar can usually export the underlying JSON.
-2. **If the page only shows a short list, log in first** and look again. If the guide mentions a setting that shows the full list without login, use it on a throwaway test instance only.
-3. **If there is no export,** find the address the page loads its spec from (browser network tab, look for a `.json` request). ASP.NET apps often serve it at `/openapi/v1.json`; that is a guess, not confirmed for AMP 3.
-4. **If none of that works,** save the guide page itself as text, then a screenshot of every call list you can reach. That is still useful, but the real spec is better.
+- [ ] Download the new spec and run spec-diff against the pinned one ([DEVELOPING.md](DEVELOPING.md)). A changed route or model is the most likely way for Portcullis to break, and the preview build expires on 7 December 2026.
+- [ ] Log in, open `/server list` and `/server status` on one running server.
 
-Save the spec as `docs/amp3/openapi.json` in this repo, or attach it. If it is split by area, save each part.
+### 2. Actions labelled "unverified" in Discord
 
-## What to capture, in priority order
+These use routes from the spec that have never run on a real panel. Try each on a server you can afford to lose.
 
-Tick each one when done. Where it says "spec", the answer should be readable from the saved spec; otherwise a screenshot or a short note is enough.
+- [ ] `/server power`: update, sleep and wake.
+- [ ] `/backups`: make a backup, restore one, delete one. Making a backup copies the kind and content values from an existing backup, because the spec doesn't document them; check the new backup looks like the one it copied.
+- [ ] Schedules: run now, turn on and off, run history, delete.
 
-### 1. The spec itself and the auth model (Q-1, Q-2, Q-3, Q-10)
+### 3. Player events per game
 
-- [ ] The full OpenAPI JSON (see above), or the guide page text if there is no spec.
-- [ ] The guide page's description of how calls are made (HTTP verb, headers, body shape, how the session or token is sent). Do not assume it matches AMP 2.
-- [ ] How a bot signs in without a person. Is there an API key or token, a service account, or OAuth client credentials? Or only passkey and username/password? Note where you create it in the panel (a screenshot of that page is ideal).
-- [ ] How long a token lasts and how it refreshes (or "none").
-- [ ] The list of capabilities (Q-2): the roles or permissions page, or the capability list in the spec.
-- [ ] Whether you can create an account or role with only chosen capabilities on chosen shards, and whether the API tells you what the signed-in account can do (V3 used `Core/CurrentSessionHasPermission`; AMP 3 may differ) (Q-3).
-- [ ] Any statement on rate limits, API versioning, or "this will change during the beta" (Q-10). The release notes or forum post are enough.
+- [ ] `UserLeft`: not captured for any game yet. Until it is, a player's session only ends when the server stops. Record a player leaving (`tools/record_events.py`).
+- [ ] One capture with a player joining, chatting and leaving for each game you run other than Unturned. Arma Reforger is known to give no names or chat through AMP.
+- [ ] What a command typed in the panel's console looks like on the hub, so relayed console output can tell it apart from game output.
 
-### 2. Events, console and chat (Q-4, Q-6)
+### 4. Permissions
 
-This decides most of the design, so it is worth the most care.
+- [ ] Give the bot's AMP account a small role instead of an admin one, then run `/admin diagnostics`. So far the bot has mostly run with broad grants, so a missing grant has had little chance to show up.
+- [ ] Confirm that a call the role lacks comes back as 403 and that Discord shows a clear message.
 
-- [ ] Is there a live stream for console output (WebSocket or server-sent events)? The spec path and one example message.
-- [ ] Does AMP itself emit player join, leave and chat events, or a player list? In AMP 2 Gatekeeper had to read the console and apply patterns itself.
-- [ ] Webhooks: what events can trigger one, the payload shape, and how a request is signed so the bot can verify it.
-- [ ] Console input: the endpoint that sends a command to a game server, and the capability it needs. This is what whitelist, kick and say commands will use.
+### 5. Long runs
 
-### 3. Servers: status and power (Q-5, Q-6)
-
-- [ ] List shards and instances: the response shape, including the field that says which template or game an instance runs.
-- [ ] Start, stop, restart and kill endpoints.
-- [ ] Live status and metrics: state, CPU, memory, player count, and TPS where a game has it.
-- [ ] The online player list endpoint, if one exists.
-- [ ] Game actions as endpoints, if any (whitelist, kick, ban).
-
-### 4. Schedules and webhooks (Q-7)
-
-- [ ] The list of triggers and tasks the scheduler offers. Is there a "send webhook" or "emit event" task?
-- [ ] The schedule create, list and delete endpoints.
-
-### 5. Files and backups (Q-8)
-
-- [ ] Backup create, list, delete and restore endpoints, the capability each one needs, and whether a restore reports progress.
-- [ ] File access endpoints, only if you spot them while you are in there.
-
-### 6. Running Portcullis inside AMP (Q-9)
-
-- [ ] Create an instance from the **Python App Runner** template (git repository, `requirements.txt`, entry script, `.env`). Does it start, does it install requirements, does it survive a restart?
-- [ ] Note the Python version it provides. Portcullis wants 3.11 or newer.
-- [ ] Can the app instance reach the panel API from inside AMP, and at what address?
-
-### 7. Nice to have (Q-11, Q-12)
-
-- [ ] Whether an API client can write to the audit log and name the Discord user (Q-11).
-- [ ] What "Generate MCP" produces. A screenshot of the output is enough (Q-12).
-
-## Samples from a running game
-
-Two or three games give the most: one Minecraft server, one Source RCON game (for example ARK or Valheim), and one game that uses the plain AMP console (for example Palworld). For each:
-
-- [ ] The template name and the game version.
-- [ ] Ten lines of console output covering one player joining and one leaving, and one chat line if the game has chat.
-- [ ] What the API returns for the player list at that moment.
-
-This lets me compare what AMP gives with what the template patterns expect.
+- [ ] Leave the bot running for more than 8 hours, so the session token is renewed at least once, and check the relay still posts afterwards.
+- [ ] Restart the AMP panel while the bot is running. The relay should come back by itself within a few minutes.
+- [ ] Change the bot account's password in AMP while it runs. The log should say the login was refused, about once a minute and no faster.
 
 ## What must never be shared
 
-Do not paste, attach or screenshot any of these. If they appear in a capture, redact them first:
-
-- API tokens, keys, session cookies and `Authorization` headers.
-- Passwords, TOTP secrets and passkey or recovery codes.
+- Tokens, session cookies and `Authorization` headers.
+- Passwords, TOTP secrets, passkeys and recovery codes.
 - AMP licence keys.
-- Game server passwords, RCON passwords and Steam credentials.
-- Webhook signing secrets and Discord bot tokens.
-- Public IP addresses of your real servers, and player names you do not have permission to share (use a test account).
+- Game server, RCON and Steam passwords.
+- Discord bot tokens and invite links.
+- Public addresses of your real servers, and player names you may not share.
 
-The OpenAPI spec itself should hold no secrets. Search it before sharing anyway.
-
-### How to redact
-
-- **Screenshots:** cover the value with a solid box. Blurring is not enough. Check the browser address bar and the network tab too.
-- **Text and JSON:** replace the value with `REDACTED` and keep the key, for example `"Authorization": "REDACTED"`.
-- **Quick check before you send a file:** search it for `token`, `secret`, `password`, `apikey`, `licence`, `license` and `Bearer`. This lists any hits with line numbers:
-
-  ```
-  grep -n -i -E 'token|secret|password|api[_-]?key|licen[cs]e|bearer' openapi.json
-  ```
-
-  A hit in a field name is fine. A hit next to a real value is not.
-- **If something leaks:** rotate it. Remove the token or change the password in AMP, then tell me so I can point out anything stored in the thread or a PR.
-
-## What I will do with it
-
-1. Read the spec and answer Q-1 to Q-12 in `docs/DESIGN.md`, marking each answered, partly answered or still open.
-2. Fix the AMP interface layer (`portcullis/amp/`) to match the real API, and re-check the command list in Appendix B against which endpoints exist.
-3. List what Mike still needs to answer.
+The recorder redacts these, but look through a capture before sending it. If something leaks, rotate it first and say so afterwards.

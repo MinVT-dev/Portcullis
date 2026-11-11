@@ -7,6 +7,7 @@ environment variables win over ``.env``, so a container or AMP's App Runner can 
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 from collections.abc import Mapping
@@ -39,6 +40,28 @@ class Settings:
 
     def secrets(self) -> list[str]:
         return [s for s in (self.amp_password, self.discord_token) if s]
+
+
+def plain_http_risk(amp_url: str) -> str | None:
+    """A warning when ``amp_url`` would send the bot's AMP password over plain HTTP across the internet.
+
+    Plain HTTP is normal on a home network or the same machine, so private, loopback and single-label
+    hosts (``amp``, ``localhost``) pass. A public address or a dotted name does not.
+    """
+    parts = urlsplit(amp_url)
+    host = parts.hostname or ""
+    if parts.scheme != "http" or not host:
+        return None
+    try:
+        address = ipaddress.ip_address(host)
+        local = address.is_private or address.is_loopback or address.is_link_local
+    except ValueError:
+        local = "." not in host or host.endswith((".local", ".lan", ".home", ".internal", ".localhost"))
+    if local:
+        return None
+    return (f"AMP_URL uses plain http:// to {host}, which is not a private address. The bot's AMP password "
+            "and session token cross the network unencrypted. Put the panel behind https:// and use that "
+            "address.")
 
 
 def parse_env_file(path: Path) -> dict[str, str]:
@@ -156,4 +179,7 @@ def setup_logging(settings: Settings, redactor: Redactor | None = None) -> Redac
     for handler in logging.getLogger().handlers:
         if not any(isinstance(f, RedactingFilter) for f in handler.filters):
             handler.addFilter(RedactingFilter(redactor))
+    risk = plain_http_risk(settings.amp_url)
+    if risk:
+        logging.getLogger("portcullis").warning(risk)
     return redactor

@@ -58,3 +58,13 @@ def test_logging_is_redacted(caplog: pytest.LogCaptureFixture) -> None:
     caplog.handler.addFilter(logging.getLogger().handlers[0].filters[0])
     logging.getLogger("x").warning("token=%s", "discord-token-value")
     assert "discord-token-value" not in caplog.text
+
+
+def test_plain_http_to_a_public_address_is_flagged() -> None:
+    from portcullis.config import plain_http_risk
+
+    for fine in ("http://192.168.1.10:8443", "http://localhost:8443", "http://amp:8443", "http://10.0.0.5",
+                 "http://panel.lan:8443", "https://amp.example.com", "http://[::1]:8443"):
+        assert plain_http_risk(fine) is None, fine
+    for risky in ("http://amp.example.com:8443", "http://8.8.8.8:8443"):
+        assert "plain http" in (plain_http_risk(risky) or ""), risky

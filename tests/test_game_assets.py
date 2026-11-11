@@ -130,3 +130,11 @@ def test_steam_urls_prefer_normal_art_over_seasonal():
 
 def test_game_art_cache_is_git_ignored():
     assert "game-art/" in (ROOT / ".gitignore").read_text().splitlines()
+
+
+def test_art_link_checker_lists_every_link() -> None:
+    from tools.check_game_art import art_links
+
+    links = art_links({"games": [{"template": "a", "art": {"banner": "https://x/b.jpg", "logo": None}},
+                                 {"name": "B", "art": {"icon": "https://x/i.jpg"}}, {"template": "c"}]})
+    assert links == [("a", "banner", "https://x/b.jpg"), ("B", "icon", "https://x/i.jpg")]

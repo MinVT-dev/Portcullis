@@ -34,6 +34,10 @@ from portcullis_api.signalr import HubConnection, HubEvent, Mode
 log = logging.getLogger(__name__)
 
 
+class EventStreamEnded(Exception):
+    """A shard's hub connection stopped for good (AMP refused the login or the join). Raised to its
+    subscribers so they can retry, instead of leaving them waiting for events that will never come."""
+
 
 def _float(value: Any) -> float | None:
     try:
@@ -56,7 +60,7 @@ class ShardEvents:
         self._client = client
         self._mode = mode
         self._queue_size = queue_size
-        self._subs: dict[str, set[asyncio.Queue[ServerEvent]]] = {}
+        self._subs: dict[str, set[asyncio.Queue[ServerEvent | EventStreamEnded]]] = {}
         self._conns: dict[str, tuple[HubConnection, asyncio.Task[None]]] = {}
         self.dropped = 0  # events lost because a subscriber fell behind
         self._tenants: dict[str, str] = {}  # shard id -> tenant id
@@ -84,8 +88,30 @@ class ShardEvents:
                 except asyncio.QueueFull:
                     self.dropped += 1
 
+        def ended(task: asyncio.Task[None]) -> None:
+            # ``run`` only returns after close(), and only raises when reconnecting can't help. Either
+            # way no more events will arrive, so wake every subscriber that is still listening.
+            if task.cancelled():
+                return
+            reason = task.exception()
+            if reason is not None:
+                log.warning("live events for shard %s stopped: %s", sid[:8], reason)
+            current = self._conns.get(sid)
+            if current is not None and current[1] is task:
+                del self._conns[sid]
+            for queue in self._subs.get(sid, ()):
+                while True:  # make room: the notice matters more than the oldest events
+                    try:
+                        queue.put_nowait(EventStreamEnded(str(reason) if reason else "the connection was closed"))
+                        break
+                    except asyncio.QueueFull:
+                        queue.get_nowait()
+                        self.dropped += 1
+
         conn = self._client.hub("shard", mode=self._mode, on_connected=join)
-        self._conns[sid] = (conn, asyncio.create_task(conn.run(handle), name=f"amp-shard-hub-{sid[:8]}"))
+        task = asyncio.create_task(conn.run(handle), name=f"amp-shard-hub-{sid[:8]}")
+        task.add_done_callback(ended)
+        self._conns[sid] = (conn, task)
 
     async def _close(self, sid: str) -> None:
         entry = self._conns.pop(sid, None)
@@ -102,13 +128,16 @@ class ShardEvents:
 
     async def subscribe(self, server: ServerId) -> AsyncIterator[ServerEvent]:
         sid = server.lower()
-        queue: asyncio.Queue[ServerEvent] = asyncio.Queue(self._queue_size)
+        queue: asyncio.Queue[ServerEvent | EventStreamEnded] = asyncio.Queue(self._queue_size)
         self._subs.setdefault(sid, set()).add(queue)
         if sid not in self._conns or self._conns[sid][1].done():
             self._open(sid)
         try:
             while True:
-                yield await queue.get()
+                item = await queue.get()
+                if isinstance(item, EventStreamEnded):
+                    raise item
+                yield item
         finally:
             subs = self._subs.get(sid)
             if subs is not None:

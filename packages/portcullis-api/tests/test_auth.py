@@ -157,3 +157,17 @@ def test_jwt_expiry_fallback() -> None:
     payload = base64.urlsafe_b64encode(json.dumps({"exp": 1794000000}).encode()).decode().rstrip("=")
     exp = jwt_expiry(f"eyJhbGciOiJIUzI1NiJ9.{payload}.sig")
     assert exp is not None and int(exp.timestamp()) == 1794000000
+
+
+async def test_refused_login_is_not_retried_until_the_cooldown_passes(
+    base_url: str, session: aiohttp.ClientSession, fake: FakeAmp
+) -> None:
+    tm = TokenManager(base_url, session, Credentials(USERNAME, "wrong-password"), clock=fake.clock)
+    for _ in range(5):  # five callers, as five hub reconnects would be
+        with pytest.raises(AuthFailed):
+            await tm.token()
+    assert fake.calls == ["login"]  # AMP was asked once, so its failed-login limit is not tripped
+    fake.clock.advance(seconds=61)
+    with pytest.raises(AuthFailed):
+        await tm.token()
+    assert fake.calls == ["login", "login"]
