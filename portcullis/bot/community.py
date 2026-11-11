@@ -26,6 +26,7 @@ from portcullis.bot.base import (
     role_ids,
     role_problem,
     short_error,
+    thinking,
     valid_line,
     valid_name,
     valid_reason,
@@ -188,6 +189,7 @@ class CommunityModule(Module):
         if owner is None or owner.discord_id != user_id:
             return False
         template = await self.ctx.settings.get(WL_ADD, scope=row.shard_id)
+        await thinking(interaction)  # AMP may take longer than the 3 seconds Discord allows
         try:
             await self.ctx.port.send_console(row.shard_id, fill(template, name=name))
         except Exception as exc:  # noqa: BLE001 - the moderators can still approve it by hand
@@ -231,6 +233,7 @@ class CommunityModule(Module):
             await reply(interaction, "Someone already decided this request.")
             return
         note = None
+        await interaction.response.defer()  # keeps the button alive while AMP answers; the card is edited below
         if status == "approved":
             template = await self.ctx.settings.get(WL_ADD, scope=req.shard_id)
             try:
@@ -246,7 +249,7 @@ class CommunityModule(Module):
                                     result="failed" if note else "ok")
         updated = await self.ctx.whitelist.get(request_id)
         assert updated is not None
-        await interaction.response.edit_message(embed=request_embed(updated, server_name, note), view=None)
+        await interaction.edit_original_response(embed=request_embed(updated, server_name, note), view=None)
         text = (f"Your whitelist request for **{escape(req.ingame_name)}** on "
                 f"**{escape(server_name)}** was {status}.")
         await self._dm(req.discord_id, await self._with_reply(text) if status == "approved" and not note else text)
@@ -273,6 +276,7 @@ class CommunityModule(Module):
             await reply(interaction, f"{escape(row.name)} has no whitelist {'add' if add else 'remove'} command. "
                                      "An admin can set one in `/setup server`.")
             return
+        await thinking(interaction)
         try:
             await self.ctx.port.send_console(row.shard_id, fill(template, name=name))
         except Exception as exc:  # noqa: BLE001
@@ -336,6 +340,7 @@ class CommunityModule(Module):
                                      "Moderation commands in `/setup server`.")
             return
         line = fill(template, name=name, reason=reason or "no reason given")
+        await thinking(interaction)
         try:
             await self.ctx.port.send_console(row.shard_id, line)
         except Exception as exc:  # noqa: BLE001
@@ -461,16 +466,20 @@ class CommunityModule(Module):
         if found is None:
             await reply(interaction, f"I haven't seen {escape(name)} on any server.")
             return
-        names = {r.shard_id: r.name for r in await self.ctx.servers.list(include_gone=True)}
+        # Hidden servers are named only to members who may see them.
+        names = {r.shard_id: r.name for r in await self.ctx.servers.list(include_gone=True)
+                 if not r.hidden or await self.ctx.sees_hidden(interaction.user, r.shard_id)}
         embed = card(title=found.name)
         if found.online_on:
-            embed.add_field(name="Online now", value=", ".join(escape(names.get(s, s)) for s in found.online_on))
+            on = ", ".join(escape(names[s]) for s in found.online_on if s in names)
+            embed.add_field(name="Online now", value=on or "Yes")
         else:
             embed.add_field(name="Last seen", value=when(found.last_seen))
         embed.add_field(name="First seen", value=when(found.first_seen))
         embed.add_field(name="Play time", value=f"{duration(found.seconds)} over {found.sessions} sessions")
-        embed.add_field(name="Servers", value=", ".join(escape(names.get(s, s)) for s in found.servers)[:1000],
-                        inline=False)
+        played = ", ".join(escape(names[s]) for s in found.servers if s in names)
+        if played:
+            embed.add_field(name="Servers", value=played[:1000], inline=False)
         members = await links_by_name(self.ctx.db, found.name)
         if members:
             embed.add_field(name="Discord", value=", ".join(f"<@{m}>" for m, _ in members), inline=False)

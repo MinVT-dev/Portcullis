@@ -32,6 +32,7 @@ from portcullis.bot.base import (
     reply,
     role_problem,
     valid_line,
+    valid_template,
 )
 from portcullis.bot.board import BOARD_CHANNEL, BOARD_STYLE, STYLES
 from portcullis.bot.events import TIMEZONE, valid_zone
@@ -57,6 +58,11 @@ from portcullis.core.relay import escape
 from portcullis.db.repos import ServerRow
 
 log = logging.getLogger(__name__)
+
+def clip(text: str, limit: int = 1024) -> str:
+    """``text`` cut to an embed field's limit. Discord rejects the whole message when one field is over."""
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
 
 RELAY_KINDS = {"console": "console_channel", "events": "event_channel", "chat": "chat_channel"}
 WL_ADD, WL_REMOVE = "whitelist_add", "whitelist_remove"
@@ -184,10 +190,10 @@ class SetupModule(Module):
             value = commands.get(key)
             embed.add_field(name=label, value=f"`{escape(value)}`" if value else "not set", inline=False)
         mod = [f"{label}: {code(commands[key])}" for key, label in MOD_KEYS.items() if commands.get(key)]
-        embed.add_field(name="Moderation commands", value="\n".join(mod) or "not set", inline=False)
+        embed.add_field(name="Moderation commands", value=clip("\n".join(mod)) or "not set", inline=False)
         quick = quick_commands(commands.get(QUICK_KEY))
         listed = "\n".join(f"{escape(q['label'])} → `{escape(q['command'])}`" for q in quick)
-        embed.add_field(name="Quick commands (buttons on /server status)", value=listed or "none", inline=False)
+        embed.add_field(name="Quick commands (buttons on /server status)", value=clip(listed) or "none", inline=False)
         address = commands.get(CONNECT_KEY)
         embed.add_field(name="Address on /server status", value=code(address) if address else "not shown")
         embed.add_field(name="Members can start it", value="Yes" if commands.get(START_KEY) else "No")
@@ -232,7 +238,7 @@ class SetupModule(Module):
         """Store console command templates. Returns a problem to show, or None."""
         for key, value in values.items():
             value = value.strip()
-            if value and ("\n" in value or len(value) > 200):
+            if value and not valid_template(value):
                 return f"{COMMAND_KEYS[key]} must be one line of up to 200 characters."
             placeholder = "{message}" if key == SAY_KEY else "{name}"
             if value and placeholder not in value:
@@ -274,7 +280,7 @@ class SetupModule(Module):
                                 values: dict[str, str]) -> str | None:
         for key, value in values.items():
             value = value.strip()
-            if value and ("\n" in value or len(value) > 200):
+            if value and not valid_template(value):
                 return f"{MOD_KEYS[key]} must be one line of up to 200 characters."
             if value and "{name}" not in value:
                 return f"{MOD_KEYS[key]} must contain {{name}}, e.g. `kick {{name}} {{reason}}`."

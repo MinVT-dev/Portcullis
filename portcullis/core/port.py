@@ -8,6 +8,7 @@ The real implementation is ``portcullis.amp.port.AmpServerPort``; tests use
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from portcullis.core.types import (
@@ -57,6 +58,10 @@ class AmpPort(Protocol):
     async def schedule_history(self, server: ServerId, schedule_id: str, limit: int = 10) -> list[ScheduleRun]: ...
 
     async def permissions(self) -> list[str]: ...
+
+    async def preview_expires_at(self) -> datetime | None:
+        """When this AMP preview build stops working, or None for a release build."""
+        ...
 
     # create_backup waits: TakeBody needs SnapshotKind and SnapshotContent numbers that the spec
     # doesn't list. Read them off a snapshot taken in the panel first.

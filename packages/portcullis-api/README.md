@@ -221,7 +221,7 @@ Every error is an `AmpError`. Its `status`, `code`, `method`, `path` and `body` 
 | `NotFound` | 404: no such shard, schedule, backup and so on. |
 | `BadRequest` | 400, with AMP's validation errors in the message. |
 | `Conflict` | 409: for example, starting a server that is already starting. |
-| `RateLimited` | 429. |
+| `RateLimited` | 429. `retry_after` holds the seconds from AMP's `Retry-After` header, or `None` if it sent none. |
 | `Unreachable` | The panel didn't answer in time, or refused the connection. |
 | `HubError`, `HubGaveUp` | Hub problems. `HubGaveUp` means reconnecting won't help. |
 
@@ -238,6 +238,8 @@ except NotFound:
 
 **Retries:**
 - Read-only calls (`GET`, `HEAD`, `OPTIONS`) are retried twice when the panel doesn't answer, or when it answers with 502, 503 or 504.
+- A 429 on a read-only call is retried after the wait AMP names in `Retry-After`, if that wait is 10 seconds or less (`max_rate_limit_wait` on `AmpTransport`). A longer wait, or a 429 without the header, raises `RateLimited`.
+- A 429 on login holds every caller off for the wait AMP names (at least `login_cooldown`, at most an hour) instead of asking again, because repeated login attempts extend the limit.
 - Writes are never retried on their own, so a start or a console command can't run twice.
 - At most 8 requests are in flight at once.
 
@@ -287,6 +289,8 @@ Switches on `FakeAmp` let you test failure paths:
 | `fake.roster_forbidden = True` | The player list returns 403. |
 | `fake.join_error = "..."` | `JoinShard` fails with this error. |
 | `fake.login_response = {...}` | Simulates, for example, a forced password change. |
+| `fake.preview = {"expiresAt": "2026-12-07T00:00:00Z", "daysRemaining": None}` | The preview-build block on `GET /api/Health/status`. |
+| `fake.rate_limits = ["2", None]` | The next login or shard-list calls answer 429, with that `Retry-After` (`None` = no header). |
 
 `fake.calls`, `fake.joined` and `fake.left` record what your code did.
 

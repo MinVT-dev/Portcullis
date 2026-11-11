@@ -10,7 +10,14 @@ import aiohttp
 import pytest
 
 from portcullis_api.auth import Credentials, TokenManager, jwt_expiry, parse_instant
-from portcullis_api.errors import AuthExpired, AuthFailed, LoginNotSupported, MissingCapability
+from portcullis_api.errors import (
+    AuthExpired,
+    AuthFailed,
+    LoginNotSupported,
+    MissingCapability,
+    RateLimited,
+    parse_retry_after,
+)
 from portcullis_api.testing import PASSWORD, SHARD_ID, USERNAME, FakeAmp
 from portcullis_api.transport import AmpTransport
 
@@ -170,4 +177,51 @@ async def test_refused_login_is_not_retried_until_the_cooldown_passes(
     fake.clock.advance(seconds=61)
     with pytest.raises(AuthFailed):
         await tm.token()
+    assert fake.calls == ["login", "login"]
+
+
+def test_parse_retry_after_reads_seconds_and_dates() -> None:
+    from datetime import UTC, datetime
+    now = datetime(2026, 11, 11, 12, 0, tzinfo=UTC)
+    assert parse_retry_after("30") == 30.0
+    assert parse_retry_after("Wed, 11 Nov 2026 12:02:00 GMT", now=now) == 120.0
+    assert parse_retry_after("Wed, 11 Nov 2026 11:00:00 GMT", now=now) == 0.0  # already past
+    assert parse_retry_after("999999999") == 86400.0  # capped at a day
+    assert parse_retry_after(None) is None and parse_retry_after("soon") is None and parse_retry_after("nan") is None
+
+
+async def test_short_rate_limit_on_a_read_is_waited_out(tokens: TokenManager, fake: FakeAmp, base_url: str,
+                                                        session: aiohttp.ClientSession) -> None:
+    t = AmpTransport(base_url, session, tokens)
+    await tokens.token()
+    fake.rate_limits = ["0"]
+    assert (await t.request("GET", "/api/Shards"))[0]["id"] == SHARD_ID
+    assert fake.calls == ["login", "shards", "shards"]
+
+
+async def test_long_rate_limit_is_raised_with_the_wait(tokens: TokenManager, fake: FakeAmp, base_url: str,
+                                                       session: aiohttp.ClientSession) -> None:
+    t = AmpTransport(base_url, session, tokens)
+    await tokens.token()
+    fake.rate_limits = ["120"]
+    with pytest.raises(RateLimited) as info:
+        await t.request("GET", "/api/Shards")
+    assert info.value.retry_after == 120.0 and "try again in 120 s" in str(info.value)
+    assert fake.calls == ["login", "shards"]  # not retried: the wait is longer than the transport will sit out
+
+
+async def test_rate_limited_login_holds_every_caller_off(base_url: str, session: aiohttp.ClientSession,
+                                                         fake: FakeAmp) -> None:
+    tm = TokenManager(base_url, session, Credentials(USERNAME, PASSWORD), clock=fake.clock)
+    fake.rate_limits = ["300"]
+    for _ in range(4):
+        with pytest.raises(RateLimited) as info:
+            await tm.token()
+    assert fake.calls == ["login"]  # asking again during the wait would only extend it
+    assert info.value.retry_after == 300.0
+    fake.clock.advance(seconds=299)
+    with pytest.raises(RateLimited):
+        await tm.token()
+    fake.clock.advance(seconds=2)
+    assert await tm.token()
     assert fake.calls == ["login", "login"]

@@ -55,6 +55,10 @@ class FakeAmp:
     # How negotiate treats the ticket: "consume" (a second use is refused) or "peek" (not consumed).
     negotiate_consumes: bool = True
     login_response: dict[str, Any] | None = None  # override to simulate PasswordChangeRequired etc.
+    # Retry-After values (None = no header) for the next login or shard-list calls, which answer 429.
+    rate_limits: list[str | None] = field(default_factory=list)
+    # The ``preview`` block of GET /api/Health/status; None is a release build, which has none.
+    preview: dict[str, Any] | None = None
 
     tokens: dict[str, tuple[Session, datetime]] = field(default_factory=dict)
     tickets: dict[str, tuple[Session, bool]] = field(default_factory=dict)  # ticket -> (session, used)
@@ -110,8 +114,17 @@ class FakeAmp:
 
     # ------------------------------------------------------------------ handlers
 
+    def _rate_limited(self) -> web.Response | None:
+        if not self.rate_limits:
+            return None
+        wait = self.rate_limits.pop(0)
+        return web.json_response({"title": "Too Many Requests", "status": 429}, status=429,
+                                 headers={"Retry-After": wait} if wait is not None else None)
+
     async def login(self, request: web.Request) -> web.Response:
         self.calls.append("login")
+        if (limited := self._rate_limited()) is not None:
+            return limited
         body = await request.json()
         if body.get("username") != USERNAME or body.get("password") != PASSWORD:
             return web.json_response({"title": "Unauthorized", "status": 401}, status=401)
@@ -141,10 +154,16 @@ class FakeAmp:
         # AMP declares text/plain for this body; the client must not rely on the content type.
         return web.Response(text=json.dumps({"token": ticket, "expiresAt": expires}), content_type="text/plain")
 
+    async def health(self, request: web.Request) -> web.Response:
+        self.calls.append("health")
+        return web.json_response({"phase": "ready", "message": None, "preview": self.preview})
+
     async def shards(self, request: web.Request) -> web.Response:
         self.calls.append("shards")
         if self._bearer(request) is None:
             return web.Response(status=401, headers={"WWW-Authenticate": "Bearer"})
+        if (limited := self._rate_limited()) is not None:
+            return limited
         return web.json_response([{"id": SHARD_ID, "tenantId": TENANT, "name": "Survival",
                                    "unknownFutureField": 1}])
 
@@ -311,6 +330,7 @@ class FakeAmp:
         app.router.add_post("/api/Auth/logout", self.logout)
         app.router.add_post("/api/auth/hub-token", self.hub_token)
         app.router.add_get("/api/Shards", self.shards)
+        app.router.add_get("/api/Health/status", self.health)
         app.router.add_post("/api/Shards/{id}/console", self.console)
         app.router.add_get("/api/Shards/{id}/schedules", self.forbidden)
         app.router.add_get("/api/always-401", self.always_401)
