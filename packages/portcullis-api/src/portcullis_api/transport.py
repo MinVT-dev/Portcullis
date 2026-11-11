@@ -139,7 +139,7 @@ class AmpTransport:
                 status, text, token = await self._send(
                     method, real_path, params=query, json_body=json_body, form=form, timeout=client_timeout
                 )
-            except (aiohttp.ClientConnectionError, TimeoutError) as exc:
+            except (aiohttp.ClientError, TimeoutError) as exc:  # a cut-off body too, not only a refused connect
                 if attempt < retries:
                     attempt += 1
                     await asyncio.sleep(self._retry_backoff * attempt)

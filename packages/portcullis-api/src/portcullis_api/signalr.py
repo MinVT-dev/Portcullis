@@ -166,7 +166,7 @@ class HubConnection:
     async def _ticket(self) -> str:
         ticket = await self._ticket_source()
         self.tickets_used += 1
-        self.redactor.add(ticket.token)
+        self.redactor.add(ticket.token, short_lived=True)
         return ticket.token
 
     async def _negotiate(self, ticket: str) -> str:
@@ -185,7 +185,7 @@ class HubConnection:
         token = body.get("connectionToken") or body.get("connectionId")
         if not token:
             raise HubError("negotiate response had no connection token")
-        self.redactor.add(token)
+        self.redactor.add(token, short_lived=True)
         return token
 
     async def _open(self) -> aiohttp.ClientWebSocketResponse:
@@ -205,17 +205,22 @@ class HubConnection:
             raise HubError(f"WebSocket upgrade refused: {exc.status}", status=exc.status,
                            path=self.path) from exc
 
-        await ws.send_str(encode({"protocol": "json", "version": 1}))
-        msg = await ws.receive(timeout=self.handshake_timeout)
-        if msg.type != aiohttp.WSMsgType.TEXT:
+        try:
+            await ws.send_str(encode({"protocol": "json", "version": 1}))
+            msg = await ws.receive(timeout=self.handshake_timeout)
+            if msg.type != aiohttp.WSMsgType.TEXT:
+                raise HubError(f"no handshake response (got {msg.type.name})", path=self.path)
+            parts = msg.data.split(RS, 1)
+            handshake = json.loads(parts[0]) if parts[0] else {}
+            if handshake.get("error"):
+                raise HubError(f"handshake refused: {handshake['error']}", path=self.path)
+            self._buffered = decode_frame(parts[1]) if len(parts) > 1 else []
+        except TimeoutError as exc:
             await ws.close()
-            raise HubError(f"no handshake response (got {msg.type.name})", path=self.path)
-        parts = msg.data.split(RS, 1)
-        handshake = json.loads(parts[0]) if parts[0] else {}
-        if handshake.get("error"):
+            raise HubError(f"no handshake response in {self.handshake_timeout:.0f}s", path=self.path) from exc
+        except BaseException:  # never leave a half-open socket behind, whatever went wrong
             await ws.close()
-            raise HubError(f"handshake refused: {handshake['error']}", path=self.path)
-        self._buffered = decode_frame(parts[1]) if len(parts) > 1 else []
+            raise
         return ws
 
     async def probe(self) -> None:
@@ -244,7 +249,10 @@ class HubConnection:
             await self._ws.send_str(
                 encode({"type": INVOCATION, "invocationId": inv_id, "target": target, "arguments": list(args)})
             )
-            return await asyncio.wait_for(fut, self.invoke_timeout)
+            try:
+                return await asyncio.wait_for(fut, self.invoke_timeout)
+            except TimeoutError as exc:
+                raise HubError(f"{target} got no answer in {self.invoke_timeout:.0f}s", path=self.path) from exc
         finally:
             self._pending.pop(inv_id, None)
 

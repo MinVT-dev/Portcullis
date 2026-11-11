@@ -1,0 +1,26 @@
+name: Game art links
+
+# The art registry holds links to publishers' images. This finds the ones that have stopped working.
+on:
+  schedule:
+    - cron: "17 5 * * 1"  # Mondays, 05:17 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "portcullis/assets/games.json"
+      - "tools/check_game_art.py"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install "aiohttp>=3.10,<4"
+      - name: Check every art link
+        run: python tools/check_game_art.py
