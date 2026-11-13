@@ -17,7 +17,11 @@ from portcullis.assets import game_art
 from portcullis.bot.backups import BackupView
 from portcullis.bot.banners import MAX_CARDS, THEMES, card_from, render_banner
 from portcullis.bot.base import (
+    BAD,
+    GOOD,
+    MUTED,
     NONE,
+    WARN,
     Ctx,
     Module,
     card,
@@ -37,13 +41,13 @@ from portcullis.db.repos import ServerRow
 log = logging.getLogger(__name__)
 
 STATE_COLOURS = {
-    ServerState.RUNNING: 0x2ECC71,
-    ServerState.STOPPED: 0xE74C3C,
-    ServerState.BUSY: 0xF1C40F,
-    ServerState.SLEEPING: 0x95A5A6,
+    ServerState.RUNNING: GOOD,
+    ServerState.STOPPED: BAD,
+    ServerState.BUSY: WARN,
+    ServerState.SLEEPING: MUTED,
     ServerState.FAILED: 0xC0392B,
-    ServerState.SUSPENDED: 0x7F8C8D,
-    ServerState.UNKNOWN: 0x7F8C8D,
+    ServerState.SUSPENDED: MUTED,
+    ServerState.UNKNOWN: MUTED,
 }
 POWER_ACTIONS = (PowerAction.START, PowerAction.STOP, PowerAction.RESTART)
 # AMP has routes for these but none has been run on a real panel yet, so they're single-server only and
@@ -102,7 +106,7 @@ def console_block(lines: list[str]) -> str:
 
 
 def status_embed(row: ServerRow, status: ServerStatus, address: str | None = None) -> discord.Embed:
-    embed = card(title=row.name, colour=STATE_COLOURS.get(status.state, 0x7F8C8D))
+    embed = card(title=row.name, colour=STATE_COLOURS.get(status.state, MUTED))
     embed.add_field(name="State", value=state_text(status.state))
     count = f"{status.player_count}" + (f" / {status.max_players}" if status.max_players else "")
     embed.add_field(name="Players", value=count)

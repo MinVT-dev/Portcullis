@@ -2,15 +2,17 @@
 
 **Decision (Min, 2026-11-07):** the AMP 3 edition of the bot is called **Portcullis**. Gatekeeper V2 and V3 keep their names.
 
-![Banner, Discord banner, icons at 128 to 16 px, and the mark and logo on dark and light](preview.png)
+![Banner, Discord banner, icons at 112 to 20 px, and the mark and logo on dark and light](preview.png)
 
-## Idea
+## Idea (v3, 2026-11-13)
 
-The mark is a gatehouse arch with its portcullis hanging inside it.
+The mark is a gate in a pointed arch, with the portcullis hanging half-raised and light coming from under it.
 
-- **Fits next to CubeCoders, without copying them.** It borrows their visual language: deep navy, flat near-white shapes, one heavy stroke weight, hard mitred corners, and hexagon geometry. The arch's shoulders are the top half of a flat-topped hexagon at 60°, and the banner background is a faint isometric grid. It uses no cube, no hexagon badge, and no part of the CubeCoders or AMP logos. The wordmark is a different typeface from theirs.
-- **Built on a grid.** It sits on a 64-unit grid. Every member (frame, beam, bars, rail) is 5 units thick, and there is a 3-unit gap between the frame and the gate, so the two still read apart at 32 px.
-- **Status is built in.** With the gate raised, light shows underneath: cyan on the brand icon, green for online. With the gate down, the bars reach the ground and a red sill shows: offline.
+- **It reads as a portcullis.** v2's hexagon arch and three spiked bars read as letters ("AA") at small sizes. v3 draws a real lattice: three bars and two rails, so the grid shape survives at 20 px, and a pointed arch, which says "castle gate" on its own.
+- **One warm accent.** Torchlight amber (`#FFB547`) replaces cyan. It gives Portcullis its own colour and keeps clear distance from CubeCoders' palette. There is still no cube, no hexagon badge, and no part of the CubeCoders or AMP logos.
+- **Built on a grid.** The mark sits on a 64-unit grid: the arch is 6.5 units thick, the bars 5.5, the rails 5. The gate is clipped to the arch's inside, so frame and gate always read apart.
+- **Status is built in.** Gate raised with light under it: amber on the brand icon, green for online. Gate down with the spikes on the ground and a red sill: offline.
+- **Wordmark:** `PORTCULLIS` in Chakra Petch Bold, all caps with 6% tracking. Its cut corners echo the gate's spikes.
 
 ## Files
 
@@ -18,36 +20,44 @@ SVG is the source. Upload-ready PNGs are in [`png/`](png/).
 
 | File | PNG | Use it for |
 |---|---|---|
-| [portcullis-icon.svg](portcullis-icon.svg) | 1024×1024 | Discord app icon and bot avatar. It's full-bleed and stays inside Discord's circle crop. |
+| [portcullis-icon.svg](portcullis-icon.svg) | 1024×1024, plus `portcullis-avatar-512.png` | Discord app icon and bot avatar. Full-bleed, and the mark stays inside Discord's circle crop. |
 | [portcullis-status-online.svg](portcullis-status-online.svg) | 256×256 | Online status in embeds and thumbnails. |
 | [portcullis-status-offline.svg](portcullis-status-offline.svg) | 256×256 | Offline status. |
 | [portcullis-banner.svg](portcullis-banner.svg) | 1280×640 | GitHub social preview, release posts. |
 | [portcullis-discord-banner.svg](portcullis-discord-banner.svg) | 1360×480 | The bot's Discord profile banner (680×240 at 2×). The left third stays plain, because the avatar sits there. |
-| [portcullis-logo.svg](portcullis-logo.svg) / [-dark](portcullis-logo-dark.svg) | 1200 wide | The mark and wordmark together, for dark and light backgrounds. |
+| [portcullis-logo.svg](portcullis-logo.svg) / [-dark](portcullis-logo-dark.svg) | 264 high | The mark and wordmark together, for dark and light backgrounds. |
 | [portcullis-mark.svg](portcullis-mark.svg) / [-dark](portcullis-mark-dark.svg) | 512×512 | The mark on its own, with a transparent background. |
 | [portcullis-game-banner.svg](portcullis-game-banner.svg) | 920×430 | Placeholder banner for a game with no art of its own. The PNG is `portcullis/assets/fallback/game-banner.png`; see [GAME_ASSETS.md](../GAME_ASSETS.md). |
-| [portcullis-game-logo.svg](portcullis-game-logo.svg) | 512×512 | Placeholder logo for a game with no art of its own (`portcullis/assets/fallback/game-logo.png`). |
+| [portcullis-game-logo.svg](portcullis-game-logo.svg) | 512×512 | Placeholder logo for a game with no art of its own (`portcullis/assets/fallback/game-logo.png`). Grey light, so it doesn't read as the bot's own avatar. |
 
-[`generate.py`](generate.py) rebuilds every SVG: `python3 generate.py OUT_DIR FONT_DIR` (it needs `fonttools` and `brotli`). FONT_DIR holds Exo 2 Bold and Roboto Regular from Google Fonts as `exo2.woff2` and `roboto.woff2`. All text is converted to outlines, so the SVGs look the same everywhere and don't need the fonts installed.
+**Rebuild:**
+
+1. `python3 docs/branding/generate.py docs/branding FONT_DIR` rewrites every SVG. It needs `fonttools`. FONT_DIR holds `ChakraPetch-Bold.ttf` and `ChakraPetch-Regular.ttf` from Google Fonts. All text becomes outlines, so the SVGs look the same everywhere and don't need the fonts installed.
+2. `node docs/branding/render_png.js` renders every PNG, including the two game fallbacks, with headless Chromium. It needs Playwright.
+
+**Minimum sizes:** the mark holds up down to 16 px. Below 24 px, use the icon (mark on navy), not the bare mark. Keep the wordmark at least 14 px high.
 
 ## Palette
 
 | Role | Hex |
 |---|---|
-| Navy (background) | `#121A30`, lifted `#1A2442` |
-| Mark and text | `#E9EFF8` |
-| Secondary text | `#A6B2C9` |
-| Lines and pill borders | `#8CAADC` at low opacity |
-| Brand accent | `#4AD6FF` (cyan) |
+| Night (background) | `#0E1424`, lifted `#18213A` |
+| Stone (mark and text) | `#EEF2FA` |
+| Mist (secondary text) | `#9AA6BD` |
+| Lines | `#8FA3C8` at low opacity |
+| Torch (brand accent) | `#FFB547`, ember `#FF7A2F` in glows |
 | Online / success | `#4ADE80` |
 | Offline / error | `#FF5A5F` |
 
+Embed colours in the bot can use the same values: Torch for neutral notices, green and red for status.
+
 ## Type
 
-- **Wordmark:** Exo 2 Bold (SIL Open Font License).
-- **Text and taglines:** Roboto Regular, which is also what CubeCoders' site uses for body text.
+- **Wordmark and text:** Chakra Petch Bold and Regular (SIL Open Font License).
 
 **Tagline:** "Your game servers, in Discord." Keep "AMP" and CubeCoders' logos out of all Portcullis artwork, so nothing suggests it's an official CubeCoders product. Whether "Portcullis for AMP 3" is OK as a descriptive subtitle is a question for Mike.
+
+**History:** v1 (PR #7) was rejected. v2 (PR #10) was the hexagon gatehouse in cyan and Exo 2. v3 replaces both.
 
 ## Still to check before going public
 

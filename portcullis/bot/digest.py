@@ -11,7 +11,7 @@ import logging
 from datetime import UTC, datetime, time, timedelta
 from time import monotonic
 
-from portcullis.bot.base import COUNT_CHANNEL, SUMMARY_CHANNEL, Ctx, as_id, card
+from portcullis.bot.base import COUNT_CHANNEL, INFO, SUMMARY_CHANNEL, Ctx, as_id, card
 from portcullis.bot.events import TIMEZONE, zone
 from portcullis.core.relay import escape
 
@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 SUMMARY_DAY = "summary_posted_for"  # bot: the local date the last summary covered
 MILESTONE_HOURS = (10, 50, 100, 250, 500, 1000)
-SUMMARY_COLOUR = 0x5865F2
+SUMMARY_COLOUR = INFO
 RENAME_EVERY = 330.0
 
 

@@ -14,7 +14,11 @@ import discord
 from discord import app_commands
 
 from portcullis.bot.base import (
+    BAD,
+    GOOD,
+    MUTED,
     NONE,
+    WARN,
     Ctx,
     Module,
     as_id,
@@ -65,7 +69,7 @@ def new_code() -> str:
 
 
 def request_embed(req: WhitelistRequest, server_name: str, note: str | None = None) -> discord.Embed:
-    colour = {"pending": 0xF1C40F, "approved": 0x2ECC71, "denied": 0xE74C3C}.get(req.status, 0x7F8C8D)
+    colour = {"pending": WARN, "approved": GOOD, "denied": BAD}.get(req.status, MUTED)
     embed = card(title=f"Whitelist request for {server_name}", colour=colour)
     embed.add_field(name="Member", value=f"<@{req.discord_id}>")
     embed.add_field(name="In-game name", value=escape(req.ingame_name))
