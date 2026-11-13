@@ -7,7 +7,8 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import discord
 from discord import app_commands
@@ -40,13 +41,16 @@ def intents() -> discord.Intents:
 class DiscordSink:
     """The relay's way out: post text to a channel id, with every mention disabled."""
 
-    def __init__(self, client: discord.Client) -> None:
+    def __init__(self, client: discord.Client,
+                 resolve: Callable[[int], Awaitable[Any]] | None = None) -> None:
         self.client = client
+        self.resolve = resolve  # ``Ctx.channel``, which remembers channels Discord refused
 
     async def send(self, channel_id: int, text: str) -> None:
-        channel = self.client.get_channel(channel_id)
-        if channel is None:
-            channel = await self.client.fetch_channel(channel_id)
+        if self.resolve is not None:
+            channel = await self.resolve(channel_id)
+        else:
+            channel = self.client.get_channel(channel_id) or await self.client.fetch_channel(channel_id)
         await channel.send(text, allowed_mentions=discord.AllowedMentions.none(),  # type: ignore[union-attr]
                            suppress_embeds=True)
 
@@ -94,7 +98,7 @@ class PortcullisBot(discord.Client):
         self.modules = Modules(self.ctx)
         self.board = self.ctx.board
         self.notifier = Notifier(self.ctx)
-        self.relay = Relay(port, DiscordSink(self), hooks=hooks, follow_all=True)
+        self.relay = Relay(port, DiscordSink(self, self.ctx.channel), hooks=hooks, follow_all=True)
         # JoinWatch first: it needs to know whether a join is someone's first, before PlayerTracker records it.
         self.relay.listeners += [
             self.modules.joins,

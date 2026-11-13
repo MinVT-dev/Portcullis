@@ -16,7 +16,19 @@ from discord import app_commands
 from portcullis.assets import game_art
 from portcullis.bot.backups import BackupView
 from portcullis.bot.banners import MAX_CARDS, THEMES, card_from, render_banner
-from portcullis.bot.base import NONE, Ctx, Module, card, code, fill, reply, short_error, state_text, valid_line
+from portcullis.bot.base import (
+    NONE,
+    Ctx,
+    Module,
+    card,
+    code,
+    fill,
+    reply,
+    short_error,
+    state_text,
+    valid_line,
+    valid_template,
+)
 from portcullis.core.console_rules import DENY_KEY, HIDE_KEY, blocked_word, hider, stored_denylist, stored_rules
 from portcullis.core.relay import console_safe, escape
 from portcullis.core.types import PowerAction, ServerState, ServerStatus
@@ -44,6 +56,7 @@ GOES_DOWN = (PowerAction.STOP, PowerAction.RESTART, PowerAction.UPDATE, PowerAct
 VERBS = {"start": "Starting", "stop": "Stopping", "restart": "Restarting", "update": "Updating",
          "sleep": "Putting to sleep", "wake": "Waking"}
 STATUS_TIMEOUT = 8.0
+QUICK_TIMEOUT = 2.0  # for an AMP read that happens before the first reply: Discord allows 3 seconds in all
 SAY_KEY = "say"  # per-server setting: console command template for in-game chat, e.g. "say {message}"
 QUICK_KEY = "quick_commands"  # per-server setting: [{"label": "Save world", "command": "save"}, ...]
 QUICK_LIMIT = 5
@@ -69,8 +82,9 @@ def quick_commands(value: object) -> list[dict[str, str]]:
         return []
     out = []
     for item in value[:QUICK_LIMIT]:
-        if isinstance(item, dict) and isinstance(item.get("label"), str) and isinstance(item.get("command"), str):
-            out.append({"label": item["label"], "command": item["command"]})
+        if isinstance(item, dict) and isinstance(item.get("label"), str) and item["label"].strip() \
+                and valid_template(item.get("command")):  # the list can come from /admin import
+            out.append({"label": item["label"][:40], "command": item["command"]})
     return out
 
 
@@ -188,12 +202,13 @@ class ServerModule(Module):
         super().__init__(ctx)
         self.restarts: dict[str, asyncio.Task[None]] = {}
         self.member_starts: dict[str, float] = {}
+        self.restart_pending: set[str] = set()  # warned restarts between "asked" and "counting down"
         self.sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
 
-    async def players_online(self, row: ServerRow) -> int | None:
-        """How many players are on, or None if AMP couldn't say."""
+    async def players_online(self, row: ServerRow, timeout: float = STATUS_TIMEOUT) -> int | None:
+        """How many players are on, or None if AMP couldn't say (in time)."""
         try:
-            status = await asyncio.wait_for(self.ctx.port.get_status(row.shard_id), STATUS_TIMEOUT)
+            status = await asyncio.wait_for(self.ctx.port.get_status(row.shard_id), timeout)
         except Exception:  # noqa: BLE001
             return None
         return status.player_count if status.state is ServerState.RUNNING else 0
@@ -316,7 +331,7 @@ class ServerModule(Module):
                 return
             self.member_starts[row.shard_id] = time.monotonic()
         if power is PowerAction.STOP and not confirmed:
-            online = await self.players_online(row)
+            online = await self.players_online(row, QUICK_TIMEOUT)
             if online != 0:
                 who = "someone may be playing (AMP didn't say)" if online is None else \
                     f"{online} player{'s are' if online != 1 else ' is'} online"
@@ -360,19 +375,25 @@ class ServerModule(Module):
                                      "plain restart.")
             return
         task = self.restarts.get(row.shard_id)
-        if task is not None and not task.done():
+        if (task is not None and not task.done()) or row.shard_id in self.restart_pending:
             await reply(interaction, f"A restart of {escape(row.name)} is already counting down.")
             return
-        if await self.players_online(row) == 0:
-            await self.do_power(interaction, row, PowerAction.RESTART)
-            return
-        await self.ctx.audit.record("server.power.restart.warned", actor_id=interaction.user.id, shard_id=row.shard_id)
-        first = WARN_STEPS[0][1]
-        await reply(interaction, f"Restarting **{escape(row.name)}** in {first} (asked by {interaction.user.mention}). "
-                                 "Players get a warning in game chat.", ephemeral=False,
-                    view=CancelRestart(self, row))
-        self.restarts[row.shard_id] = asyncio.create_task(self._count_down(interaction, row, template),
-                                                          name=f"portcullis-restart-{row.shard_id[:8]}")
+        # Claimed before the first await below, so two members asking at once can't start two countdowns.
+        self.restart_pending.add(row.shard_id)
+        try:
+            if await self.players_online(row, QUICK_TIMEOUT) == 0:
+                await self.do_power(interaction, row, PowerAction.RESTART)
+                return
+            await self.ctx.audit.record("server.power.restart.warned", actor_id=interaction.user.id,
+                                        shard_id=row.shard_id)
+            first = WARN_STEPS[0][1]
+            await reply(interaction, f"Restarting **{escape(row.name)}** in {first} (asked by "
+                                     f"{interaction.user.mention}). Players get a warning in game chat.",
+                        ephemeral=False, view=CancelRestart(self, row))
+            self.restarts[row.shard_id] = asyncio.create_task(self._count_down(interaction, row, template),
+                                                              name=f"portcullis-restart-{row.shard_id[:8]}")
+        finally:
+            self.restart_pending.discard(row.shard_id)
 
     async def _count_down(self, interaction: discord.Interaction, row: ServerRow, template: str) -> None:
         try:
@@ -396,7 +417,8 @@ class ServerModule(Module):
             await self._update(interaction, f"Restarted **{escape(row.name)}** after warning players "
                                             f"(asked by {interaction.user.mention}).")
         finally:
-            self.restarts.pop(row.shard_id, None)
+            if self.restarts.get(row.shard_id) is asyncio.current_task():  # never a newer countdown's entry
+                self.restarts.pop(row.shard_id, None)
 
     @staticmethod
     async def _update(interaction: discord.Interaction, text: str) -> None:
@@ -415,15 +437,16 @@ class ServerModule(Module):
         task.cancel()
         await self.ctx.audit.record("server.power.restart.cancelled", actor_id=interaction.user.id,
                                     shard_id=row.shard_id)
+        # Answer the button first: Discord gives 3 seconds, and AMP may take longer than that.
+        await interaction.response.edit_message(
+            content=f"Restart of **{escape(row.name)}** cancelled by {interaction.user.mention}.", view=None,
+            allowed_mentions=NONE)
         template = await self.ctx.settings.get(SAY_KEY, scope=row.shard_id)
         if template:
             try:
                 await self.ctx.port.send_console(row.shard_id, fill(template, message="The restart is cancelled."))
             except Exception as exc:  # noqa: BLE001
                 log.info("could not tell players the restart is off: %s", exc)
-        await interaction.response.edit_message(
-            content=f"Restart of **{escape(row.name)}** cancelled by {interaction.user.mention}.", view=None,
-            allowed_mentions=NONE)
 
     # ---------------------------------------------------------------- power all
 
@@ -442,6 +465,8 @@ class ServerModule(Module):
                 continue
             if not await self.ctx.allowed(interaction.user, node, row.shard_id):
                 continue
+            if row.hidden and not await self.ctx.sees_hidden(interaction.user, row.shard_id):
+                continue  # a role granted "power" everywhere still doesn't get to see hidden servers
             state = self.ctx.live.states.get(row.shard_id, ServerState.UNKNOWN)
             if (power is PowerAction.START and state is ServerState.RUNNING) or \
                     (power is not PowerAction.START and state is ServerState.STOPPED):

@@ -19,7 +19,7 @@ import aiohttp
 from pydantic import BaseModel, TypeAdapter
 
 from portcullis_api.auth import TokenManager
-from portcullis_api.errors import AmpError, AuthExpired, Unreachable
+from portcullis_api.errors import AmpError, AuthExpired, Unreachable, parse_retry_after
 
 log = logging.getLogger(__name__)
 
@@ -83,6 +83,7 @@ class AmpTransport:
         max_concurrency: int = 8,
         safe_retries: int = 2,
         retry_backoff: float = 1.0,
+        max_rate_limit_wait: float = 10.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self._session = session
@@ -91,6 +92,9 @@ class AmpTransport:
         self._sem = asyncio.Semaphore(max_concurrency)
         self._safe_retries = safe_retries
         self._retry_backoff = retry_backoff
+        # A 429 on a safe call is retried after the wait AMP names, but only when that wait is this short.
+        # A longer one is raised as RateLimited with ``retry_after`` set, so the caller can say how long.
+        self._max_rate_limit_wait = max_rate_limit_wait
 
     async def _send(
         self,
@@ -101,7 +105,7 @@ class AmpTransport:
         json_body: Any,
         form: Mapping[str, str] | None,
         timeout: aiohttp.ClientTimeout,
-    ) -> tuple[int, str, str]:
+    ) -> tuple[int, str, str, float | None]:
         token = await self.auth.token()
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         url = self.base_url + path
@@ -110,8 +114,9 @@ class AmpTransport:
             method, url, params=params, json=json_body, data=form, headers=headers, timeout=timeout
         ) as resp:
             text = await resp.text()
+            wait = parse_retry_after(resp.headers.get("Retry-After")) if resp.status in (429, 503) else None
         log.debug("%s %s -> %s in %.0f ms", method, path, resp.status, (time.monotonic() - started) * 1000)
-        return resp.status, text, token
+        return resp.status, text, token, wait
 
     async def request(
         self,
@@ -136,7 +141,7 @@ class AmpTransport:
         attempt = 0
         while True:
             try:
-                status, text, token = await self._send(
+                status, text, token, wait = await self._send(
                     method, real_path, params=query, json_body=json_body, form=form, timeout=client_timeout
                 )
             except (aiohttp.ClientError, TimeoutError) as exc:  # a cut-off body too, not only a refused connect
@@ -155,10 +160,14 @@ class AmpTransport:
                 attempt += 1
                 await asyncio.sleep(self._retry_backoff * attempt)
                 continue
+            if status == 429 and attempt < retries and wait is not None and wait <= self._max_rate_limit_wait:
+                attempt += 1
+                await asyncio.sleep(wait)
+                continue
             break
 
         if status >= 400:
-            err = AmpError.from_response(status, self.auth.redactor.text(text), method, path)
+            err = AmpError.from_response(status, self.auth.redactor.text(text), method, path, retry_after=wait)
             if status == 401:
                 raise AuthExpired(err.message, status=401, method=method, path=path)
             raise err

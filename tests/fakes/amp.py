@@ -50,6 +50,7 @@ def _now() -> datetime:
 class FakeAmpPort:
     def __init__(self) -> None:
         self.grants: list[str] = [">"]
+        self.preview_expires: datetime | None = None
         self.servers: dict[ServerId, FakeServer] = {}
         self.sent: list[tuple[ServerId, str]] = []
         self.power_calls: list[tuple[ServerId, PowerAction]] = []
@@ -178,6 +179,9 @@ class FakeAmpPort:
     async def schedule_history(self, server: ServerId, schedule_id: str, limit: int = 10) -> list[ScheduleRun]:
         self._get(server)
         return list(self.schedule_runs.get(schedule_id, []))[:limit]
+
+    async def preview_expires_at(self) -> datetime | None:
+        return self.preview_expires
 
     async def permissions(self) -> list[str]:
         return list(self.grants)

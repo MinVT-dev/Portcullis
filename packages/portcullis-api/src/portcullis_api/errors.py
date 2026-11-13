@@ -9,7 +9,29 @@ AMP's own ``ApiError`` (``{"code", "params", "message"}``) and the analytics ``{
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
+
+
+def parse_retry_after(value: str | None, *, now: datetime | None = None) -> float | None:
+    """Seconds to wait from a ``Retry-After`` header: a number of seconds or an HTTP date. None if unusable."""
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            when = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=UTC)
+        seconds = (when - (now or datetime.now(UTC))).total_seconds()
+    if seconds != seconds or seconds < 0:  # NaN or already past
+        return 0.0 if seconds == seconds else None
+    return min(seconds, 86400.0)
 
 
 class AmpError(Exception):
@@ -24,6 +46,7 @@ class AmpError(Exception):
         body: Any = None,
         method: str | None = None,
         path: str | None = None,
+        retry_after: float | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -32,12 +55,14 @@ class AmpError(Exception):
         self.body = body
         self.method = method
         self.path = path
+        self.retry_after = retry_after  # seconds AMP asked callers to wait (Retry-After), when it said
 
     def __str__(self) -> str:
         where = f"{self.method} {self.path}: " if self.method else ""
         status = f"[{self.status}] " if self.status is not None else ""
         code = f" ({self.code})" if self.code else ""
-        return f"{where}{status}{self.message}{code}"
+        wait = f"; try again in {max(1, round(self.retry_after))} s" if self.retry_after is not None else ""
+        return f"{where}{status}{self.message}{code}{wait}"
 
     @staticmethod
     def parse_body(text: str) -> tuple[str | None, str | None, Any]:
@@ -64,7 +89,8 @@ class AmpError(Exception):
         return None, None, body
 
     @classmethod
-    def from_response(cls, status: int, text: str, method: str, path: str) -> AmpError:
+    def from_response(cls, status: int, text: str, method: str, path: str, *,
+                      retry_after: float | None = None) -> AmpError:
         code, message, body = cls.parse_body(text)
         kind: type[AmpError]
         if status == 400:
@@ -84,7 +110,8 @@ class AmpError(Exception):
         else:
             kind = AmpError
         return kind(
-            message or f"HTTP {status}", status=status, code=code, body=body, method=method, path=path
+            message or f"HTTP {status}", status=status, code=code, body=body, method=method, path=path,
+            retry_after=retry_after if status in (429, 503) else None,
         )
 
 
@@ -117,7 +144,7 @@ class Conflict(AmpError):
 
 
 class RateLimited(AmpError):
-    """429 (AMP only documents this for failed logins)."""
+    """429 (AMP only documents this for failed logins). ``retry_after`` holds the wait AMP asked for, if any."""
 
 
 class Unreachable(AmpError):

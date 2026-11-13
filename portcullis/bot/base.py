@@ -127,6 +127,14 @@ def valid_line(text: str) -> bool:
     return bool(_LINE.match(text))
 
 
+TEMPLATE_MAX = 200
+
+
+def valid_template(value: object) -> bool:
+    """A stored console command template or quick command: one line, no control characters, up to 200."""
+    return isinstance(value, str) and len(value) <= TEMPLATE_MAX and valid_line(value)
+
+
 def fill(template: str, **values: str) -> str:
     """``{name}``-style substitution without ``str.format`` (so templates can't reach attributes)."""
     for key, value in values.items():
@@ -172,6 +180,9 @@ class Ctx:
     client: discord.Client | None = None
     board: Any = None  # StatusBoard, set by Modules (it imports this module)
     expected_offline: dict[str, float] = field(default_factory=dict)
+    # Channel id -> when to ask Discord about it again. A deleted or closed channel is otherwise fetched
+    # (and refused) on every relay batch, alert and audit entry, which Discord counts against the bot.
+    missing_channels: dict[int, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.servers = ServerRepo(self.db)
@@ -270,7 +281,32 @@ class Ctx:
     async def channel(self, channel_id: int) -> Any:
         if self.client is None:
             raise RuntimeError("no Discord client")
-        return self.client.get_channel(channel_id) or await self.client.fetch_channel(channel_id)
+        cached = self.client.get_channel(channel_id)
+        if cached is not None:
+            self.missing_channels.pop(channel_id, None)
+            return cached
+        until = self.missing_channels.get(channel_id)
+        if until is not None and time.monotonic() < until:
+            raise ChannelUnavailable(channel_id)
+        try:
+            found = await self.client.fetch_channel(channel_id)
+        except (discord.NotFound, discord.Forbidden):
+            self.missing_channels[channel_id] = time.monotonic() + MISSING_CHANNEL_RETRY
+            raise
+        self.missing_channels.pop(channel_id, None)
+        return found
+
+
+MISSING_CHANNEL_RETRY = 600.0  # seconds before a channel Discord refused is looked up again
+
+
+class ChannelUnavailable(Exception):
+    """Discord said this channel is gone or closed to the bot a moment ago, so it wasn't asked again."""
+
+    def __init__(self, channel_id: int) -> None:
+        super().__init__(f"channel {channel_id} was missing or closed to the bot a moment ago; "
+                         f"checking again within {MISSING_CHANNEL_RETRY / 60:.0f} minutes")
+        self.channel_id = channel_id
 
 
 def code(text: str) -> str:
@@ -337,6 +373,13 @@ async def reply(interaction: discord.Interaction, content: str | None = None, *,
         await interaction.followup.send(content, **kwargs)
     else:
         await interaction.response.send_message(content, **kwargs)
+
+
+async def thinking(interaction: discord.Interaction, *, ephemeral: bool = True) -> None:
+    """Show "thinking…" unless the interaction was already answered. Discord drops an interaction that
+    gets no answer within 3 seconds, so call this before anything that waits on AMP."""
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=ephemeral, thinking=True)
 
 
 class Module:

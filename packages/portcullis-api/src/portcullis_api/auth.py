@@ -27,7 +27,15 @@ from typing import Any
 
 import aiohttp
 
-from portcullis_api.errors import AmpError, AuthExpired, AuthFailed, LoginNotSupported, Unreachable
+from portcullis_api.errors import (
+    AmpError,
+    AuthExpired,
+    AuthFailed,
+    LoginNotSupported,
+    RateLimited,
+    Unreachable,
+    parse_retry_after,
+)
 from portcullis_api.redact import Redactor
 
 log = logging.getLogger(__name__)
@@ -137,7 +145,7 @@ class TokenManager:
         # Every caller (each REST call, each hub reconnect) would otherwise retry the login, and AMP
         # answers repeated failed logins with 429 and can lock the account out.
         self.login_cooldown = login_cooldown
-        self._refused: tuple[datetime, AuthFailed] | None = None
+        self._refused: tuple[datetime, AmpError] | None = None
         # Counters, handy for /admin diagnostics and for tests.
         self.logins = 0
         self.renewals = 0
@@ -157,13 +165,19 @@ class TokenManager:
     # ------------------------------------------------------------------ HTTP
 
     async def _post(self, path: str, *, json_body: Any = None, bearer: str | None = None) -> tuple[int, str]:
+        status, text, _ = await self._post_with_wait(path, json_body=json_body, bearer=bearer)
+        return status, text
+
+    async def _post_with_wait(self, path: str, *, json_body: Any = None,
+                              bearer: str | None = None) -> tuple[int, str, float | None]:
+        """Like ``_post``, plus the seconds a ``Retry-After`` header asked for (None when there was none)."""
         headers = {"Accept": "application/json"}
         if bearer:
             headers["Authorization"] = f"Bearer {bearer}"
         url = self.base_url + path
         try:
             async with self._session.post(url, json=json_body, headers=headers, timeout=self._timeout) as resp:
-                return resp.status, await resp.text()
+                return resp.status, await resp.text(), parse_retry_after(resp.headers.get("Retry-After"))
         except (aiohttp.ClientError, TimeoutError) as exc:
             raise Unreachable(f"AMP did not answer: {type(exc).__name__}", method="POST", path=path) from exc
 
@@ -195,11 +209,12 @@ class TokenManager:
         }
         if self._refused is not None:
             until, refused = self._refused
-            if self._clock() < until:
-                raise AuthFailed(refused.message, status=refused.status, code=refused.code,
-                                 method="POST", path=LOGIN_PATH)
+            left = (until - self._clock()).total_seconds()
+            if left > 0:
+                raise type(refused)(refused.message, status=refused.status, code=refused.code, method="POST",
+                                    path=LOGIN_PATH, retry_after=left if isinstance(refused, RateLimited) else None)
             self._refused = None
-        status, text = await self._post(LOGIN_PATH, json_body=body)
+        status, text, wait = await self._post_with_wait(LOGIN_PATH, json_body=body)
         if status == 200:
             self._current = self._session_from(_json_or_none(text), LOGIN_PATH)
             self._stale = False
@@ -215,6 +230,14 @@ class TokenManager:
             )
             self._refused = (self._clock() + self.login_cooldown, refused)
             raise refused
+        if status == 429:
+            # AMP is rate-limiting logins. Asking again before the wait is over only extends it, so hold
+            # every caller off for as long as AMP said (at least the cooldown, at most an hour).
+            hold = min(max(wait or 0.0, self.login_cooldown.total_seconds()), 3600.0)
+            limited = RateLimited(f"AMP is rate-limiting logins: {err.message}", status=429, code=err.code,
+                                  method="POST", path=LOGIN_PATH, retry_after=hold)
+            self._refused = (self._clock() + timedelta(seconds=hold), limited)
+            raise limited
         raise err
 
     async def renew(self) -> SessionToken:
@@ -298,7 +321,7 @@ class TokenManager:
             except AuthFailed:
                 raise  # wrong password: retrying won't help and may trip AMP's 429
             except AmpError as exc:
-                wait = retry_delays[min(failures, len(retry_delays) - 1)]
+                wait = max(retry_delays[min(failures, len(retry_delays) - 1)], exc.retry_after or 0.0)
                 failures += 1
                 log.warning("Could not renew the AMP session (%s); retrying in %ss", exc, wait)
             await asyncio.sleep(wait)

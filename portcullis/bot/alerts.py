@@ -28,6 +28,9 @@ QUIET_FOR = 300.0  # at most one alert of a kind per server this often
 UNREACHABLE_AFTER = 180.0  # AMP must be unreachable this long before anyone is told
 SUSTAIN = 300.0  # load must stay high this long before it's an alert
 BACKUP_EVERY = timedelta(days=1)
+PREVIEW_CHECKED = "preview_checked_at"  # bot: when the preview-build expiry was last checked (ISO)
+PREVIEW_WARN_DAYS = 14  # start warning this many days before the AMP preview build stops working
+PREVIEW_PING_DAYS = 3  # and ping the alert role from this many days before
 BACKUP_TIMEOUT = 15.0
 
 
@@ -89,8 +92,41 @@ class Alerts:
                                "I'll post here when it is.", ping_role=as_id(await self.ctx.settings.get(ALERT_ROLE)))
 
     async def tick(self, now: datetime | None = None) -> None:
+        now = now or datetime.now(UTC)
         await self.check_load()
-        await self.check_backups(now or datetime.now(UTC))
+        await self.check_backups(now)
+        await self.check_preview(now)
+
+    async def _due(self, key: str, now: datetime, every: timedelta = BACKUP_EVERY) -> bool:
+        """True at most once per ``every``, across restarts. A stored time that can't be read counts as due."""
+        last = await self.ctx.settings.get(key)
+        try:
+            before = datetime.fromisoformat(last) if isinstance(last, str) else None
+            if before is not None and before.tzinfo is None:
+                before = before.replace(tzinfo=UTC)
+        except ValueError:
+            before = None
+        if before is not None and timedelta(0) <= now - before < every:
+            return False
+        await self.ctx.settings.set(key, now.isoformat(timespec="seconds"))
+        return True
+
+    async def check_preview(self, now: datetime) -> None:
+        """Once a day: warn when the AMP preview build is about to stop working. AMP reports the date itself."""
+        if not self.ctx.live.reachable or not await self._due(PREVIEW_CHECKED, now):
+            return
+        try:
+            expires = await asyncio.wait_for(self.ctx.port.preview_expires_at(), 8)
+        except Exception as exc:  # noqa: BLE001 - a build without this route just gets no warning
+            log.debug("could not read the preview expiry: %s", exc)
+            return
+        text = preview_warning(expires, now)
+        if text is None:
+            return
+        log.warning(text.replace("**", ""))
+        ping = expires is not None and (expires - now) <= timedelta(days=PREVIEW_PING_DAYS)
+        await self.ctx.post(ALERT_CHANNEL, f"⏳ {text}",
+                            ping_role=as_id(await self.ctx.settings.get(ALERT_ROLE)) if ping else None)
 
     async def check_load(self) -> None:
         for row in await self.ctx.servers.list():
@@ -134,10 +170,8 @@ class Alerts:
         days = await self.ctx.settings.get(BACKUP_DAYS)
         if not isinstance(days, int) or days <= 0:
             return
-        last = await self.ctx.settings.get(BACKUP_CHECKED)
-        if isinstance(last, str) and now - datetime.fromisoformat(last) < BACKUP_EVERY:
+        if not await self._due(BACKUP_CHECKED, now):
             return
-        await self.ctx.settings.set(BACKUP_CHECKED, now.isoformat(timespec="seconds"))
         cutoff = now - timedelta(days=days)
         lines = []
         for row in await self.ctx.servers.list(include_hidden=False):
@@ -154,6 +188,23 @@ class Alerts:
                              f"<t:{int(max(dated).timestamp())}:R>.")
         if lines:
             await self.ctx.post(ALERT_CHANNEL, f"🗄️ Backups older than {days} day(s):\n" + "\n".join(lines[:25]))
+
+
+def preview_warning(expires: datetime | None, now: datetime) -> str | None:
+    """What to tell admins about the AMP preview build's expiry, or None when it is far off or not a preview."""
+    if expires is None:
+        return None
+    left = expires - now
+    if left > timedelta(days=PREVIEW_WARN_DAYS):
+        return None
+    stamp = f"<t:{int(expires.timestamp())}:D>"
+    advice = ("Update AMP, then check the new build's API with spec-diff (docs/SETUP.md section 9) before "
+              "relying on Portcullis: a newer build can change the API.")
+    if left <= timedelta(0):
+        return f"**This AMP preview build expired on {stamp}.** AMP says it stops working then. {advice}"
+    days = left.days
+    soon = "in less than a day" if days == 0 else f"in {days} day{'s' if days != 1 else ''}"
+    return f"**This AMP preview build stops working {soon}** ({stamp}). {advice}"
 
 
 # Member actions that would only be noise in the audit channel.

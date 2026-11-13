@@ -216,7 +216,10 @@ class EventModule(Module):
 
     async def cancel(self, interaction: discord.Interaction, event_id: int) -> None:
         event = await self.ctx.events.get(event_id)
-        if event is None or not await self.require_mod(interaction, "event.cancel"):
+        if event is None:
+            await reply(interaction, "That event no longer exists.")
+            return
+        if not await self.require_mod(interaction, "event.cancel"):
             return
         if not await self.ctx.events.cancel(event_id):
             await reply(interaction, "That event is already cancelled.")

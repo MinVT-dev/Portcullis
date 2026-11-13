@@ -22,6 +22,7 @@ import asyncio
 import contextlib
 import logging
 import re
+import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -137,6 +138,9 @@ class ChannelBuffer:
         self.max_pending = max_pending
         self.skipped = 0
         self.ready = asyncio.Event()
+        self.failures = 0  # sends that failed in a row
+        self.muted_until = 0.0  # no sends before this (monotonic) time, after a failure
+        self.lost = False  # lines were dropped while the channel couldn't be posted to
 
     def add(self, kind: Kind, text: str) -> None:
         if len(self.items) >= self.max_pending:
@@ -153,7 +157,18 @@ class ChannelBuffer:
         if self.skipped:
             items.insert(0, ("text", f"*… {self.skipped} line(s) skipped because they came too fast*"))
             self.skipped = 0
+        if self.lost and items:
+            items.insert(0, ("text", "*… some lines are missing: I couldn't post in this channel for a while*"))
+            self.lost = False
         return pack(items)
+
+    def drop(self) -> None:
+        """Throw away what is pending (the channel can't be posted to right now)."""
+        if self.items:
+            self.lost = True
+        self.items.clear()
+        self.skipped = 0
+        self.ready.clear()
 
 
 def pack(items: list[tuple[Kind, str]]) -> list[str]:
@@ -196,7 +211,10 @@ class Relay:
         max_pending: int = 200,
         retry_min: float = 1.0,
         retry_max: float = 60.0,
+        send_retry_min: float = 30.0,
+        send_retry_max: float = 900.0,
         follow_all: bool = False,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.port = port
         self.sink = sink
@@ -205,6 +223,12 @@ class Relay:
         self.max_pending = max_pending
         self.retry_min = retry_min
         self.retry_max = retry_max
+        # After a failed send (a deleted channel, a missing permission) the channel is left alone for
+        # send_retry_min seconds, doubling up to send_retry_max. Hammering it earns nothing but
+        # log noise and "invalid request" strikes from Discord.
+        self.send_retry_min = send_retry_min
+        self.send_retry_max = send_retry_max
+        self._clock = clock
         self._targets: dict[ServerId, RelayTarget] = {}
         self._followers: dict[ServerId, asyncio.Task[None]] = {}
         self._buffers: dict[int, ChannelBuffer] = {}
@@ -340,11 +364,21 @@ class Relay:
             await self._send(buf)
 
     async def _send(self, buf: ChannelBuffer) -> None:
+        if self._clock() < buf.muted_until:
+            buf.drop()
+            return
         for text in buf.take():
             try:
                 await self.sink.send(buf.channel_id, text)
             except Exception as exc:  # noqa: BLE001 - a missing channel or permission must not stop the relay
-                log.warning("could not post to channel %s: %s", buf.channel_id, exc)
+                wait = min(self.send_retry_max, self.send_retry_min * 2 ** buf.failures)
+                buf.failures += 1
+                buf.muted_until = self._clock() + wait
+                buf.lost = True
+                log.warning("could not post to channel %s: %s. Leaving it alone for %.0f s; pick another "
+                            "channel in /setup if it was deleted.", buf.channel_id, exc, wait)
+                return
+            buf.failures = 0
 
     async def flush(self) -> None:
         """Send everything pending now (used at shutdown and in tests)."""

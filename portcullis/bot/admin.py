@@ -25,6 +25,8 @@ from portcullis.bot.base import (
     reply,
     short_error,
     state_text,
+    thinking,
+    valid_template,
     when,
 )
 from portcullis.bot.v3map import STATUS_LABELS, lookup, search
@@ -40,6 +42,22 @@ def version(dist: str) -> str:
         return dist_version(dist)
     except PackageNotFoundError:
         return "unknown"
+
+# Settings that hold console command templates (the keys /setup server writes).
+TEMPLATE_KEYS = frozenset({"whitelist_add", "whitelist_remove", "say", "kick", "ban", "unban"})
+_SERVER_TEXT = {"display_name": 64, "prefix": 16}  # column -> longest value an import may set
+
+
+def server_field_ok(key: str, value: object) -> bool:
+    """Whether an imported server field has the type its column expects."""
+    if value is None:
+        return key != "hidden"
+    if key == "hidden":
+        return isinstance(value, bool) or value in (0, 1)
+    if key in _SERVER_TEXT:
+        return isinstance(value, str) and len(value) <= _SERVER_TEXT[key] and "\n" not in value
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0  # channel and role ids
+
 
 STARTED = time.monotonic()
 STATS_DAYS = 30
@@ -288,6 +306,12 @@ class AdminModule(Module):
         if self.ctx.client is not None and self.ctx.client.latency == self.ctx.client.latency:  # not NaN
             embed.add_field(name="Discord latency", value=f"{self.ctx.client.latency * 1000:.0f} ms")
         embed.add_field(name="Database", value=f"schema version {self.ctx.db.version}")
+        try:
+            expires = await asyncio.wait_for(self.ctx.port.preview_expires_at(), 8)
+        except Exception:  # noqa: BLE001 - not every build has the route; the field is a courtesy
+            expires = None
+        if expires is not None:
+            embed.add_field(name="AMP preview build", value=f"stops working {discord.utils.format_dt(expires, 'R')}")
         await reply(interaction, embed=embed)
 
     async def permission_text(self) -> str:
@@ -340,6 +364,10 @@ class AdminModule(Module):
                 problems.append(f"skipped unknown server {shard_id}")
                 continue
             clean = {k: v for k, v in fields.items() if k in ServerRepo.EDITABLE}
+            bad = sorted(k for k, v in clean.items() if not server_field_ok(k, v))
+            for key in bad:
+                del clean[key]
+                problems.append(f"{shard_id}: skipped {key} (not a valid value)")
             try:
                 await self.ctx.servers.update(shard_id, **clean)
                 updated += 1
@@ -352,6 +380,10 @@ class AdminModule(Module):
                 if key in OWNER_ONLY_KEYS and not owner:
                     problems.append(f"skipped {key} ({scope}): only owners can import operator roles")
                     continue
+                if key in TEMPLATE_KEYS and not valid_template(value):
+                    # These are sent to the game's console, so a file gets the same check as the /setup form.
+                    problems.append(f"skipped {key} ({scope}): not a one-line command of up to 200 characters")
+                    continue
                 await self.ctx.settings.set(str(key), value, scope=str(scope), by=by)
                 written += 1
         return updated, written, problems
@@ -362,6 +394,7 @@ class AdminModule(Module):
         if file.size > MAX_IMPORT_BYTES:
             await reply(interaction, "That file is too big for a settings export.")
             return
+        await thinking(interaction)  # the download and the writes can take longer than Discord's 3 seconds
         try:
             data = json.loads(await file.read())
         except ValueError:

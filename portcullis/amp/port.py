@@ -13,7 +13,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
-from portcullis.amp.events import parse_hub_event, state_from, to_int
+from portcullis.amp.events import field_of, parse_hub_event, state_from, to_int
 from portcullis.core.types import (
     Backup,
     Player,
@@ -26,6 +26,7 @@ from portcullis.core.types import (
     ServerStatus,
 )
 from portcullis_api import models as m
+from portcullis_api.auth import parse_instant
 from portcullis_api.client import AmpClient
 from portcullis_api.errors import MissingCapability
 from portcullis_api.live import leave_shard, shard_tenant
@@ -204,6 +205,10 @@ class AmpServerPort:
         await calls[action](server)
 
     async def send_console(self, server: ServerId, line: str) -> None:
+        # The last check before AMP: a line break would let one command smuggle in a second one. Callers
+        # validate what members type, but templates can also arrive through /admin import.
+        if not line or any(ord(c) < 32 or ord(c) == 127 for c in line):
+            raise ValueError("a console command must be one line without control characters")
         await self.client.shards.post_shards_console(server, m.ConsoleInputBody(command=line))
 
     async def recent_console(self, server: ServerId, limit: int = 50) -> list[str]:
@@ -282,6 +287,13 @@ class AmpServerPort:
         """The bot account's grant strings. ``">"`` means everything (seen on an admin account)."""
         mine = await self.client.my_account.get_me_permissions()
         return list(mine.grants)
+
+    async def preview_expires_at(self) -> datetime | None:
+        # Read as plain JSON, not as the generated AppStatus: the spec types ``daysRemaining`` as a
+        # required number but documents it as null until AMP has verified the time.
+        status = await self.client.transport.request("GET", "/api/Health/status")
+        expires = field_of(field_of(status, "preview"), "expiresAt")
+        return parse_instant(expires) if isinstance(expires, str) else None
 
     async def close(self) -> None:
         await self.hub.close()
