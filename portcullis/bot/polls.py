@@ -12,7 +12,7 @@ from typing import Any
 import discord
 from discord import app_commands
 
-from portcullis.bot.base import NONE, Ctx, Module, card, reply, when
+from portcullis.bot.base import MUTED, NONE, Ctx, Module, card, reply, when
 from portcullis.core.relay import escape
 from portcullis.db.features import Poll
 
@@ -35,7 +35,7 @@ def poll_embed(poll: Poll, tally: dict[int, int]) -> discord.Embed:
         filled = round(BAR * votes / total) if total else 0
         lines.append(f"**{i + 1}. {escape(option)}**\n`{'█' * filled}{'░' * (BAR - filled)}` {votes}")
     embed = card(title=poll.question[:256], description="\n".join(lines),
-                          colour=0x7F8C8D if poll.closed else 0x3498DB)
+                          colour=MUTED if poll.closed else 0x3498DB)
     if poll.closed:
         footer = f"Closed · {total} vote(s)"
     elif poll.closes_at:

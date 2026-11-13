@@ -9,10 +9,10 @@
 </p>
 
 <p align="center">
-  <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-5CE1FF?labelColor=0F1629">
-  <img alt="AMP 3 preview" src="https://img.shields.io/badge/AMP-3%20preview-5CE1FF?labelColor=0F1629">
-  <img alt="Bot licence AGPL-3.0" src="https://img.shields.io/badge/bot-AGPL--3.0-EEF3FB?labelColor=0F1629">
-  <img alt="API licence MIT" src="https://img.shields.io/badge/portcullis--api-MIT-EEF3FB?labelColor=0F1629">
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-FFB547?labelColor=0E1424">
+  <img alt="AMP 3 preview" src="https://img.shields.io/badge/AMP-3%20preview-FFB547?labelColor=0E1424">
+  <img alt="Bot licence AGPL-3.0" src="https://img.shields.io/badge/bot-AGPL--3.0-EEF2FA?labelColor=0E1424">
+  <img alt="API licence MIT" src="https://img.shields.io/badge/portcullis--api-MIT-EEF2FA?labelColor=0E1424">
 </p>
 
 ---

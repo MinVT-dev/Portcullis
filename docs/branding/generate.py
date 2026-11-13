@@ -1,12 +1,10 @@
-"""Portcullis brand v3: the gate tower. Text is converted to outlines.
+"""Portcullis brand v3: a pointed gate arch with a real lattice, lit from below.
 
-Usage:
-    python3 generate.py OUT_DIR FONT_DIR          # SVGs only
-    python3 generate.py OUT_DIR FONT_DIR --png    # also png/, preview.png and the bot's fallback art
+Usage: python3 generate.py OUT_DIR FONT_DIR
 
-FONT_DIR holds the variable fonts from github.com/google/fonts, as named there:
-``Sora[wght].ttf`` (ofl/sora) and ``Roboto[wdth,wght].ttf`` (ofl/roboto). Needs ``fonttools``;
-``--png`` also needs ``cairosvg``. Run it from the repo root with OUT_DIR = docs/branding.
+FONT_DIR holds ChakraPetch-Bold.ttf and ChakraPetch-Regular.ttf from Google Fonts
+(SIL Open Font License). Text is converted to outlines, so the SVGs need no fonts.
+Needs fonttools.
 """
 
 import math
@@ -16,112 +14,81 @@ import sys
 from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
-from fontTools.varLib import instancer
 
 OUT = pathlib.Path(sys.argv[1])
 FONTS = pathlib.Path(sys.argv[2])
-PNG = "--png" in sys.argv[3:]
 OUT.mkdir(parents=True, exist_ok=True)
 
-# ---------------------------------------------------------------- palette
-NAVY = "#0F1629"  # background and the gate opening
-NAVY_2 = "#18223F"  # lifted background
-WHITE = "#EEF3FB"  # the gate, text
-GREY = "#A9B4CB"  # secondary text
-LINE = "#8CAADC"  # hairlines, pill borders (low opacity)
-SKY = "#5CE1FF"  # tower gradient, top
-BLUE = "#4C6BFF"  # tower gradient, bottom
-CYAN = "#4AD6FF"  # brand light under the gate
-GREEN = "#4ADE80"  # online
-RED = "#FF5A5F"  # offline
-STONE = ("#C3CBDA", "#7D879C")  # neutral tower for the game placeholder
+BOLD = "ChakraPetch-Bold.ttf"
+TEXT = "ChakraPetch-Regular.ttf"
+
+# Palette. Night navy and stone white, with torchlight amber as the one accent.
+# Amber (not cyan) keeps clear distance from CubeCoders' own colours.
+NIGHT = "#0E1424"
+NIGHT_2 = "#18213A"
+STONE = "#EEF2FA"
+MIST = "#9AA6BD"
+LINE = "#8FA3C8"
+TORCH = "#FFB547"
+EMBER = "#FF7A2F"
+GREEN = "#4ADE80"
+RED = "#FF5A5F"
 
 # ---------------------------------------------------------------- the mark
-# 64-unit grid. A gate tower: a solid block with three merlons, a pointed arch cut through it,
-# and the portcullis hanging inside the arch with a 2.5-unit gap all round so it reads as its own
-# piece at 32 px. Raised, light shows under its spikes (cyan for the brand, green for online).
-# Lowered, the spikes reach the ground and a red sill shows: offline.
-L, R, TOP, NOTCH, BASE = 9.0, 55.0, 7.0, 13.0, 58.0
-MERLON, GAP_X = 10.0, 6.5
-ARCH = (20.0, 44.0, 35.0, 17.0)  # x0, x1, springline, radius of each arc
-INSET = 2.5
-BAR_W, BAR_X = 4.0, (25.5, 32.0, 38.5)
-RAIL_Y, RAIL_H = 31.0, 4.0
-SPIKE_TOP, SPIKE_TIP = 43.0, 47.5
-DROP = 9.5  # how far the lowered gate drops: its tips then touch the ground
+# 64x64 grid. A pointed (two-centred) arch, 6.5 units thick, with a lattice of
+# three spiked bars and two rails hanging inside it. Raised, light shows under
+# the spikes; lowered, the spikes reach the ground and a sill lights up.
+FRAME_W = 6.5
+SPRING = 30.0  # where the walls turn into the arch
+R_OUT = 26.0
+ARCH = f"M10 58 V{SPRING} A{R_OUT} {R_OUT} 0 0 1 32 4.3 A{R_OUT} {R_OUT} 0 0 1 54 {SPRING} V58"
+INNER = "M16 58 V31 A20 20 0 0 1 32 11.5 A20 20 0 0 1 48 31 V58 Z"
+BAR_X = (22.5, 32.0, 41.5)
+BAR_W = 5.5
+RAIL_H = 5.0
 
 
-def arch(x0, x1, spring, r, base=BASE):
-    """A pointed (two-centred) arch from the ground up. Returns the SVG path."""
-    mid = (x0 + x1) / 2
-    rise = math.sqrt(r * r - (r - (mid - x0)) ** 2)
-    apex = spring - rise
-    return f"M{x0} {base} V{spring} A{r} {r} 0 0 1 {mid} {apex:.3f} A{r} {r} 0 0 1 {x1} {spring} V{base} Z"
-
-
-TOWER = (
-    f"M{L} {BASE} V{TOP} H{L + MERLON} V{NOTCH} H{L + MERLON + GAP_X} V{TOP} "
-    f"H{R - MERLON - GAP_X} V{NOTCH} H{R - MERLON} V{TOP} H{R} V{BASE} Z"
-)
-OPENING = arch(*ARCH)
-INNER = arch(ARCH[0] + INSET, ARCH[1] - INSET, ARCH[2], ARCH[3] - INSET)
-
-
-def mark(p, *, mono=None, light=None, lowered=False, stone=None):
-    """The mark in 64-unit space. ``mono`` draws it in one colour with a see-through arch; otherwise the
-    tower has the brand gradient (or ``stone``) and the arch is navy. ``p`` prefixes ids."""
-    top, bottom = stone or (SKY, BLUE)
-    defs = (
-        f'<linearGradient id="{p}t" x1="0" y1="0" x2="0.35" y2="1">'
-        f'<stop offset="0" stop-color="{top}"/><stop offset="1" stop-color="{bottom}"/></linearGradient>'
-        f'<clipPath id="{p}a"><path d="{INNER}"/></clipPath>'
+def mark(p, fg=STONE, light=TORCH, lowered=False):
+    """SVG for the mark in 64-unit space. p prefixes ids so several marks can share a file."""
+    d = 10.0 if lowered else 0.0
+    bars = "".join(
+        f'<path d="M{x - BAR_W / 2} 0 H{x + BAR_W / 2} V{42 + d} L{x} {48 + d} L{x - BAR_W / 2} {42 + d} Z"/>'
+        for x in BAR_X
     )
+    rails = "".join(f'<rect x="0" y="{y + d}" width="64" height="{RAIL_H}"/>' for y in (20, 32))
+    defs = f'<clipPath id="{p}c"><path d="{INNER}"/></clipPath>'
+    glow = ""
     if light and not lowered:
         defs += (
-            f'<linearGradient id="{p}l" x1="0" y1="0" x2="0" y2="1">'
+            f'<linearGradient id="{p}g" x1="0" y1="0" x2="0" y2="1">'
             f'<stop offset="0" stop-color="{light}" stop-opacity="0"/>'
-            f'<stop offset="1" stop-color="{light}" stop-opacity="1"/></linearGradient>'
+            f'<stop offset="1" stop-color="{light}"/></linearGradient>'
         )
-    out = f"<defs>{defs}</defs>"
-    out += f'<path fill-rule="evenodd" fill="{mono or f"url(#{p}t)"}" d="{TOWER} {OPENING}"/>'
-    if not mono:
-        out += f'<path fill="{NAVY}" d="{OPENING}"/>'
-    d = DROP if lowered else 0.0
-    gate = ""
-    if light and not lowered:
-        gate += (f'<rect x="{ARCH[0]}" y="{SPIKE_TOP}" width="{ARCH[1] - ARCH[0]}" height="{BASE - SPIKE_TOP}" '
-                 f'fill="url(#{p}l)"/>')
-    for cx in BAR_X:
-        h = BAR_W / 2
-        gate += f'<path d="M{cx - h} 0 H{cx + h} V{SPIKE_TOP + d} L{cx} {SPIKE_TIP + d} L{cx - h} {SPIKE_TOP + d} Z"/>'
-    gate += f'<rect x="{ARCH[0]}" y="{RAIL_Y + d}" width="{ARCH[1] - ARCH[0]}" height="{RAIL_H}"/>'
-    out += f'<g clip-path="url(#{p}a)" fill="{mono or WHITE}">{gate}</g>'
+        glow = f'<rect x="0" y="42" width="64" height="16" fill="url(#{p}g)" clip-path="url(#{p}c)"/>'
+    sill = ""
     if light and lowered:
-        out += f'<rect x="{L}" y="{BASE + 1.5}" width="{R - L}" height="3" fill="{light}"/>'
-    return out
+        sill = f'<rect x="6.75" y="59.5" width="50.5" height="3" rx="1.5" fill="{light}"/>'
+    return (
+        f"<defs>{defs}</defs>{glow}"
+        f'<g fill="{fg}" clip-path="url(#{p}c)">{bars}{rails}</g>'
+        f'<path d="{ARCH}" fill="none" stroke="{fg}" stroke-width="{FRAME_W}" stroke-linejoin="round"/>'
+        f"{sill}"
+    )
+
+
+def place(inner, x, y, size):
+    return f'<g transform="translate({x:.2f} {y:.2f}) scale({size / 64:.5f})">{inner}</g>'
 
 
 # ---------------------------------------------------------------- text as paths
 _fonts = {}
 
 
-def font(name):
-    if name not in _fonts:
-        if name == "sora":
-            _fonts[name] = instancer.instantiateVariableFont(TTFont(FONTS / "Sora[wght].ttf"), {"wght": 800})
-        elif name == "roboto":
-            _fonts[name] = instancer.instantiateVariableFont(TTFont(FONTS / "Roboto[wdth,wght].ttf"),
-                                                             {"wght": 400, "wdth": 100})
-        else:
-            raise KeyError(name)
-    return _fonts[name]
-
-
-def text_path(face, text, size, x, y, tracking=0.0, fill=WHITE):
-    """Outline ``text`` with its baseline at (x, y). Returns (svg, width)."""
-    f = font(face)
-    gs, cmap, hmtx = f.getGlyphSet(), f.getBestCmap(), f["hmtx"]
-    scale = size / f["head"].unitsPerEm
+def text_path(font_file, text, size, x, y, tracking=0.0, fill=STONE):
+    """Outline `text` with its baseline at (x, y). Returns (svg, width)."""
+    font = _fonts.setdefault(font_file, TTFont(FONTS / font_file))
+    gs, cmap, hmtx = font.getGlyphSet(), font.getBestCmap(), font["hmtx"]
+    scale = size / font["head"].unitsPerEm
     cursor, out = 0.0, []
     for ch in text:
         name = cmap[ord(ch)]
@@ -132,183 +99,142 @@ def text_path(face, text, size, x, y, tracking=0.0, fill=WHITE):
     return f'<path fill="{fill}" d="{" ".join(out)}"/>', cursor - tracking
 
 
-def svg(w, h, label, body, bg=None):
-    rect = f'<rect width="{w}" height="{h}" fill="{bg}"/>' if bg else ""
+def svg(w, h, label, body):
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" '
-        f'role="img" aria-label="{label}"><title>{label}</title>{rect}{body}</svg>\n'
+        f'role="img" aria-label="{label}"><title>{label}</title>{body}</svg>\n'
     )
 
 
-def place(inner, x, y, size):
-    return f'<g transform="translate({x:.2f} {y:.2f}) scale({size / 64})">{inner}</g>'
+# ---------------------------------------------------------------- pieces
+CAP = 0.70  # Chakra Petch cap height, in em
+WORD = "PORTCULLIS"
 
 
-# ---------------------------------------------------------------- assets
-def icon(p, *, lowered=False, light=CYAN, stone=None, size=512):
-    """Full-bleed square for avatars. Discord crops to a circle, so the mark stays inside the middle 66%."""
-    return (
-        f'<defs><radialGradient id="{p}bg" cx="0.5" cy="0.3" r="0.8">'
-        f'<stop offset="0" stop-color="{NAVY_2}"/><stop offset="1" stop-color="{NAVY}"/></radialGradient></defs>'
-        f'<rect width="{size}" height="{size}" fill="url(#{p}bg)"/>'
-        + place(mark(p, lowered=lowered, light=light, stone=stone), size * 0.17, size * 0.15, size * 0.66)
-    )
-
-
-def lockup(p, fg, sub, x, y, mark_size, text_size, *, mono=None, tagline=None, tag_size=None):
-    """Mark and wordmark side by side. Returns (svg, width)."""
-    out = place(mark(p, mono=mono), x, y, mark_size)
-    base = y + mark_size * (BASE / 64)
-    tx = x + mark_size * (R + 7) / 64
-    word, ww = text_path("sora", "Portcullis", text_size, tx, base - mark_size * 0.06,
-                         tracking=-text_size * 0.01, fill=fg)
-    out += word
-    width = tx - x + ww
+def lockup(p, fg, sub, mark_size, tagline=None, accent=TORCH):
+    """Mark + wordmark, top-left at (0, 0). Returns (svg, width)."""
+    text_size = mark_size * 0.62
+    tracking = text_size * 0.06
+    gap = mark_size * 0.22
+    m = place(mark(p, fg=fg, light=accent), 0, 0, mark_size)
+    # Centre the caps (or caps + tagline) on the arch body, y 10..58 of 64.
+    body_mid = mark_size * (34 / 64)
+    cap_h = text_size * CAP
+    base = body_mid - mark_size * 0.04 if tagline else body_mid + cap_h / 2
+    tx = mark_size * (58 / 64) + gap
+    word, ww = text_path(BOLD, WORD, text_size, tx, base, tracking=tracking, fill=fg)
+    out, width = m + word, tx + ww
     if tagline:
-        t, tw = text_path("roboto", tagline, tag_size, tx + text_size * 0.03, base + tag_size * 1.55, fill=sub)
+        tag_size = text_size * 0.42
+        t, tw = text_path(TEXT, tagline, tag_size, tx + text_size * 0.03, base + tag_size * 1.75, fill=sub)
         out += t
-        width = max(width, tx - x + tw)
+        width = max(width, tx + tw)
     return out, width
 
 
-def dots(w, h, step, opacity):
-    """A faint dot grid behind banners."""
-    return (
-        f'<defs><pattern id="dots{w}x{h}" width="{step}" height="{step}" patternUnits="userSpaceOnUse">'
-        f'<circle cx="{step / 2}" cy="{step / 2}" r="1.2" fill="{LINE}" fill-opacity="{opacity}"/></pattern></defs>'
-        f'<rect width="{w}" height="{h}" fill="url(#dots{w}x{h})"/>'
-    )
+def lattice_bg(w, h, cell, opacity):
+    """Faint portcullis lattice across the background."""
+    d = " ".join(f"M{x} 0 V{h}" for x in range(0, w + cell, cell))
+    d += " " + " ".join(f"M0 {y} H{w}" for y in range(0, h + cell, cell))
+    return f'<path d="{d}" stroke="{LINE}" stroke-opacity="{opacity}" stroke-width="1" fill="none"/>'
 
 
-def pills(labels, size):
-    """Feature pills in a row. Returns (svg, width)."""
-    out, cx = [], 0.0
-    for label in labels:
-        t, tw = text_path("roboto", label, size, 0, 0, fill=WHITE)
-        pw, ph = tw + size * 1.8, size * 2.1
-        out.append(
-            f'<g transform="translate({cx:.1f} 0)"><rect width="{pw:.1f}" height="{ph:.1f}" rx="{ph / 2:.1f}" '
-            f'fill="#FFFFFF" fill-opacity="0.05" stroke="{LINE}" stroke-opacity="0.35" stroke-width="1.5"/>'
-            f'<g transform="translate({size * 0.9:.1f} {ph / 2 + size * 0.36:.1f})">{t}</g></g>'
-        )
-        cx += pw + size * 0.7
-    return "".join(out), cx - size * 0.7
-
-
-def backdrop(w, h, p, glow_x, glow_y):
+def backdrop(w, h, p, gx, gy, glow=TORCH, grid=48):
+    """Night background, faint lattice, warm light rising from below the focal point."""
     return (
         f'<defs><radialGradient id="{p}glow" cx="0.5" cy="0.5" r="0.5">'
-        f'<stop offset="0" stop-color="{BLUE}" stop-opacity="0.30"/>'
-        f'<stop offset="0.6" stop-color="{SKY}" stop-opacity="0.06"/>'
-        f'<stop offset="1" stop-color="{SKY}" stop-opacity="0"/></radialGradient>'
-        f'<linearGradient id="{p}bar" x1="0" y1="0" x2="1" y2="0">'
-        f'<stop offset="0" stop-color="{SKY}"/><stop offset="1" stop-color="{BLUE}"/></linearGradient></defs>'
-        f'<rect width="{w}" height="{h}" fill="{NAVY}"/>'
-        + dots(w, h, 28, 0.16)
-        + f'<ellipse cx="{glow_x}" cy="{glow_y}" rx="{w * 0.5}" ry="{h * 0.7}" fill="url(#{p}glow)"/>'
-        + f'<rect y="{h - 5}" width="{w}" height="5" fill="url(#{p}bar)"/>'
+        f'<stop offset="0" stop-color="{glow}" stop-opacity="0.22"/>'
+        f'<stop offset="0.6" stop-color="{EMBER if glow == TORCH else glow}" stop-opacity="0.05"/>'
+        f'<stop offset="1" stop-color="{glow}" stop-opacity="0"/></radialGradient>'
+        f'<linearGradient id="{p}v" x1="0" y1="0" x2="0" y2="1">'
+        f'<stop offset="0" stop-color="{NIGHT}" stop-opacity="0.85"/>'
+        f'<stop offset="1" stop-color="{NIGHT}" stop-opacity="0"/></linearGradient></defs>'
+        f'<rect width="{w}" height="{h}" fill="{NIGHT}"/>'
+        + lattice_bg(w, h, grid, 0.06)
+        + f'<rect width="{w}" height="{h}" fill="url(#{p}v)"/>'
+        + f'<ellipse cx="{gx}" cy="{gy}" rx="{w * 0.42}" ry="{h * 0.55}" fill="url(#{p}glow)"/>'
     )
 
 
+def big_gate(p, x, y, size, opacity=0.08):
+    """A huge, faint gate silhouette used as a background motif."""
+    return f'<g opacity="{opacity}">{place(mark(p, fg=STONE, light=None), x, y, size)}</g>'
+
+
+def icon(p, light=TORCH, lowered=False, size=512):
+    """Full-bleed square for avatars and thumbnails. Discord crops to a circle, so the
+    mark stays inside the middle 66%."""
+    s = size
+    return (
+        f'<defs><radialGradient id="{p}bg" cx="0.5" cy="0.4" r="0.7">'
+        f'<stop offset="0" stop-color="{NIGHT_2}"/><stop offset="1" stop-color="{NIGHT}"/></radialGradient>'
+        f'<radialGradient id="{p}lt" cx="0.5" cy="0.5" r="0.5">'
+        f'<stop offset="0" stop-color="{light}" stop-opacity="0.28"/>'
+        f'<stop offset="1" stop-color="{light}" stop-opacity="0"/></radialGradient></defs>'
+        f'<rect width="{s}" height="{s}" fill="url(#{p}bg)"/>'
+        f'<ellipse cx="{s / 2}" cy="{s * 0.86}" rx="{s * 0.46}" ry="{s * 0.24}" fill="url(#{p}lt)"/>'
+        + place(mark(p, light=light, lowered=lowered), s * 0.17, s * 0.15, s * 0.66)
+    )
+
+
+def features(items, x, y, size, color=STONE):
+    """Inline feature list separated by small amber diamonds. Returns (svg, width)."""
+    out, cx = [], x
+    for i, label in enumerate(items):
+        if i:
+            r = size * 0.18
+            mx, my = cx + size * 0.7, y - size * 0.33
+            out.append(f'<path d="M{mx} {my - r} L{mx + r} {my} L{mx} {my + r} L{mx - r} {my} Z" fill="{TORCH}"/>')
+            cx += size * 1.4
+        t, tw = text_path(TEXT, label, size, cx, y, fill=color)
+        out.append(t)
+        cx += tw
+    return "".join(out), cx - x
+
+
+# ---------------------------------------------------------------- assets
 TAG = "Your game servers, in Discord."
 FEATURES = ["Server status", "Join & leave alerts", "Chat bridge", "Backups"]
 
 files = {}
 files["portcullis-mark.svg"] = svg(64, 64, "Portcullis mark", mark("m"))
-files["portcullis-mark-light.svg"] = svg(64, 64, "Portcullis mark, one colour (for dark backgrounds)",
-                                         mark("ml", mono=WHITE))
-files["portcullis-mark-dark.svg"] = svg(64, 64, "Portcullis mark, one colour (for light backgrounds)",
-                                        mark("md", mono=NAVY))
+files["portcullis-mark-dark.svg"] = svg(64, 64, "Portcullis mark (for light backgrounds)", mark("md", fg=NIGHT))
 files["portcullis-icon.svg"] = svg(512, 512, "Portcullis icon", icon("i"))
 files["portcullis-status-online.svg"] = svg(512, 512, "Portcullis: server online", icon("on", light=GREEN))
-files["portcullis-status-offline.svg"] = svg(512, 512, "Portcullis: server offline",
-                                             icon("off", lowered=True, light=RED))
+files["portcullis-status-offline.svg"] = svg(
+    512, 512, "Portcullis: server offline", icon("off", light=RED, lowered=True)
+)
 
-lk, lw = lockup("l", WHITE, GREY, 0, 2, 128, 96)
-files["portcullis-logo.svg"] = svg(int(lw) + 4, 132, "Portcullis logo", lk)
-lk, lw = lockup("ld", NAVY, "#4A5670", 0, 2, 128, 96)
-files["portcullis-logo-dark.svg"] = svg(int(lw) + 4, 132, "Portcullis logo (for light backgrounds)", lk)
+lk, lw = lockup("l", STONE, MIST, 128)
+files["portcullis-logo.svg"] = svg(math.ceil(lw) + 4, 132, "Portcullis logo", lk)
+lk, lw = lockup("ld", NIGHT, "#4A5670", 128)
+files["portcullis-logo-dark.svg"] = svg(math.ceil(lw) + 4, 132, "Portcullis logo (for light backgrounds)", lk)
 
-# 1280x640: GitHub social preview, release posts.
-lk, lw = lockup("b", WHITE, GREY, 0, 0, 200, 150, tagline=TAG, tag_size=38)
-body = backdrop(1280, 640, "b", 640, 250)
-body += f'<g transform="translate({(1280 - lw) / 2:.1f} 140)">{lk}</g>'
-pill_svg, pw = pills(FEATURES, 22)
-body += f'<g transform="translate({(1280 - pw) / 2:.1f} 468)">{pill_svg}</g>'
+# 1280x640: GitHub social preview and release posts. Lockup on the left, a huge
+# faint gate on the right, warm light rising behind it.
+body = backdrop(1280, 640, "b", 960, 560)
+body += big_gate("bg", 700, 40, 640, 0.07)
+lk, lw = lockup("b", STONE, MIST, 168, tagline=TAG)
+bx = 96
+body += f'<g transform="translate({bx} 160)">{lk}</g>'
+body += f'<rect x="{bx + 4}" y="384" width="72" height="4" fill="{TORCH}"/>'
+body += features(FEATURES, bx + 4, 434, 24, color=MIST)[0]
 files["portcullis-banner.svg"] = svg(1280, 640, "Portcullis banner", body)
 
-# 680x240 Discord profile banner: the avatar covers the bottom left, so the lockup sits right of
-# centre and the left third stays plain.
-lk, lw = lockup("d", WHITE, GREY, 0, 0, 84, 62, tagline=TAG, tag_size=17)
-body = backdrop(680, 240, "d", 480, 110)
-body += f'<g transform="translate({680 - lw - 44:.1f} 50)">{lk}</g>'
+# 680x240 Discord profile banner. The avatar overlaps the bottom-left, so the
+# left third stays plain and the lockup sits on the right.
+body = backdrop(680, 240, "d", 520, 230, grid=24)
+body += big_gate("dg", 430, -10, 260, 0.06)
+lk, lw = lockup("d", STONE, MIST, 72, tagline=TAG)
+body += f'<g transform="translate({680 - lw - 40:.1f} 70)">{lk}</g>'
 files["portcullis-discord-banner.svg"] = svg(680, 240, "Portcullis Discord profile banner", body)
 
-# Placeholders for games with no art (docs/GAME_ASSETS.md): no text, a neutral stone tower so they
-# don't read as the bot's own avatar. The banner is a Steam header at 2x (920x430).
-body = backdrop(920, 430, "gb", 460, 215) + place(mark("gb", stone=STONE), 460 - 115, 215 - 125, 230)
+# Fallbacks for games with no art (see docs/GAME_ASSETS.md). No text, so one image
+# serves every game. Neutral grey light so it doesn't read as the bot's own avatar.
+body = backdrop(920, 430, "gb", 460, 400, glow=MIST) + place(mark("gb", light=MIST), 460 - 115, 215 - 125, 230)
 files["portcullis-game-banner.svg"] = svg(920, 430, "Game banner placeholder", body)
-files["portcullis-game-logo.svg"] = svg(512, 512, "Game logo placeholder", icon("gl", light=None, stone=STONE))
+files["portcullis-game-logo.svg"] = svg(512, 512, "Game logo placeholder", icon("gl", light=MIST))
 
 for name, content in files.items():
     (OUT / name).write_text(content)
 print("written", sorted(files))
-
-if PNG:
-    import cairosvg
-
-    png_dir = OUT / "png"
-    png_dir.mkdir(exist_ok=True)
-    sizes = {
-        "portcullis-icon": 1024, "portcullis-status-online": 256, "portcullis-status-offline": 256,
-        "portcullis-banner": 1280, "portcullis-discord-banner": 1360, "portcullis-logo": 1200,
-        "portcullis-logo-dark": 1200, "portcullis-mark": 512, "portcullis-mark-light": 512,
-        "portcullis-mark-dark": 512,
-    }
-    for stem, width in sizes.items():
-        cairosvg.svg2png(bytestring=files[stem + ".svg"].encode(), write_to=str(png_dir / f"{stem}.png"),
-                         output_width=width)
-    fallback = OUT.parent.parent / "portcullis" / "assets" / "fallback"
-    if fallback.is_dir():
-        cairosvg.svg2png(bytestring=files["portcullis-game-banner.svg"].encode(),
-                         write_to=str(fallback / "game-banner.png"), output_width=920)
-        cairosvg.svg2png(bytestring=files["portcullis-game-logo.svg"].encode(),
-                         write_to=str(fallback / "game-logo.png"), output_width=512)
-
-    def at(name, x, y, w):
-        """Embed one generated SVG at (x, y), ``w`` wide. Returns (svg, height)."""
-        inner = files[name].split(">", 1)[1].rsplit("</svg>", 1)[0]
-        vb = files[name].split('viewBox="', 1)[1].split('"', 1)[0].split()
-        s = w / float(vb[2])
-        return f'<g transform="translate({x} {y}) scale({s:.5f})">{inner}</g>', float(vb[3]) * s
-
-    # preview.png: every asset on one sheet.
-    parts, y = [], 20
-    g, h = at("portcullis-banner.svg", 20, y, 1280)
-    parts.append(g)
-    y += h + 20
-    g, h2 = at("portcullis-discord-banner.svg", 20, y, 680)
-    parts.append(g)
-    for i, name in enumerate(("portcullis-icon.svg", "portcullis-status-online.svg",
-                              "portcullis-status-offline.svg")):
-        x, yy = 730, y + i * 82
-        for s in (72, 48, 32, 16):
-            inner, _ = at(name, x, yy + 36 - s / 2, s)
-            parts.append(f'<defs><clipPath id="pc{i}{s}"><circle cx="{x + s / 2}" cy="{yy + 36}" r="{s / 2}"/>'
-                         f'</clipPath></defs><g clip-path="url(#pc{i}{s})">{inner}</g>')
-            x += s + 18
-        label, _ = text_path("roboto", name[11:-4], 15, x + 4, yy + 41, fill=GREY)
-        parts.append(label)
-    y += max(h2, 3 * 82) + 20
-    parts.append(f'<rect x="20" y="{y}" width="630" height="150" fill="{NAVY}"/>')
-    parts.append(f'<rect x="670" y="{y}" width="630" height="150" fill="#FFFFFF"/>')
-    for bx, logo, mono in ((20, "portcullis-logo.svg", "portcullis-mark-light.svg"),
-                           (670, "portcullis-logo-dark.svg", "portcullis-mark-dark.svg")):
-        for name, dx, dy, w in (("portcullis-mark.svg", 24, 31, 88), (mono, 128, 51, 48),
-                                ("portcullis-mark.svg", 192, 59, 32), (logo, 250, 52, 350)):
-            g, _ = at(name, bx + dx, y + dy, w)
-            parts.append(g)
-    y += 170
-    sheet = svg(1320, int(y), "Portcullis brand preview", "".join(parts), bg="#2B2D31")
-    cairosvg.svg2png(bytestring=sheet.encode(), write_to=str(OUT / "preview.png"))
-    print("rendered png/, preview.png and the fallback art")
