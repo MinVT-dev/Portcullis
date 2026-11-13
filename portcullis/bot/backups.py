@@ -166,7 +166,7 @@ class ScheduleModule(Module):
             when = f"next {discord.utils.format_dt(s.next_fire, 'R')}" if s.next_fire and s.next_fire > now else \
                 ("no next run" if s.enabled else "off")
             lines.append(f"{'🟢' if s.enabled else '⚪'} **{escape(s.name)}**: {when}")
-        embed = card(title=f"Schedules on {row.name}", description="\n".join(lines), colour=0x5865F2)
+        embed = card(title=f"Schedules on {row.name}", description="\n".join(lines))
         embed.set_footer(text=UNVERIFIED)
         await reply(interaction, embed=embed, view=ScheduleView(self, row, items))
 

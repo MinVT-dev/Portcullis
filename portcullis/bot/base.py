@@ -315,11 +315,12 @@ def code(text: str) -> str:
     return "`" + text.replace("`", "ˋ").replace("@", "@​") + "`"
 
 
-INFO, GOOD, WARN, BAD = 0x5865F2, 0x2ECC71, 0xF1C40F, 0xE74C3C  # embed colours; text always says it too
+# Embed colours from the brand palette (docs/branding/README.md); the text always says it too.
+INFO, GOOD, WARN, BAD, MUTED = 0xFFB547, 0x4ADE80, 0xFF7A2F, 0xFF5A5F, 0x9AA6BD
 
 
 def card(**kwargs: Any) -> discord.Embed:
-    """An embed in the house style: blurple unless the caller picks a colour."""
+    """An embed in the house style: torch amber unless the caller picks a colour."""
     kwargs.setdefault("colour", INFO)
     return discord.Embed(**kwargs)
 
