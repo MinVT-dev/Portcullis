@@ -7,10 +7,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from collections.abc import Mapping
 from enum import Enum
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 from uuid import UUID
@@ -180,3 +182,69 @@ class AmpTransport:
         if response_type is None:
             return data
         return _adapter(response_type).validate_python(data)
+
+    async def download(
+        self,
+        path: str,
+        *,
+        path_params: Mapping[str, Any] | None = None,
+        params: Mapping[str, Any] | None = None,
+        dest: str | os.PathLike[str] | None = None,
+        bearer: bool = True,
+        max_bytes: int | None = None,
+        timeout: float | None = None,
+        chunk_size: int = 1 << 16,
+    ) -> bytes | int:
+        """GET a binary body. Returns the bytes, or writes them to ``dest`` and returns the byte count.
+
+        ``bearer=False`` sends no Authorization header, for URLs opened by a download ticket (the
+        ticket carries the session). Downloads are never retried: a ticket is accepted once. A body
+        larger than ``max_bytes`` is cut off with ``AmpError``, and a partial ``dest`` file is removed.
+        """
+        real_path = fill_path(path, path_params or {})
+        query = encode_query(params)
+        client_timeout = aiohttp.ClientTimeout(total=timeout) if timeout else self._timeout
+        headers = {"Accept": "*/*"}
+        token: str | None = None
+        if bearer:
+            token = await self.auth.token()
+            headers["Authorization"] = f"Bearer {token}"
+        target = Path(dest) if dest is not None else None
+        chunks: list[bytes] = []
+        size = 0
+        try:
+            async with self._sem, self._session.get(self.base_url + real_path, params=query, headers=headers,
+                                                    timeout=client_timeout) as resp:
+                if resp.status >= 400:
+                    text = await resp.text()
+                    wait = parse_retry_after(resp.headers.get("Retry-After")) if resp.status in (429, 503) else None
+                    if resp.status == 401 and token is not None:
+                        await self.auth.invalidate(token)
+                    err = AmpError.from_response(resp.status, self.auth.redactor.text(text), "GET", path,
+                                                 retry_after=wait)
+                    if resp.status == 401:
+                        raise AuthExpired(err.message, status=401, method="GET", path=path, code=err.code)
+                    raise err
+                handle = target.open("wb") if target is not None else None
+                try:
+                    async for chunk in resp.content.iter_chunked(chunk_size):
+                        size += len(chunk)
+                        if max_bytes is not None and size > max_bytes:
+                            raise AmpError(f"download is larger than {max_bytes} bytes", method="GET", path=path)
+                        if handle is not None:
+                            handle.write(chunk)
+                        else:
+                            chunks.append(chunk)
+                finally:
+                    if handle is not None:
+                        handle.close()
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            if target is not None:
+                target.unlink(missing_ok=True)
+            raise Unreachable(f"AMP did not answer: {type(exc).__name__}", method="GET", path=path) from exc
+        except AmpError:
+            if target is not None:
+                target.unlink(missing_ok=True)
+            raise
+        log.debug("GET %s -> %d bytes", path, size)
+        return size if target is not None else b"".join(chunks)

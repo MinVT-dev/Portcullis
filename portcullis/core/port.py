@@ -59,6 +59,11 @@ class AmpPort(Protocol):
 
     async def permissions(self) -> list[str]: ...
 
+    async def answer_licence(self, server: ServerId, accept: bool) -> None:
+        """Accept or decline the game's licence (EULA) for a server waiting on it. Accepting is recorded
+        by AMP in the game's own settings (Minecraft's eula.txt) and audited as the bot's account."""
+        ...
+
     async def preview_expires_at(self) -> datetime | None:
         """When this AMP preview build stops working, or None for a release build."""
         ...

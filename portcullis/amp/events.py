@@ -65,16 +65,26 @@ def to_int(value: Any) -> int | None:
 def state_from(data: Any, *, suspended: bool = False) -> tuple[ServerState, int | None]:
     """Map a ShardState (model dump or event payload) to a ServerState.
 
-    Uses AMP's own isBusy/isRunning/isStopped flags, because the numbers behind ApplicationState
-    are not documented (20 and 25 were both seen on a running shard).
+    Uses AMP's own flags, because the numbers behind ApplicationState are not documented (20 and 25
+    were both seen on a running shard):
+
+    * ``awaitsLicence`` (live spec of 2026-11-13): the shard waits for its game licence to be accepted.
+      It sits in AwaitingUserAction, which is none of busy, running or stopped.
+    * ``isBusy``, ``isRunning``, ``isStopped`` as before.
+    * Not running but ``acceptsTraffic``: asleep. The spec says a sleeping shard has no process but its
+      port stays reachable, so the agent can wake it. Inferred from the spec, not yet seen live.
     """
     raw = to_int(field_of(data, "status"))
     if suspended:
         return ServerState.SUSPENDED, raw
+    if field_of(data, "awaitsLicence") is True:
+        return ServerState.AWAITING_LICENCE, raw
     if field_of(data, "isBusy"):
         return ServerState.BUSY, raw
     if field_of(data, "isRunning"):
         return ServerState.RUNNING, raw
+    if field_of(data, "acceptsTraffic") is True:
+        return ServerState.SLEEPING, raw
     if field_of(data, "isStopped"):
         return (ServerState.FAILED if field_of(data, "lastErrorCode") else ServerState.STOPPED), raw
     return ServerState.UNKNOWN, raw

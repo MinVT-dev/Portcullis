@@ -108,7 +108,8 @@ class PlayerTracker:
         elif isinstance(event, PlayerLeft):
             await self.players.left(event.server, event.player.name, at=event.at.isoformat(timespec="seconds"))
         elif isinstance(event, StateChanged) and event.state in (ServerState.STOPPED, ServerState.FAILED,
-                                                                 ServerState.SLEEPING):
+                                                                 ServerState.SLEEPING,
+                                                                 ServerState.AWAITING_LICENCE):
             await self.players.close_all(event.server, at=now_iso())
 
 

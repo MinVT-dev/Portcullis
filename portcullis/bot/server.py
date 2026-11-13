@@ -47,6 +47,7 @@ STATE_COLOURS = {
     ServerState.SLEEPING: MUTED,
     ServerState.FAILED: 0xC0392B,
     ServerState.SUSPENDED: MUTED,
+    ServerState.AWAITING_LICENCE: WARN,
     ServerState.UNKNOWN: MUTED,
 }
 POWER_ACTIONS = (PowerAction.START, PowerAction.STOP, PowerAction.RESTART)
@@ -190,6 +191,31 @@ class Confirm(discord.ui.View):
         await interaction.response.edit_message(content="Cancelled. Nothing was changed.", view=None)
 
 
+class LicenceButtons(discord.ui.View):
+    """Under the status of a server waiting for its game licence (EULA): accept (admins, after a
+    confirmation) or decline (admins and anyone who may power the server)."""
+
+    def __init__(self, module: ServerModule, row: ServerRow, *, can_accept: bool, can_decline: bool) -> None:
+        super().__init__(timeout=600)
+        self.module = module
+        self.row = row
+        if can_accept:
+            accept: discord.ui.Button[LicenceButtons] = discord.ui.Button(
+                label="Accept the licence…", style=discord.ButtonStyle.primary)
+            accept.callback = self._press(True)  # type: ignore[method-assign]
+            self.add_item(accept)
+        if can_decline:
+            decline: discord.ui.Button[LicenceButtons] = discord.ui.Button(
+                label="Decline", style=discord.ButtonStyle.secondary)
+            decline.callback = self._press(False)  # type: ignore[method-assign]
+            self.add_item(decline)
+
+    def _press(self, accept: bool):  # noqa: ANN202
+        async def press(interaction: discord.Interaction) -> None:
+            await self.module.answer_licence(interaction, self.row, accept)
+        return press
+
+
 class CancelRestart(discord.ui.View):
     def __init__(self, module: ServerModule, row: ServerRow) -> None:
         super().__init__(timeout=max(s for s, _ in WARN_STEPS) + 120)
@@ -297,7 +323,11 @@ class ServerModule(Module):
         can_power = await self.ctx.allowed(user, "server.power", row.shard_id)
         can_console = await self.ctx.allowed(user, "server.quick", row.shard_id)
         quick = quick_commands(await self.ctx.settings.get(QUICK_KEY, scope=row.shard_id)) if can_console else []
-        if can_power or quick:
+        if status.state is ServerState.AWAITING_LICENCE:
+            can_accept = self.ctx.access.is_admin(user)
+            if can_accept or can_power:
+                extra["view"] = LicenceButtons(self, row, can_accept=can_accept, can_decline=True)
+        elif can_power or quick:
             extra["view"] = PowerButtons(self, row, quick)
         elif status.state is ServerState.STOPPED and await self.ctx.settings.get(START_KEY, False, scope=row.shard_id):
             extra["view"] = PowerButtons(self, row, start_only=True)
@@ -364,6 +394,46 @@ class ServerModule(Module):
         await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id,
                                     detail={"member_start": True} if on_demand else None)
         await reply(interaction, f"{VERBS[power.value]} **{escape(row.name)}** (asked by {interaction.user.mention}).",
+                    ephemeral=False)
+
+    # ---------------------------------------------------------------- game licence (EULA)
+
+    async def answer_licence(self, interaction: discord.Interaction, row: ServerRow, accept: bool,
+                             confirmed: bool = False) -> None:
+        """Answer AMP's licence prompt. Accepting is an act on the server owner's behalf that AMP
+        records in the game's settings, so it needs Manage Server and an explicit confirmation."""
+        node = "server.licence.accept" if accept else "server.licence.decline"
+        if accept:
+            if not await self.require_admin(interaction, node):
+                return
+        elif not self.ctx.access.is_admin(interaction.user) and \
+                not await self.require_mod(interaction, node, row.shard_id):
+            return
+        if accept and not confirmed:
+            game = game_art(row.template, name=row.amp_name).name
+            await reply(interaction,
+                        f"Accept the licence (EULA) of **{escape(game)}** for **{escape(row.name)}**? Read the "
+                        "game's licence first: you accept it for whoever runs this server. AMP records the "
+                        "acceptance in the game's own settings under the bot's account, and Portcullis records "
+                        "that you asked. The server is then stopped; start it when you're ready.",
+                        view=Confirm(interaction.user.id,
+                                     lambda i: self.answer_licence(i, row, True, confirmed=True), "I accept it"))
+            return
+        await interaction.response.defer(thinking=True)  # public, so everyone sees who answered
+        try:
+            await self.ctx.port.answer_licence(row.shard_id, accept)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("%s on %s failed: %s", node, row.name, exc)
+            await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, result="failed",
+                                        detail={"error": short_error(exc)})
+            await reply(interaction, f"AMP didn't take the answer for {escape(row.name)}: "
+                                     f"{escape(short_error(exc))}", ephemeral=False)
+            return
+        await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id)
+        done = "accepted the game licence for" if accept else "declined the game licence for"
+        after = " It is stopped now; start it with `/server power`." if accept else \
+            " It stays stopped, and the next start asks again."
+        await reply(interaction, f"{interaction.user.mention} {done} **{escape(row.name)}**.{after}",
                     ephemeral=False)
 
     # ---------------------------------------------------------------- restart with warning

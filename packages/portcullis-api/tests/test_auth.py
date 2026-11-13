@@ -78,7 +78,7 @@ async def test_login_without_token_is_not_supported(tokens: TokenManager, fake: 
     fake.login_response = marker
     with pytest.raises(LoginNotSupported) as info:
         await tokens.token()
-    assert "second factor" in str(info.value)
+    assert "bot" in str(info.value) and ("password" in str(info.value) or "passkey" in str(info.value))
 
 
 async def test_hub_tickets_are_fresh_every_time(tokens: TokenManager, fake: FakeAmp) -> None:
@@ -225,3 +225,10 @@ async def test_rate_limited_login_holds_every_caller_off(base_url: str, session:
     fake.clock.advance(seconds=2)
     assert await tm.token()
     assert fake.calls == ["login", "login"]
+
+
+async def test_unrecognised_tokenless_login_lists_the_fields(tokens: TokenManager, fake: FakeAmp) -> None:
+    fake.login_response = {"somethingNew": True}
+    with pytest.raises(LoginNotSupported) as info:
+        await tokens.token()
+    assert "second factor" in str(info.value) and "somethingNew" in str(info.value)

@@ -24,11 +24,12 @@ from portcullis.core.types import (
     ServerId,
     ServerInfo,
     ServerStatus,
+    TryLater,
 )
 from portcullis_api import models as m
 from portcullis_api.auth import parse_instant
 from portcullis_api.client import AmpClient
-from portcullis_api.errors import MissingCapability
+from portcullis_api.errors import Conflict, MissingCapability, Unreachable
 from portcullis_api.live import leave_shard, shard_tenant
 from portcullis_api.signalr import HubConnection, HubEvent, Mode
 
@@ -38,6 +39,20 @@ log = logging.getLogger(__name__)
 class EventStreamEnded(Exception):
     """A shard's hub connection stopped for good (AMP refused the login or the join). Raised to its
     subscribers so they can retry, instead of leaving them waiting for events that will never come."""
+
+
+@contextlib.asynccontextmanager
+async def _snapshot_errors() -> AsyncIterator[None]:
+    """The snapshot calls document 409 and 503 since the live spec of 2026-11-13. Say what they mean."""
+    try:
+        yield
+    except Conflict as exc:
+        raise TryLater("AMP is busy with another backup job on this server. Try again in a minute.") from exc
+    except Unreachable as exc:
+        if exc.status == 503:
+            wait = f" AMP asked to wait {max(1, round(exc.retry_after))} s." if exc.retry_after else ""
+            raise TryLater(f"AMP's backup storage isn't available right now.{wait} Try again later.") from exc
+        raise
 
 
 def _float(value: Any) -> float | None:
@@ -250,15 +265,18 @@ class AmpServerPort:
         if not usable:
             raise ValueError("there is no earlier backup to copy the settings from; make the first one in AMP")
         latest = max(usable, key=lambda n: n.created_at or datetime.min.replace(tzinfo=UTC))
-        await self.client.files_backups.post_shards_snapshots(server, {
-            "kind": latest.kind.root, "content": latest.content.root, "name": name,
-            "description": "Made from Discord", "sticky": False})
+        async with _snapshot_errors():
+            await self.client.files_backups.post_shards_snapshots(server, {
+                "kind": latest.kind.root, "content": latest.content.root, "name": name,
+                "description": "Made from Discord", "sticky": False})
 
     async def restore_backup(self, server: ServerId, backup_id: str) -> None:
-        await self.client.files_backups.post_shards_snapshots_restore(server, backup_id)
+        async with _snapshot_errors():
+            await self.client.files_backups.post_shards_snapshots_restore(server, backup_id)
 
     async def delete_backup(self, server: ServerId, backup_id: str) -> None:
-        await self.client.files_backups.delete_shards_snapshots_by_snapshot_id(server, backup_id)
+        async with _snapshot_errors():
+            await self.client.files_backups.delete_shards_snapshots_by_snapshot_id(server, backup_id)
 
     async def list_schedules(self, server: ServerId) -> list[Schedule]:
         out = []
@@ -282,6 +300,13 @@ class AmpServerPort:
         return [ScheduleRun(started_at=r.started_at or r.queued_at, finished_at=r.completed_at,
                             status=r.status.value if r.status is not None else None, error=r.error_message)
                 for r in runs]
+
+    async def answer_licence(self, server: ServerId, accept: bool) -> None:
+        # accept needs settings.write and decline needs power.start on the bot's AMP account.
+        if accept:
+            await self.client.shards.post_shards_eula_accept(server)
+        else:
+            await self.client.shards.post_shards_eula_decline(server)
 
     async def permissions(self) -> list[str]:
         """The bot account's grant strings. ``">"`` means everything (seen on an admin account)."""

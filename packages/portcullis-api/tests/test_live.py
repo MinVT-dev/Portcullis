@@ -42,7 +42,8 @@ async def test_watch_shard_yields_own_events_and_skips_others(base_url: str, fak
 def test_public_surface() -> None:
     for name in portcullis_api.__all__:
         assert hasattr(portcullis_api, name), name
-    assert portcullis_api.SPEC_BUILD == "3.0.0.6"
+    assert portcullis_api.SPEC_DATE == "2026-11-13"
+    assert "live spec" in portcullis_api.SPEC_BUILD
 
 
 def test_package_never_imports_the_bot() -> None:

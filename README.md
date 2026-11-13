@@ -10,7 +10,7 @@
 
 <p align="center">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-FFB547?labelColor=0E1424">
-  <img alt="AMP 3.0.0.6" src="https://img.shields.io/badge/AMP-3.0.0.6%20preview-FFB547?labelColor=0E1424">
+  <img alt="AMP 3 preview" src="https://img.shields.io/badge/AMP-3%20preview-FFB547?labelColor=0E1424">
   <img alt="Bot licence AGPL-3.0" src="https://img.shields.io/badge/bot-AGPL--3.0-EEF2FA?labelColor=0E1424">
   <img alt="API licence MIT" src="https://img.shields.io/badge/portcullis--api-MIT-EEF2FA?labelColor=0E1424">
 </p>
@@ -25,7 +25,7 @@ Everything the bot does is logged, and every risky action asks first.
 
 Portcullis is built for **AMP 3** only. For AMP 2, use [Gatekeeper V2](https://github.com/k8thekat/GatekeeperV2).
 
-> **Status: preview.** Portcullis is built against AMP 3.0.0.6, a preview build that expires on 7 December 2026. These have been checked on a real panel: login, the live event hub, the server list, power, the console and listing backups. Features not yet checked are labelled in Discord and in the [setup guide](docs/SETUP.md#11-known-gaps).
+> **Status: preview.** Portcullis is built against the AMP 3 preview: first 3.0.0.6, which expires on 7 December 2026, and since 13 November 2026 the API spec a newer live panel serves. These have been checked on a real panel: login, the live event hub, the server list, power, the console and listing backups. Features not yet checked are labelled in Discord and in the [setup guide](docs/SETUP.md#11-known-gaps).
 
 ## Contents
 
@@ -264,7 +264,8 @@ async with AmpClient("https://panel.example:8443", Credentials("bot", "password"
 ```
 
 It covers:
-- all 263 operations in the AMP 3.0.0.6 API, with typed models;
+- all 269 operations in the AMP 3 API (the spec a live panel served on 13 November 2026), with typed models;
+- file, zip and snapshot downloads through AMP's download tickets;
 - a login that renews itself;
 - live events;
 - a fake panel for your tests.

@@ -10,9 +10,9 @@ The code has three parts:
 
 | Path | What it is |
 |---|---|
-| `packages/portcullis-api/src/portcullis_api/spec/` | The pinned AMP OpenAPI spec (`webapi-3.0.0.6.json`) and `PIN.json` with its sha256 and build. |
-| `.../portcullis_api/models.py` | **Generated.** Pydantic v2 models for all 390 schemas. |
-| `.../portcullis_api/api/` | **Generated** (except `_base.py`). One class per spec tag, one async method per operation (263). |
+| `packages/portcullis-api/src/portcullis_api/spec/` | The pinned AMP OpenAPI spec (`webapi-live-2026-11-13.json`, from a live panel's API browser, `servers` entry removed) and `PIN.json` with its sha256 and source. |
+| `.../portcullis_api/models.py` | **Generated.** Pydantic v2 models for all 392 schemas. |
+| `.../portcullis_api/api/` | **Generated** (except `_base.py`). One class per spec tag, one async method per operation (269). |
 | `.../portcullis_api/auth.py` | Login, renewal 30 minutes before expiry, fallback to a fresh login, single-use hub tickets. |
 | `.../portcullis_api/transport.py` | Bearer header, one retry after a 401, retries for GETs, a concurrency cap, typed parsing. |
 | `.../portcullis_api/signalr.py` | A small SignalR (JSON protocol) client that fetches a new hub ticket for every connect and reconnect. |

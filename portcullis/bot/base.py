@@ -43,7 +43,7 @@ GROUPS = {
 }
 # Audit node prefix -> group. The first match wins.
 NODE_GROUPS = (
-    ("server.power", "power"), ("server.send", "console"), ("server.console", "console"),
+    ("server.power", "power"), ("server.licence", "power"), ("server.send", "console"), ("server.console", "console"),
     ("server.quick", "console"), ("whitelist", "whitelist"), ("player.moderate", "moderation"),
     ("watch", "moderation"), ("user", "moderation"), ("poll", "polls"), ("event", "events"),
     ("backup", "backups"), ("schedule", "backups"),

@@ -890,6 +890,97 @@
         }
       }
     },
+    "/api/api-browser/ticket": {
+      "post": {
+        "tags": [
+          "Platform Settings"
+        ],
+        "summary": "Get a ticket for the API browser",
+        "description": "Mints a ticket that signs the caller's browser in to the API browser: open\n`scalar/session?ticket=\u2026`, relative to the panel's address, in the browser. The ticket is\naccepted there once, within sixty seconds, and traded for a cookie that the browser sends only\nto `/scalar` and that ends with the caller's session. It is a download ticket of a kind\nof its own: no download accepts it, and the API browser accepts no other kind. A user holds\nat most three unused ones; a fourth is refused, with nothing audited, until one of them is\nused or lapses. Any signed-in user may ask while the Developer setting serves the API browser.\nAudited as `ApiBrowserOpened`.",
+        "responses": {
+          "200": {
+            "description": "The ticket and the instant it lapses",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadTicketResponse"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadTicketResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadTicketResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The caller is not signed in, or carries no session to bind the ticket to",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The API browser is turned off (`apiBrowser.error.off`)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The caller already holds three unused tickets; ask again within a minute",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/Audit": {
       "get": {
         "tags": [
@@ -1909,7 +2000,7 @@
             "description": "The connection succeeded"
           },
           "400": {
-            "description": "The request could not be resolved (malformed blob), or no server URL was supplied",
+            "description": "The request could not be resolved (malformed blob), no server URL was supplied, or a user name or password in an address is not percent-encoded (`auth.setup.database.busUserInfoNotEncoded`)",
             "content": {
               "text/plain": {
                 "schema": {
@@ -1949,7 +2040,7 @@
             }
           },
           "503": {
-            "description": "The connection could not be established"
+            "description": "The connection could not be established; the body names the cause (`auth.setup.database.bus*`)"
           }
         }
       }
@@ -1987,7 +2078,7 @@
             "description": "The connection was saved; the body carries the fresh setup status"
           },
           "400": {
-            "description": "The request could not be resolved (malformed blob), or no server URL was supplied",
+            "description": "The request could not be resolved (malformed blob), no server URL was supplied, or a user name or password in an address is not percent-encoded (`auth.setup.database.busUserInfoNotEncoded`)",
             "content": {
               "text/plain": {
                 "schema": {
@@ -2027,7 +2118,7 @@
             }
           },
           "503": {
-            "description": "The connection could not be established"
+            "description": "The connection could not be established; the body names the cause (`auth.setup.database.bus*`)"
           }
         }
       }
@@ -2437,7 +2528,7 @@
             }
           },
           "503": {
-            "description": "The database connection has not been configured yet, or is not reachable"
+            "description": "The database connection has not been configured yet (`auth.setup.admin.busNotConfigured`), or the bus is not reachable (`auth.setup.database.bus*`) or holds no storage for the account"
           }
         }
       }
@@ -3070,6 +3161,89 @@
         }
       }
     },
+    "/api/shards/{shardId}/files/start": {
+      "get": {
+        "tags": [
+          "Files & Backups"
+        ],
+        "summary": "Find the directory the file manager opens at",
+        "description": "The root when the caller may read it. Otherwise the highest directory the caller may read:\nthe walk goes down from the root while exactly one subdirectory leads toward the caller's\nfile grants, and stops at a directory they may read, at a directory where their grants part,\nor where nothing leads further. Requires what listing the root requires: `files.read`\non the root or on some path beneath it. The answer names only directories on the way to a\ngrant the caller holds, which listing them by traversal already allows.",
+        "parameters": [
+          {
+            "name": "shardId",
+            "in": "path",
+            "description": "The shard whose files are being browsed",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The directory to open at",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileStartDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileStartDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileStartDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may read no path in the shard",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The shard does not exist",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/shards/{shardId}/files/stat": {
       "get": {
         "tags": [
@@ -3140,7 +3314,7 @@
             }
           },
           "404": {
-            "description": "The shard does not exist, or the path was not found",
+            "description": "The shard does not exist, or the path was not found (`files.error.notFound`)",
             "content": {
               "text/plain": {
                 "schema": {
@@ -3231,7 +3405,7 @@
             }
           },
           "404": {
-            "description": "The shard does not exist",
+            "description": "The shard does not exist, or the path is not a file (`files.error.notFound`)",
             "content": {
               "text/plain": {
                 "schema": {
@@ -3346,13 +3520,137 @@
         }
       }
     },
+    "/api/shards/{shardId}/files/download-ticket": {
+      "post": {
+        "tags": [
+          "Files & Backups"
+        ],
+        "summary": "Issue a ticket to download a single file",
+        "description": "A browser downloads by navigation, which carries no Authorization header, so it presents this\nticket as `ticket` on `GET download` instead. Runs every check the download runs:\n`files.read` on the path and, unless the caller holds `files.bypassrestrictions`, the\ntenant download file-type policy on the name and the leading bytes, so a refusal is answered\nhere with its code. The ticket is bound to the caller's session, this shard and this path, is\naccepted once, and is valid for sixty seconds; the download runs the checks again when it is\npresented. Path is relative to the shard working directory.",
+        "parameters": [
+          {
+            "name": "shardId",
+            "in": "path",
+            "description": "The shard whose file is to be downloaded",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The path to download",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PathBody"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PathBody"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/PathBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A ticket",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadTicketResponse"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadTicketResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadTicketResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the token presented carries no session",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller lacks read access, or the file-type policy blocked the download",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The shard does not exist, or the path is not a file (`files.error.notFound`)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/shards/{shardId}/files/download": {
       "get": {
         "tags": [
           "Files & Backups"
         ],
         "summary": "Download a single file",
-        "description": "Requires `files.read` on the path. Unless the caller holds `files.bypassrestrictions`,\nthe tenant download file-type policy sniffs the file's leading bytes and may block it with 403.\nThe download name is the last path segment. Path is relative to the shard working directory.",
+        "description": "Requires `files.read` on the path. Unless the caller holds `files.bypassrestrictions`,\nthe tenant download file-type policy sniffs the file's leading bytes and may block it with 403.\nThe download name is the last path segment. Path is relative to the shard working directory.\nAuthenticated by the Authorization header, or by a ticket from `POST download-ticket` for\nthis path in the `ticket` query parameter; the checks run for the ticket's user as they do\nfor a header's. A download opened by a ticket records a `ShardFileDownloaded` audit event:\nthe ticket is what the user's Download action asks for. One read with the header, which is how\nthe page shows a small image's preview, records none.",
         "parameters": [
           {
             "name": "shardId",
@@ -3377,6 +3675,26 @@
           "200": {
             "description": "The file stream"
           },
+          "401": {
+            "description": "Not authenticated, or the ticket is used, expired, for another download, or its session has ended",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "403": {
             "description": "The caller lacks read access, or the file-type policy blocked the download",
             "content": {
@@ -3398,7 +3716,7 @@
             }
           },
           "404": {
-            "description": "The shard does not exist",
+            "description": "The shard does not exist, or the path is not a file (`files.error.notFound`)",
             "content": {
               "text/plain": {
                 "schema": {
@@ -3426,7 +3744,7 @@
           "Files & Backups"
         ],
         "summary": "Upload files into a directory",
-        "description": "Requires `files.write` on the target directory and on each computed destination; the whole\ndrop is rejected with 403 if any destination is denied. Unless the caller holds\n`files.bypassrestrictions`, the tenant upload file-type policy sniffs each file and may block\nthe drop with 403 before anything is written. For folder drops, each file's relative path is\nsupplied in the matching `paths` entry; otherwise the file name is used. Records a\n`ShardFileUploaded` audit event. Suited to smaller payloads; for large files use the\nchunked upload-start / upload-chunk / upload-commit flow.",
+        "description": "Requires `files.write` on the target directory and on each computed destination; the whole\ndrop is rejected with 403 if any destination is denied. Unless the caller holds\n`files.bypassrestrictions`, the tenant upload file-type policy sniffs each file and may block\nthe drop with 403 before anything is written. For folder drops, each file's relative path is\nsupplied in the matching `paths` entry; otherwise the file name is used. Records a\n`ShardFileUploaded` audit event. Suited to smaller payloads; for large files use the\nchunked upload-start / upload-chunk / upload-commit flow. When the shard has a disk budget, a\ndrop whose files, counted together, would take the shard past it is refused whole with 409\n`files.error.uploadExceedsBudget` and a `ShardUploadOverDiskBudget` audit event.",
         "parameters": [
           {
             "name": "shardId",
@@ -3522,6 +3840,26 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "A destination is a file AMP writes, or the drop would take the shard past its disk budget",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         }
       }
@@ -3532,7 +3870,7 @@
           "Files & Backups"
         ],
         "summary": "Start or resume a chunked upload",
-        "description": "Returns a session ID and the number of bytes already received so the client can skip ahead on\nreconnect. Requires `files.write` on the destination. For bus-path (remote agent) uploads the session\noperates in pipeline mode: the destination is preallocated to its final size and each chunk is\nforwarded to the agent over NATS as the next arrives from the browser, so the browser experiences\ntrue end-to-end throughput rather than local disk write speed. Unless the caller holds\n`files.bypassrestrictions`, a bus-path destination whose name the upload file-type policy\nblocks is refused here with the upload's code and audit, before anything is allocated; the\ncontent is judged at commit. The response includes `via`\n(`agent` or `direct`) so the client can surface the routing.",
+        "description": "Returns a session ID and the number of bytes already received so the client can skip ahead on\nreconnect. Requires `files.write` on the destination. For bus-path (remote agent) uploads the session\noperates in pipeline mode: the destination is preallocated to its final size and each chunk is\nforwarded to the agent over NATS as the next arrives from the browser, so the browser experiences\ntrue end-to-end throughput rather than local disk write speed. Unless the caller holds\n`files.bypassrestrictions`, a bus-path destination whose name the upload file-type policy\nblocks is refused here with the upload's code and audit, before anything is allocated; the\ncontent is judged at commit. When the shard has a disk budget, a declared size that would take\nthe shard past the point its usage scan stops it at is refused with 409\n`files.error.uploadExceedsBudget` (`files.error.uploadExceedsBudgetUnmeasured` when no\nscan has measured the shard and the file alone is larger than the budget), counting the latest\nscan, uploads committed since it and the shard's other open sessions, less the file the upload\nreplaces. The response includes `via`\n(`agent` or `direct`) so the client can surface the routing.",
         "parameters": [
           {
             "name": "shardId",
@@ -3609,6 +3947,26 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "The destination is inside an archive or a file AMP writes, or the upload would take the shard past its disk budget",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         }
       }
@@ -3619,7 +3977,7 @@
           "Files & Backups"
         ],
         "summary": "Append a chunk to an upload",
-        "description": "The chunk is the raw request body (max 16 MB). The session is validated against the shard, tenant, and calling\nuser, so no per-path check runs here (that happened at upload-start and runs again at upload-commit).\nLocal path: appends to the temp file and returns cumulative bytes on disk. Bus path (double-buffer):\nbegins forwarding the previous chunk to the agent over NATS while reading this chunk from the HTTP\nbody, returning only when both are done so the browser gets accurate backpressure from the agent.",
+        "description": "The chunk is the raw request body (max 16 MB). The session is validated against the shard, tenant, and calling\nuser, so no per-path check runs here (that happened at upload-start and runs again at upload-commit).\nLocal path: appends to the temp file and returns cumulative bytes on disk. Bus path (double-buffer):\nbegins forwarding the previous chunk to the agent over NATS while reading this chunk from the HTTP\nbody, returning only when both are done so the browser gets accurate backpressure from the agent.\nA chunk that takes the session past its declared size is judged against the shard's disk budget\nas upload-start judges a declared size; the one that would cross it is refused with 409\n`files.error.uploadExceedsBudget` and the session is abandoned, its temp file or its partial\ndestination deleted.",
         "parameters": [
           {
             "name": "shardId",
@@ -3644,8 +4002,8 @@
           "200": {
             "description": "The cumulative number of bytes received so far"
           },
-          "403": {
-            "description": "The session belongs to a different shard, tenant, or user",
+          "404": {
+            "description": "No such upload session for this caller and shard (`files.error.uploadSessionGone`): unknown, expired, or another user's, tenant's or shard's",
             "content": {
               "text/plain": {
                 "schema": {
@@ -3664,8 +4022,8 @@
               }
             }
           },
-          "404": {
-            "description": "No such upload session (unknown or expired)",
+          "409": {
+            "description": "The chunk took the session past its declared size and the shard past its disk budget; the session is gone",
             "content": {
               "text/plain": {
                 "schema": {
@@ -3719,7 +4077,7 @@
             "description": "The file was written and the session removed"
           },
           "400": {
-            "description": "The uploaded byte count does not match the declared size",
+            "description": "The uploaded byte count does not match the declared size (`files.error.uploadIncomplete`)",
             "content": {
               "text/plain": {
                 "schema": {
@@ -3739,7 +4097,7 @@
             }
           },
           "403": {
-            "description": "The session belongs to another shard/tenant/user, write access was lost, or the file-type policy blocked the file",
+            "description": "Write access was lost, or the file-type policy blocked the file",
             "content": {
               "text/plain": {
                 "schema": {
@@ -3759,7 +4117,7 @@
             }
           },
           "404": {
-            "description": "No such upload session (unknown or expired)",
+            "description": "No such upload session for this caller and shard (`files.error.uploadSessionGone`): unknown, expired, or another user's, tenant's or shard's",
             "content": {
               "text/plain": {
                 "schema": {
@@ -3781,18 +4139,18 @@
         }
       }
     },
-    "/api/shards/{shardId}/files/zip": {
+    "/api/shards/{shardId}/files/zip-ticket": {
       "post": {
         "tags": [
           "Files & Backups"
         ],
-        "summary": "Download a zip of files or folders",
-        "description": "Requires `files.read`; the shard is resolved from and authorized against the first path, and\nevery requested root plus every recursed descendant is read-checked, so a denied subtree is skipped\nrather than exfiltrated. Unless the caller holds `files.bypassrestrictions`, the download\nfile-type policy is applied per file and blocked files are omitted from the archive. Entry names\nare made relative to the parent of the first path. Records a `ShardFilesDownloaded` audit event.",
+        "summary": "Issue a ticket to download a zip of files or folders",
+        "description": "The ticket holds the paths, and `GET zip` builds the archive when it is presented as\n`ticket`. Requires `files.read` on the first path, as the zip does. The ticket is bound\nto the caller's session and this shard, is accepted once, and is valid for sixty seconds; the zip\nread-checks every path and applies the file-type policy for the ticket's user when it is built.",
         "parameters": [
           {
             "name": "shardId",
             "in": "path",
-            "description": "The shard whose files are being zipped",
+            "description": "The shard whose files are to be zipped",
             "required": true,
             "schema": {
               "type": "string",
@@ -3823,10 +4181,47 @@
         },
         "responses": {
           "200": {
-            "description": "A `files.zip` archive stream"
+            "description": "A ticket",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadTicketResponse"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadTicketResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadTicketResponse"
+                }
+              }
+            }
           },
           "400": {
-            "description": "No paths were supplied",
+            "description": "No paths were supplied (`files.error.nothingSelected`), or more than a ticket holds (`files.error.tooManySelected`)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the token presented carries no session",
             "content": {
               "text/plain": {
                 "schema": {
@@ -3888,13 +4283,119 @@
         }
       }
     },
+    "/api/shards/{shardId}/files/zip": {
+      "get": {
+        "tags": [
+          "Files & Backups"
+        ],
+        "summary": "Download a zip of files or folders",
+        "description": "Opened only by a ticket from `POST zip-ticket` in the `ticket` query parameter, which\nnames the paths. Requires `files.read`; the shard is resolved from and authorized against the\nfirst path, and every requested root plus every recursed descendant is read-checked, so a denied\nsubtree is skipped rather than exfiltrated. Unless the ticket's user holds\n`files.bypassrestrictions`, the download file-type policy is applied per file and blocked\nfiles are omitted from the archive. Entry names are made relative to the parent of the first\npath. Records a `ShardFilesDownloaded` audit event.",
+        "parameters": [
+          {
+            "name": "shardId",
+            "in": "path",
+            "description": "The shard whose files are being zipped",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A `files.zip` archive stream"
+          },
+          "400": {
+            "description": "The request carries no zip ticket for this shard (`files.error.downloadTicketRequired`)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The ticket is used, expired, for another download, or its session has ended",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The ticket's user lacks read access to the first path",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The shard does not exist",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/shards/{shardId}/files/archive": {
       "post": {
         "tags": [
           "Files & Backups"
         ],
         "summary": "Create a zip archive in the working directory",
-        "description": "Zips the given files/folders into a NEW archive written into the working directory\n(in-place \"Create Archive\"), as opposed to Task&lt;IActionResult&gt; FileManagerController.Zip(Guid shardId, PathsBody body, CancellationToken ct = default(CancellationToken)) which streams a download.\nThis is an internal copy - bytes never leave the server - so it follows the same model\nas Task&lt;IActionResult&gt; FileManagerController.Copy(Guid shardId, MoveBody body, CancellationToken ct = default(CancellationToken)): per-path READ authz on each source, WRITE authz on the\ndestination, and no file-type (download) policy. The .zip extension is owned by the\ncaller; we just write wherever Destination points.\nRequires `files.write` on the destination and `files.read` on each source; every source\nroot and recursed descendant is read-checked so a denied subtree is never folded in. No download\nfile-type policy applies because nothing leaves the server. Records a `ShardArchiveCreated`\naudit event.",
+        "description": "Zips the given files/folders into a NEW archive written into the working directory\n(in-place \"Create Archive\"), as opposed to Task&lt;IActionResult&gt; FileManagerController.Zip(Guid shardId, CancellationToken ct = default(CancellationToken)) which streams a download.\nThis is an internal copy - bytes never leave the server - so it follows the same model\nas Task&lt;IActionResult&gt; FileManagerController.Copy(Guid shardId, MoveBody body, CancellationToken ct = default(CancellationToken)): per-path READ authz on each source, WRITE authz on the\ndestination, and no file-type (download) policy. The .zip extension is owned by the\ncaller; we just write wherever Destination points.\nRequires `files.write` on the destination and `files.read` on each source; every source\nroot and recursed descendant is read-checked so a denied subtree is never folded in. No download\nfile-type policy applies because nothing leaves the server. Records a `ShardArchiveCreated`\naudit event.",
         "parameters": [
           {
             "name": "shardId",
@@ -3933,7 +4434,7 @@
             "description": "The archive was written to the destination"
           },
           "400": {
-            "description": "No paths were supplied, or the destination is empty",
+            "description": "No paths were supplied (`files.error.nothingSelected`), or the destination is empty (`files.error.archiveNameRequired`)",
             "content": {
               "text/plain": {
                 "schema": {
@@ -4990,7 +5491,7 @@
             "description": "The exclusion list was updated"
           },
           "400": {
-            "description": "No paths were supplied",
+            "description": "No paths were supplied (`files.error.nothingSelected`)",
             "content": {
               "text/plain": {
                 "schema": {
@@ -5354,6 +5855,7 @@
           "Networking"
         ],
         "summary": "Look again for the certificate at a configured front",
+        "description": "The name is looked up first. A name that went behind a proxy network AMP recognises since it was set up, or came out, has visitor addresses read accordingly from then on, and the change is audited.",
         "responses": {
           "202": {
             "description": "The certificate rung is being checked"
@@ -8451,6 +8953,26 @@
           "200": {
             "description": "An issued session token"
           },
+          "400": {
+            "description": "The assertion could not be read; the body carries the reason",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
           "401": {
             "description": "The assertion was rejected, or the account may not sign in; the body carries the reason",
             "content": {
@@ -8525,6 +9047,26 @@
         "responses": {
           "204": {
             "description": "The proof was recorded on the session"
+          },
+          "400": {
+            "description": "The assertion could not be read; the body carries the reason",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           },
           "401": {
             "description": "The assertion was rejected, belongs to another account, or the session has ended",
@@ -8711,7 +9253,7 @@
             }
           },
           "400": {
-            "description": "The attestation was rejected; the body carries the reason",
+            "description": "The attestation was rejected or could not be read; the body carries the reason",
             "content": {
               "text/plain": {
                 "schema": {
@@ -8906,7 +9448,7 @@
           "Platform Settings"
         ],
         "summary": "Get the settings manifest",
-        "description": "Requires the `platform.settings.read` capability. Secret values are never\nreturned; the manifest only reports whether each secret is currently set.",
+        "description": "Requires the `platform.settings.read` capability. Secret values are never\nreturned; the manifest only reports whether each secret is currently set. A template source\naddress comes with its user information and each query value replaced by `***`, to\nevery caller.",
         "responses": {
           "200": {
             "description": "The full settings manifest for the authenticated tenant",
@@ -8957,7 +9499,7 @@
           "Platform Settings"
         ],
         "summary": "Apply a batch of platform setting changes",
-        "description": "Applies a batch of node changes ({\"smtp.host\": \"…\"}). Each key is authorised individually\nas `platform.settings.write.&lt;key&gt;`, so a role can be limited to specific\nsections/settings, while `platform.settings.write.&gt;` covers everything. Audited\nper node. A change to the security policy ends the live SFTP connections on this spire of\nevery account it puts on hold. Turning panel exposure off while AMP's HTTPS front is\nconfigured removes the front as its Remove action does; when that cannot be done the\nchange still stands and the answer carries a notice saying ports 80 and 443 stay open.",
+        "description": "Applies a batch of node changes ({\"smtp.host\": \"\u2026\"}). Each key is authorised individually\nas `platform.settings.write.&lt;key&gt;`, so a role can be limited to specific\nsections/settings, while `platform.settings.write.&gt;` covers everything. Audited\nper node. A change to the security policy ends the live SFTP connections on this spire of\nevery account it puts on hold. Turning panel exposure off while AMP's HTTPS front is\nconfigured removes the front as its Remove action does; when that cannot be done the\nchange still stands and the answer carries a notice saying ports 80 and 443 stay open. A\nchange to the Developer settings reaches the API browser at once.",
         "requestBody": {
           "description": "Cancels the request",
           "content": {
@@ -9013,7 +9555,7 @@
             "description": "All changes were applied"
           },
           "400": {
-            "description": "A value cannot be taken: an unknown node, an unparsable value, a node this build holds at a fixed\n    value (`settings.error.locked`), or a shared credential the caller may not choose\n    (`settings.error.credentialNotUsable`, audited at Security); no change is applied",
+            "description": "A value cannot be taken: an unknown node, an unparsable value, a node this build holds at a fixed\n    value (`settings.error.locked`), or a shared credential the caller may not choose\n    (`settings.error.credentialNotUsable`, audited at Security), or a template source\n    address whose `***` no single saved address answers for (`settings.error.templateSourceSecretNotKept`)\n    or that holds `***` within other text in a secret part (`settings.error.templateSourceMaskInSecret`);\n    no change is applied",
             "content": {
               "text/plain": {
                 "schema": {
@@ -9146,7 +9688,7 @@
           "Platform Settings"
         ],
         "summary": "Run a settings inline action",
-        "description": "Runs a settings inline action (smtp.test, templates.sync, …). Gated as a write under its\nsection, authorised as `platform.settings.write.&lt;actionId&gt;`. Returns the\naction's own result detail.",
+        "description": "Runs a settings inline action (smtp.test, templates.sync, \u2026). Gated as a write under its\nsection, authorised as `platform.settings.write.&lt;actionId&gt;`. Returns the\naction's own result detail.",
         "parameters": [
           {
             "name": "actionId",
@@ -10177,7 +10719,7 @@
             }
           },
           "400": {
-            "description": "The name is missing",
+            "description": "The name is missing, or the name or description is too long",
             "content": {
               "text/plain": {
                 "schema": {
@@ -10362,7 +10904,7 @@
             }
           },
           "400": {
-            "description": "The role store rejected the change",
+            "description": "The name or description is too long, or the role store rejected the change",
             "content": {
               "text/plain": {
                 "schema": {
@@ -12418,7 +12960,7 @@
         },
         "responses": {
           "201": {
-            "description": "The shard was created; the response carries the created shard and its provisioning result",
+            "description": "The shard was created; the response carries the created shard and its provisioning result, with every secret setting's value masked as `GET /api/shards/{id}/settings` masks it",
             "content": {
               "text/plain": {
                 "schema": {
@@ -12438,7 +12980,7 @@
             }
           },
           "400": {
-            "description": "The template slug is missing, the named credential is not one the caller may use\n    (`shards.error.credentialUnknown`), or the shard could not be created (for example an invalid template)",
+            "description": "The template slug is missing, the display name or description is too long, the named credential is not one the caller may use\n    (`shards.error.credentialUnknown`), or the shard could not be created (for example an invalid template)",
             "content": {
               "text/plain": {
                 "schema": {
@@ -13186,7 +13728,7 @@
           "Shards"
         ],
         "summary": "Accept the application's end-user licence for this shard",
-        "description": "Requires the `settings.write` capability. Records acceptance in the setting the template\nmarked `Special=EULA`, which for most apps is a real line in the application's own config\nfile (Minecraft's `eula.txt`). Audited: accepting a licence is an act taken on the tenant's\nbehalf, and who did it and when is exactly what gets asked about afterwards.\n\nThere is deliberately no matching \"decline\": declining is simply not accepting, and\nnothing needs recording for it.\n\nAn application that declares no licence succeeds without doing anything, so a caller\naccepting licences across many shards does not have to know which templates have one.",
+        "description": "Requires the `settings.write` capability. Records acceptance in the setting the template\nmarked `Special=EULA`, which for most apps is a real line in the application's own config\nfile (Minecraft's `eula.txt`). Audited: accepting a licence is an act taken on the tenant's\nbehalf, and who did it and when is exactly what gets asked about afterwards.\n\nA shard waiting in AwaitingUserAction for this acceptance (a start that no person was\nwaiting on met the licence) is returned to Stopped, which answers the prompt; the start the\nperson goes on to make is their own.\n\nAn application that declares no licence succeeds without doing anything, so a caller\naccepting licences across many shards does not have to know which templates have one.",
         "parameters": [
           {
             "name": "id",
@@ -13225,6 +13767,72 @@
           },
           "403": {
             "description": "The caller may not change this shard's settings",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such shard",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/Shards/{id}/eula/decline": {
+      "post": {
+        "tags": [
+          "Shards"
+        ],
+        "summary": "Decline the application's end-user licence for a shard waiting on it",
+        "description": "Requires the `power.start` capability. A start that no person was waiting on (the start\nafter a new shard's first update, a start on boot, a scheduled start, a start after a move)\nleaves a shard whose licence is not accepted waiting in AwaitingUserAction. Declining returns\nit to Stopped, as a declined Start leaves a shard, saying in its status that the licence must\nbe accepted before it can start; a later Start asks again. Nothing is accepted or recorded in\nthe application's settings. A shard that is not waiting on its licence is left as it is.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The shard's unique identifier",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The shard is no longer waiting on its licence"
+          },
+          "403": {
+            "description": "The caller may not start this shard",
             "content": {
               "text/plain": {
                 "schema": {
@@ -14177,7 +14785,7 @@
           "Shards"
         ],
         "summary": "Purge a soft-deleted shard",
-        "description": "Requires the `delete` capability. Irreversible. The shard must already be soft-deleted (the UI's two-step safety);\na shard that is not yet deleted is refused with 400. Every bus credential the shard was launched with is revoked\nfirst, here, since only this host can re-sign the bus account; the spire host then kills any lingering agent,\nremoves all KV records, and deletes the working directory, resolving the spire-local path before the KV purge.",
+        "description": "Requires the `delete` capability. Irreversible. The shard must already be soft-deleted (the UI's two-step safety);\na shard that is not yet deleted is refused with 400. Every bus credential the shard was launched with is revoked\nfirst, here, since only this host can re-sign the bus account; the spire host then kills any lingering agent,\ndeletes the working directory and every snapshot archive the shard has on that spire, and only once they are gone\nremoves all KV records, resolving the spire-local paths before the KV purge. Files that stay keep the records, and\nthe shard's error says so.",
         "parameters": [
           {
             "name": "id",
@@ -14365,6 +14973,26 @@
               "text/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The shard's stored settings could not be found (`shards.error.settingsMissing`)",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -14789,7 +15417,7 @@
           "Shards"
         ],
         "summary": "Update the shard's infra settings",
-        "description": "    Updates container mode, resource limits, boot behaviour, user-slot cap, and disk budget.\n    Requires the `infra.write` capability. Memory values are validated for Docker/Podman consistency (reservation must\n    not exceed the limit; swap must not be below the limit). Changed fields are diffed and audited. If a new `MaxUsersCap`\n    is below the stored `$MaxUsers`, the config value is clamped immediately so the next start enforces the cap;\n    when the template does not allow that write, the cap is still saved and `clampRefused` carries the reason.\n    A new `DiskLimitMb` takes effect at the owning spire's next usage scan, not on save.\n    The isolation and resource fields (ContainerMode, ContainerImageOverride, the memory and CPU\nlimits, MaxUsersCap and DiskLimitMb) may be sent back unchanged with infra.write alone;\nchanging any of them also requires the infra.limits capability on the shard. Setting\nContainerImageOverride to an image outside AMP's own image family also requires the\nPlatform.TemplatesManage permission, because that image decides what code the container runs.\n    Moving the shard to Native is refused when its template must run in a container on the owning\nspire, and also when the template or the spire record cannot be read, since the policy is then unknown.",
+        "description": "    Updates container mode, resource limits, boot behaviour, user-slot cap, and disk budget. Only the fields\n    present in the body are changed; a field that is absent or null keeps its stored value, and a value is\n    cleared by sending its empty form (see ShardInfraPatch). Validation runs on the record as\n    it would be saved, not on the body alone.\n    Requires the `infra.write` capability. Memory values are validated for Docker/Podman consistency (reservation must\n    not exceed the limit; swap must not be below the limit). Changed fields are diffed and audited. If a new `MaxUsersCap`\n    is below the stored `$MaxUsers`, the config value is clamped immediately so the next start enforces the cap;\n    when the template does not allow that write, the cap is still saved and `clampRefused` carries the reason.\n    A new `DiskLimitMb` takes effect at the owning spire's next usage scan, not on save.\n    The isolation and resource fields (ContainerMode, ContainerImageOverride, the memory and CPU\nlimits, MaxUsersCap and DiskLimitMb) may be sent back unchanged with infra.write alone;\nchanging any of them also requires the infra.limits capability on the shard. Setting\nContainerImageOverride to an image outside AMP's own image family also requires the\nPlatform.TemplatesManage permission, because that image decides what code the container runs.\n    Moving the shard to Native is refused when its template must run in a container on the owning\nspire, and also when the template or the spire record cannot be read, since the policy is then unknown.",
         "parameters": [
           {
             "name": "id",
@@ -14803,21 +15431,21 @@
           }
         ],
         "requestBody": {
-          "description": "The new infra settings to apply",
+          "description": "The fields to change; absent fields are left unchanged",
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ShardInfraSettings"
+                "$ref": "#/components/schemas/ShardInfraPatch"
               }
             },
             "text/json": {
               "schema": {
-                "$ref": "#/components/schemas/ShardInfraSettings"
+                "$ref": "#/components/schemas/ShardInfraPatch"
               }
             },
             "application/*+json": {
               "schema": {
-                "$ref": "#/components/schemas/ShardInfraSettings"
+                "$ref": "#/components/schemas/ShardInfraPatch"
               }
             }
           },
@@ -16400,7 +17028,7 @@
           "Files & Backups"
         ],
         "summary": "Take a snapshot",
-        "description": "Capture runs in the background: the response returns immediately with the new node while\nthe spire performs a quiesce-or-stop and writes the snapshot zip. Poll the graph for the\nnode's status to know when it finishes.",
+        "description": "Capture runs in the background on the shard's own spire: the response returns immediately\nwith the new node while that spire performs a quiesce-or-stop and writes the snapshot zip.\nPoll the graph for the node's status to know when it finishes.",
         "parameters": [
           {
             "name": "shardId",
@@ -16491,6 +17119,46 @@
               "text/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The shard's spire refused the snapshot",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The shard's spire did not answer",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -16587,6 +17255,46 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "The shard's spire refused the restore",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The shard's spire did not answer",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           }
         }
       }
@@ -16659,6 +17367,46 @@
               "text/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The shard's spire refused the delete",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The shard's spire did not answer",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -16763,13 +17511,13 @@
         }
       }
     },
-    "/api/shards/{shardId}/snapshots/{snapshotId}/download": {
-      "get": {
+    "/api/shards/{shardId}/snapshots/{snapshotId}/download-ticket": {
+      "post": {
         "tags": [
           "Files & Backups"
         ],
-        "summary": "Download a snapshot's zip",
-        "description": "The downloaded zip lets a user restore the snapshot by hand.",
+        "summary": "Issue a ticket to download a snapshot's zip",
+        "description": "A browser downloads by navigation, which carries no Authorization header, so it presents this\nticket as `ticket` on `GET download` instead. Runs the checks the download runs. The\nticket is bound to the caller's session, this shard and this snapshot, is accepted once, and is\nvalid for sixty seconds; the download runs the checks again when it is presented.",
         "parameters": [
           {
             "name": "shardId",
@@ -16784,7 +17532,7 @@
           {
             "name": "snapshotId",
             "in": "path",
-            "description": "The snapshot node whose zip to download",
+            "description": "The snapshot node whose zip is to be downloaded",
             "required": true,
             "schema": {
               "type": "string",
@@ -16794,7 +17542,44 @@
         ],
         "responses": {
           "200": {
-            "description": "The snapshot zip stream (`application/zip`)"
+            "description": "A ticket",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadTicketResponse"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadTicketResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadTicketResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated, or the token presented carries no session",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           },
           "403": {
             "description": "The caller lacks the snapshots-read capability on this shard",
@@ -16832,6 +17617,142 @@
               "text/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The snapshot is stored on another spire",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/shards/{shardId}/snapshots/{snapshotId}/download": {
+      "get": {
+        "tags": [
+          "Files & Backups"
+        ],
+        "summary": "Download a snapshot's zip",
+        "description": "The downloaded zip lets a user restore the snapshot by hand. Authenticated by the Authorization\nheader, or by a ticket from `POST download-ticket` for this snapshot in the `ticket`\nquery parameter. Records a `ShardSnapshotDownloaded` audit event.",
+        "parameters": [
+          {
+            "name": "shardId",
+            "in": "path",
+            "description": "The shard the snapshot belongs to",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "snapshotId",
+            "in": "path",
+            "description": "The snapshot node whose zip to download",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The snapshot zip stream (`application/zip`)"
+          },
+          "401": {
+            "description": "Not authenticated, or the ticket is used, expired, for another download, or its session has ended",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller lacks the snapshots-read capability on this shard",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The shard, snapshot, or its stored zip could not be found",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The snapshot is stored on another spire",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -19081,13 +20002,13 @@
           "System & Health"
         ],
         "summary": "Download the diagnostics bundle",
-        "description": "A zip of what a support request needs: `diagnostics.json` (the diagnostics snapshot) and\n`bus-stats.json` (the message bus statistics taken now: monitoring counters, this host's\nconnection, the account's JetStream use and limits, the account's revocation count and the\nbus certificates' expiry). The bus statistics are bounded to 5 seconds; a bus that does not\nanswer leaves an error field in `bus-stats.json` and the bundle is still produced.\n`blacklist.json` lists the reason record of every blacklisted version under the versions\ndirectory (the version, whether its marker is present, and the record, or why it could not be\nread); with no record it is an empty list. No credential, key or token is included. Requires\nthe support capability or the platform settings read capability.",
+        "description": "A zip of what a support request needs: `diagnostics.json` (the diagnostics snapshot without the host name) and\n`bus-stats.json` (the message bus statistics taken now: monitoring counters, this host's\nconnection, the account's JetStream use and limits, the account's revocation count and the\nbus certificates' expiry). The bus statistics are bounded to 5 seconds; a bus that does not\nanswer leaves an error field in `bus-stats.json` and the bundle is still produced.\n`blacklist.json` lists the reason record of every blacklisted version under the versions\ndirectory (the version, whether its marker is present, and the record, or why it could not be\nread); with no record it is an empty list. No credential, key or token is included, and\nnothing that identifies a person: no user, session, client address, device name, host name,\ncertificate subject or log line. A failure is stated by its kind, with its message in the\npanel's log. Requires the platform settings read capability.",
         "responses": {
           "200": {
             "description": "The bundle (`application/zip`)"
           },
           "403": {
-            "description": "The caller holds neither the support capability nor the platform settings read capability",
+            "description": "The caller lacks the platform settings read capability",
             "content": {
               "text/plain": {
                 "schema": {
@@ -20537,21 +21458,21 @@
             }
           },
           "400": {
-            "description": "The username is missing, or the password or other fields fail validation",
+            "description": "The username is missing, reserved, taken or outside its length limits, or the password or other fields fail validation",
             "content": {
               "text/plain": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "$ref": "#/components/schemas/ApiError"
                 }
               },
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "$ref": "#/components/schemas/ApiError"
                 }
               },
               "text/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -20726,17 +21647,17 @@
             "content": {
               "text/plain": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "$ref": "#/components/schemas/ApiError"
                 }
               },
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "$ref": "#/components/schemas/ApiError"
                 }
               },
               "text/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -21036,21 +21957,21 @@
             "description": "The password was reset and the user's sessions were revoked"
           },
           "400": {
-            "description": "The new password failed validation",
+            "description": "The new password failed validation or is longer than the limit",
             "content": {
               "text/plain": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "$ref": "#/components/schemas/ApiError"
                 }
               },
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "$ref": "#/components/schemas/ApiError"
                 }
               },
               "text/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -23571,7 +24492,7 @@
           },
           "configFormatRegex": {
             "type": "string",
-            "description": "Regex used when reading - named groups 'key' and 'value'"
+            "description": "Regex used when reading - named groups 'key' and 'value'. Left at\nstring ConfigFileMapping.DefaultConfigFormatRegex, lines are read through the inverse of\nstring ConfigFileMapping.ConfigFormat instead (`ConfigLineSyntax`)"
           },
           "configHeaderFormat": {
             "type": "string",
@@ -23900,7 +24821,7 @@
             "description": "Structured origin/source field parsed from the console format regex; null when unmatched"
           }
         },
-        "description": "    One console history entry, ready for the UI. Two kinds:\n      • `line`   - ordinary console output from a stream.\n      • `marker` - a lifecycle event (start/stop/update) surfaced inline\n        so the console visually separates runs. int? ConsoleLineDto.State carries\n        the ApplicationState for state markers; bool? ConsoleLineDto.Success the\n        outcome for update-complete markers (with State null).\n    long ConsoleLineDto.Seq is a per-shard monotonic sequence assigned by the\nserver-side history buffer - clients use it to merge the REST history\nsnapshot with the live SignalR feed without duplicates."
+        "description": "    One console history entry, ready for the UI. Two kinds:\n      \u2022 `line`   - ordinary console output from a stream.\n      \u2022 `marker` - a lifecycle event (start/stop/update) surfaced inline\n        so the console visually separates runs. int? ConsoleLineDto.State carries\n        the ApplicationState for state markers; bool? ConsoleLineDto.Success the\n        outcome for update-complete markers (with State null).\n    long ConsoleLineDto.Seq is a per-shard monotonic sequence assigned by the\nserver-side history buffer - clients use it to merge the REST history\nsnapshot with the live SignalR feed without duplicates."
       },
       "ConsoleSpec": {
         "type": "object",
@@ -23986,7 +24907,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Automation rules (AMP 2 `App.CommandTriggers`): a console-line REGEX → a COMMAND\nto send back to the app when it matches. The command is template-expanded\n(`{{Setting}}`/`{{$PortRef}}`) and then has the match's capture groups\nsubstituted - `{{0}}` = whole match, `{{1}}`… = numbered groups,\n`{{name}}` = named groups. A command may carry embedded newlines to send several\ncommands. (Hytale uses these to drive its `/auth login device` flow.)"
+            "description": "Automation rules (AMP 2 `App.CommandTriggers`): a console-line REGEX \u2192 a COMMAND\nto send back to the app when it matches. The command is template-expanded\n(`{{Setting}}`/`{{$PortRef}}`) and then has the match's capture groups\nsubstituted - `{{0}}` = whole match, `{{1}}`\u2026 = numbered groups,\n`{{name}}` = named groups. A command may carry embedded newlines to send several\ncommands. (Hytale uses these to drive its `/auth login device` flow.)"
           }
         },
         "description": "Parsed from the Console.* keys in a .kvp file.\nDescribes how AMP reads and interprets the application's console output."
@@ -24639,7 +25560,7 @@
           },
           "displayImageSource": {
             "type": "string",
-            "description": "The template's Meta.DisplayImageSource (\"steam:appid\" / \"url:…\" /\n\"internal:name\"), copied at creation and refreshed on update.\nDenormalized so listings render artwork from the shard record alone -\nnever gated on the (potentially slow) template-catalogue load."
+            "description": "The template's Meta.DisplayImageSource (\"steam:appid\" / \"url:\u2026\" /\n\"internal:name\"), copied at creation and refreshed on update.\nDenormalized so listings render artwork from the shard record alone -\nnever gated on the (potentially slow) template-catalogue load."
           },
           "spireId": {
             "type": "string",
@@ -24653,7 +25574,7 @@
           },
           "workingDirName": {
             "type": "string",
-            "description": "            Leaf directory name for this shard's files inside its datastore, e.g.\n            `\"valheim-3f9a2b1c\"`. Set once at creation and never changed. Unique\n            per shard (it embeds the shard id) so deleting a shard and recreating one\n            with the same display name can NEVER reuse the old data directory - a\n            privacy/security guarantee, and it also stops two same-named live shards\n            from fighting over one directory.\n            Empty on shards created before this field existed → the launcher falls\nback to string DeployedShard.Name for them."
+            "description": "            Leaf directory name for this shard's files inside its datastore, e.g.\n            `\"valheim-3f9a2b1c\"`. Set once at creation and never changed. Unique\n            per shard (it embeds the shard id) so deleting a shard and recreating one\n            with the same display name can NEVER reuse the old data directory - a\n            privacy/security guarantee, and it also stops two same-named live shards\n            from fighting over one directory.\n            Empty on shards created before this field existed \u2192 the launcher falls\nback to string DeployedShard.Name for them."
           },
           "createdByUserId": {
             "type": "string"
@@ -24744,7 +25665,7 @@
         "properties": {
           "ampVersion": {
             "type": "string",
-            "description": "Three-part AMP assembly version (e.g. \"3.1.0\")"
+            "description": "The AMP build's major.minor.patch version, as its release is named (e.g. \"3.0.1\")"
           },
           "codename": {
             "type": "string",
@@ -24852,7 +25773,7 @@
                 "type": "null"
               },
               {
-                "description": "Why a runtime that answered cannot run containers as the account AMP runs as, coded for translation; null unless the verdict is Unusable",
+                "description": "Why no container can run as the account AMP runs as, coded for translation; null unless the verdict is Unusable",
                 "$ref": "#/components/schemas/ApiError"
               }
             ]
@@ -25048,6 +25969,25 @@
           "Backups"
         ],
         "description": "What a first-level directory in a datastore is, as the usage scan sees it"
+      },
+      "DownloadTicketResponse": {
+        "required": [
+          "ticket",
+          "expiresAt"
+        ],
+        "type": "object",
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "description": "Present as `ticket` on the download's URL; accepted once"
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "UTC instant after which the ticket is refused even if unused",
+            "format": "date-time"
+          }
+        },
+        "description": "A download ticket and the instant it stops being accepted"
       },
       "EffectiveSetting": {
         "required": [
@@ -25595,6 +26535,19 @@
           }
         },
         "description": "One entry in a shard directory listing (file or folder), relative to the shard root"
+      },
+      "FileStartDto": {
+        "required": [
+          "path"
+        ],
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The directory, relative to the shard working directory. Empty is the root"
+          }
+        },
+        "description": "Where the file manager opens for the caller"
       },
       "FirewallProtocol": {
         "enum": [
@@ -26813,7 +27766,7 @@
           },
           "state": {
             "type": "string",
-            "description": "What the activation file says on its own: Valid, Expired, or Invalid (unreadable/moved-machine activation)"
+            "description": "What the activation file says on its own: Valid, Expired, or Invalid (unreadable/moved-machine activation);\n    or Unconfirmed while its spire cannot identify its machine (typically a start that ran ahead of the network) and is\n    checking again. An Unconfirmed licence stands as it did when that spire last confirmed it since it started, and stands Invalid when it has not"
           },
           "standing": {
             "type": "string",
@@ -26832,7 +27785,7 @@
               "null",
               "string"
             ],
-            "description": "When a licence in its grace period stops counting",
+            "description": "When a licence in its grace period stops counting; for an Unconfirmed licence that counts,\n    when it stops counting if it is never confirmed",
             "format": "date-time"
           },
           "usage": {
@@ -27334,7 +28287,7 @@
             "description": "When true, unmapped keys in this subsection are auto-mapped by name"
           }
         },
-        "description": "One config-file subsection: an optional string MetaConfigSubsection.Heading ([section]) plus\na map of config-key → setting-field-name. bool MetaConfigSubsection.AutoMap emits every\nnon-command-line setting automatically (no explicit mappings needed).\nPorted from AMP 2 `MetaConfigSubsection`."
+        "description": "One config-file subsection: an optional string MetaConfigSubsection.Heading ([section]) plus\na map of config-key \u2192 setting-field-name. bool MetaConfigSubsection.AutoMap emits every\nnon-command-line setting automatically (no explicit mappings needed).\nPorted from AMP 2 `MetaConfigSubsection`."
       },
       "MetricsModel": {
         "type": "object",
@@ -27690,6 +28643,10 @@
           },
           "agentVersion": {
             "type": "string"
+          },
+          "launchContract": {
+            "type": "integer",
+            "format": "int32"
           }
         }
       },
@@ -29042,7 +29999,7 @@
           },
           "isTunnel": {
             "type": "boolean",
-            "description": "Belongs to a VPN/tunnel interface (tun/tap/wg/tailscale/zerotier/ppp…)"
+            "description": "Belongs to a VPN/tunnel interface (tun/tap/wg/tailscale/zerotier/ppp\u2026)"
           },
           "interfaceName": {
             "type": "string",
@@ -29881,7 +30838,8 @@
       "SettingsActionInfo": {
         "required": [
           "id",
-          "category"
+          "category",
+          "subcategory"
         ],
         "type": "object",
         "properties": {
@@ -29892,6 +30850,10 @@
           "category": {
             "type": "string",
             "description": "The settings category the action is grouped under"
+          },
+          "subcategory": {
+            "type": "string",
+            "description": "The subcategory within that category the action ends, or empty when it follows the whole category"
           }
         },
         "description": "One renderable settings inline action"
@@ -30077,7 +31039,7 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Allowed values for an enum-style setting: stored value → display label"
+            "description": "Allowed values for an enum-style setting: stored value \u2192 display label"
           },
           "valueSourceId": {
             "type": "string",
@@ -30432,7 +31394,7 @@
             "$ref": "#/components/schemas/DiskLimitLevel"
           }
         },
-        "description": "Disk usage of one directory inside a datastore. DiskUsageKind ShardDiskUsage.Kind says which case it is:\n  • Active shard - DiskUsageKind.Shard, bool ShardDiskUsage.Deleted false.\n  • Soft-deleted shard - DiskUsageKind.Shard, bool ShardDiskUsage.Deleted true\n    (the operator can Restore it or Delete it permanently).\n  • Orphan - DiskUsageKind.Orphan: data with no matching shard at all\n    (surface it, never silently omit).\n  • Backups - DiskUsageKind.Backups: every shard's snapshot archives."
+        "description": "Disk usage of one directory inside a datastore. DiskUsageKind ShardDiskUsage.Kind says which case it is:\n  \u2022 Active shard - DiskUsageKind.Shard, bool ShardDiskUsage.Deleted false.\n  \u2022 Soft-deleted shard - DiskUsageKind.Shard, bool ShardDiskUsage.Deleted true\n    (the operator can Restore it or Delete it permanently).\n  \u2022 Orphan - DiskUsageKind.Orphan: data with no matching shard at all\n    (surface it, never silently omit).\n  \u2022 Backups - DiskUsageKind.Backups: every shard's snapshot archives."
       },
       "ShardEndpoint": {
         "required": [
@@ -30648,6 +31610,171 @@
         },
         "description": "Infra settings bundled with the spire/template context the UI needs to\nrender container-mode options and resource-limit controls correctly."
       },
+      "ShardInfraPatch": {
+        "type": "object",
+        "properties": {
+          "startOnBoot": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "autoRestartOnCrash": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "startupOrder": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "sleepMode": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "advertisedAddress": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "advertisedAddressIncludesPort": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "containerMode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ShardContainerMode"
+              }
+            ]
+          },
+          "containerImageOverride": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The image to run instead of the template's; an empty string returns to the template's"
+          },
+          "memoryLimitMb": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "memoryReservationMb": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "memorySwapMb": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "cpuLimit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "maxUsersCap": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "enableAnalytics": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "userSpecificData": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "minimumSessionTimeForRetention": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "enableGeoFiltering": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "blockedCountries": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "allowedCountries": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "blockUnknownCountries": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "geoFilterKickMessage": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "geoFilterKickCommand": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "diskLimitMb": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "importConfigFilesFromSftp": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "extraEnvironment": {
+            "type": [
+              "null",
+              "object"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The whole set of extra environment variables, replacing the stored set when present"
+          }
+        },
+        "description": "A change to a shard's ShardInfraSettings: every field is optional, and one that is\nabsent or null keeps its stored value."
+      },
       "ShardInfraSaveResult": {
         "type": "object",
         "properties": {
@@ -30671,7 +31798,7 @@
           },
           "startOnBoot": {
             "type": "boolean",
-            "description": "Start this shard automatically when the host Spire starts."
+            "description": "Start this shard when the system its spire runs on starts, whether or not it was running\nwhen that system went down. Read once per boot by the owning spire; a restart of AMP alone\nstarts nothing."
           },
           "autoRestartOnCrash": {
             "type": "boolean",
@@ -30679,7 +31806,7 @@
           },
           "startupOrder": {
             "type": "integer",
-            "description": "Determines the order in which shards start on boot.\nLower numbers start first. Shards with the same order start in\nparallel. Default 100; use lower values for dependencies.",
+            "description": "Determines the order in which shards start on boot.\nLower numbers start first, one shard at a time; shards with the same\norder start by name. Default 100; use lower values for dependencies.",
             "format": "int32"
           },
           "sleepMode": {
@@ -30819,7 +31946,7 @@
           },
           "startOnBoot": {
             "type": "boolean",
-            "description": "Start this shard automatically when the host Spire starts."
+            "description": "Start this shard when the system its spire runs on starts, whether or not it was running\nwhen that system went down. Read once per boot by the owning spire; a restart of AMP alone\nstarts nothing."
           },
           "autoRestartOnCrash": {
             "type": "boolean",
@@ -30827,7 +31954,7 @@
           },
           "startupOrder": {
             "type": "integer",
-            "description": "Determines the order in which shards start on boot.\nLower numbers start first. Shards with the same order start in\nparallel. Default 100; use lower values for dependencies.",
+            "description": "Determines the order in which shards start on boot.\nLower numbers start first, one shard at a time; shards with the same\norder start by name. Default 100; use lower values for dependencies.",
             "format": "int32"
           },
           "sleepMode": {
@@ -30982,7 +32109,7 @@
               "number",
               "string"
             ],
-            "description": "Process-tree CPU usage in percent of one core ×100 (0–100 per host normalisation)",
+            "description": "Process-tree CPU usage in percent of one core \u00d7100 (0\u2013100 per host normalisation)",
             "format": "double"
           },
           "memoryMb": {
@@ -31527,6 +32654,10 @@
           },
           "isStopped": {
             "type": "boolean"
+          },
+          "awaitsLicence": {
+            "type": "boolean",
+            "description": "Waiting for a person to accept the application's licence before a start that no person was\nwaiting on can go ahead. The shard is in the same AwaitingUserAction state an agent's own prompt\nputs it in, but no agent runs: the start was refused before anything was launched."
           },
           "acceptsTraffic": {
             "type": "boolean",
@@ -32930,7 +34061,7 @@
             "items": {
               "$ref": "#/components/schemas/Step"
             },
-            "description": "Steps run if the task fails. EMPTY = unhandled: FailurePolicy? TaskStep.FailureOverride (or the\ntask type's default policy) applies (Continue → run is marked CompletedWithErrors;\nAbort → remaining steps are NotReached and the run is Failed). NON-empty = the user\nhandled the failure (like catch): the branch runs and the failure alone doesn't fail\nthe run."
+            "description": "Steps run if the task fails. EMPTY = unhandled: FailurePolicy? TaskStep.FailureOverride (or the\ntask type's default policy) applies (Continue \u2192 run is marked CompletedWithErrors;\nAbort \u2192 remaining steps are NotReached and the run is Failed). NON-empty = the user\nhandled the failure (like catch): the branch runs and the failure alone doesn't fail\nthe run."
           },
           "failureOverride": {
             "oneOf": [
@@ -34776,8 +35907,21 @@
         },
         "description": "A server-derived firewall rule withheld because AMP itself holds the number. The server behind it\nis unreachable on that port until it is moved, and nothing outside this record says why."
       }
+    },
+    "securitySchemes": {
+      "Bearer": {
+        "type": "http",
+        "description": "The session token AMP issues at sign-in.",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
     }
   },
+  "security": [
+    {
+      "Bearer": []
+    }
+  ],
   "tags": [
     {
       "name": "Authentication & Setup",

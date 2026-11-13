@@ -3,7 +3,9 @@
 
 It follows the documented behaviour (docs/amp3-api/API_REFERENCE.md sections 5 and 8): username and
 password login, renew, single-use hub tickets accepted only as ``?access_token=``, and a SignalR JSON
-hub at /hubs/shard. It is a model of what we were told, not a recording of the real thing.
+hub at /hubs/shard. It also serves the sign-in capabilities, ticket-based downloads (files, zips and
+snapshots) and the licence (EULA) answers of the live spec of 2026-11-13. It is a model of what we were
+told, not a recording of the real thing.
 """
 
 from __future__ import annotations
@@ -59,6 +61,20 @@ class FakeAmp:
     rate_limits: list[str | None] = field(default_factory=list)
     # The ``preview`` block of GET /api/Health/status; None is a release build, which has none.
     preview: dict[str, Any] | None = None
+    # GET /api/auth/capabilities. ``passkeyStatus`` NotConfigured is what a real panel answered.
+    capabilities: dict[str, Any] | None = field(default_factory=lambda: {
+        "passkeysAvailable": False, "passkeyStatus": "NotConfigured", "passkeyMessageKey": "auth.passkey.none",
+        "rpId": None, "expectedOrigin": None, "passkeyPolicy": "Encouraged"})
+    capability_checks: int = 0
+    # Files a download can return, by shard-relative path.
+    files: dict[str, bytes] = field(default_factory=lambda: {"server.properties": b"motd=Hello\n",
+                                                             "world/level.dat": b"\x00LEVEL"})
+    snapshot_zip: bytes = b"PK\x03\x04snapshot"
+    download_tickets: dict[str, tuple[Session, str, Any, bool]] = field(default_factory=dict)
+    awaits_licence: bool = False
+    # (status, Retry-After) for the next snapshot delete: 409 and 503 are documented since 2026-11-13.
+    snapshot_error: tuple[int, str | None] | None = None
+    licence_answers: list[str] = field(default_factory=list)
 
     tokens: dict[str, tuple[Session, datetime]] = field(default_factory=dict)
     tickets: dict[str, tuple[Session, bool]] = field(default_factory=dict)  # ticket -> (session, used)
@@ -154,6 +170,98 @@ class FakeAmp:
         # AMP declares text/plain for this body; the client must not rely on the content type.
         return web.Response(text=json.dumps({"token": ticket, "expiresAt": expires}), content_type="text/plain")
 
+    async def auth_capabilities(self, request: web.Request) -> web.Response:
+        self.capability_checks += 1
+        if self.capabilities is None:
+            return web.Response(status=404)
+        return web.json_response(self.capabilities)
+
+    def _ticket(self, request: web.Request, kind: str, what: Any) -> web.Response:
+        session = self._bearer(request)
+        if session is None:
+            return web.Response(status=401)
+        ticket = f"dlticket-{next(self._seq)}-{'y' * 16}"
+        self.download_tickets[ticket] = (session, kind, what, False)
+        expires = (self.clock() + timedelta(seconds=60)).isoformat().replace("+00:00", "Z")
+        return web.json_response({"ticket": ticket, "expiresAt": expires})
+
+    def _spend(self, request: web.Request, kind: str) -> Any:
+        """The ticket's payload, or None if it is missing, used, for another download or its session ended."""
+        ticket = request.query.get("ticket", "")
+        entry = self.download_tickets.get(ticket)
+        if entry is None or entry[3] or entry[1] != kind or entry[0].revoked:
+            return None
+        self.download_tickets[ticket] = (entry[0], entry[1], entry[2], True)
+        return entry[2]
+
+    async def download_ticket(self, request: web.Request) -> web.Response:
+        body = await request.json()
+        if body.get("path") not in self.files:
+            return web.json_response({"title": "Not Found", "status": 404}, status=404)
+        return self._ticket(request, "file", body["path"])
+
+    async def zip_ticket(self, request: web.Request) -> web.Response:
+        body = await request.json()
+        paths = body.get("paths") or []
+        if not paths:
+            return web.json_response({"title": "Bad Request", "status": 400, "code": "files.error.nothingSelected"},
+                                     status=400)
+        return self._ticket(request, "zip", list(paths))
+
+    async def snapshot_ticket(self, request: web.Request) -> web.Response:
+        return self._ticket(request, "snapshot", request.match_info["snap"])
+
+    async def download(self, request: web.Request) -> web.StreamResponse:
+        if "ticket" not in request.query:  # the Bearer form, with ?path=
+            if self._bearer(request) is None:
+                return web.Response(status=401)
+            path = request.query.get("path")
+        else:
+            path = self._spend(request, "file")
+        if path is None:
+            return web.json_response({"title": "Unauthorized", "status": 401}, status=401)
+        self.calls.append(f"download:{path}")
+        return web.Response(body=self.files[path], content_type="application/octet-stream")
+
+    async def zip(self, request: web.Request) -> web.StreamResponse:
+        if "ticket" not in request.query:
+            return web.json_response({"title": "Bad Request", "status": 400,
+                                      "code": "files.error.downloadTicketRequired"}, status=400)
+        paths = self._spend(request, "zip")
+        if paths is None:
+            return web.json_response({"title": "Unauthorized", "status": 401}, status=401)
+        self.calls.append("zip:" + ",".join(paths))
+        # Not a real zip: the client must not care what the bytes are.
+        return web.Response(body=b"PK\x03\x04" + "|".join(paths).encode(), content_type="application/zip")
+
+    async def snapshot_download(self, request: web.Request) -> web.StreamResponse:
+        if "ticket" in request.query:
+            snap = self._spend(request, "snapshot")
+            if snap is None or snap != request.match_info["snap"]:
+                return web.json_response({"title": "Unauthorized", "status": 401}, status=401)
+        elif self._bearer(request) is None:
+            return web.Response(status=401)
+        self.calls.append("snapshot-download:" + request.match_info["snap"])
+        return web.Response(body=self.snapshot_zip, content_type="application/zip")
+
+    async def snapshot_delete(self, request: web.Request) -> web.Response:
+        if not self._authed(request):
+            return web.Response(status=401)
+        if self.snapshot_error is not None:
+            status, wait = self.snapshot_error
+            return web.json_response({"title": "Snapshot store busy", "status": status}, status=status,
+                                     headers={"Retry-After": wait} if wait else None)
+        self.calls.append("snapshot-delete:" + request.match_info["snap"])
+        return web.Response(status=204)
+
+    async def eula(self, request: web.Request) -> web.Response:
+        if not self._authed(request):
+            return web.Response(status=401)
+        answer = request.match_info["answer"]
+        self.licence_answers.append(answer)
+        self.awaits_licence = False
+        return web.Response(status=204)
+
     async def health(self, request: web.Request) -> web.Response:
         self.calls.append("health")
         return web.json_response({"phase": "ready", "message": None, "preview": self.preview})
@@ -201,6 +309,10 @@ class FakeAmp:
     async def state(self, request: web.Request) -> web.Response:
         if not self._authed(request):
             return web.Response(status=401)
+        if self.awaits_licence:
+            return web.json_response({"shardId": SHARD_ID, "isRunning": False, "isStopped": False,
+                                      "isBusy": False, "awaitsLicence": True,
+                                      "statusMessage": "Waiting for the licence to be accepted"})
         return web.json_response({"shardId": SHARD_ID, "status": 20, "isRunning": True, "isStopped": False,
                                   "isBusy": False, "statusMessage": "Running",
                                   "metrics": {"cpuUsagePercent": "12.5", "memoryUsageMB": 2048,
@@ -329,6 +441,15 @@ class FakeAmp:
         app.router.add_post("/api/Auth/renew", self.renew)
         app.router.add_post("/api/Auth/logout", self.logout)
         app.router.add_post("/api/auth/hub-token", self.hub_token)
+        app.router.add_get("/api/auth/capabilities", self.auth_capabilities)
+        app.router.add_post("/api/shards/{id}/files/download-ticket", self.download_ticket)
+        app.router.add_post("/api/shards/{id}/files/zip-ticket", self.zip_ticket)
+        app.router.add_get("/api/shards/{id}/files/download", self.download)
+        app.router.add_get("/api/shards/{id}/files/zip", self.zip)
+        app.router.add_post("/api/shards/{id}/snapshots/{snap}/download-ticket", self.snapshot_ticket)
+        app.router.add_get("/api/shards/{id}/snapshots/{snap}/download", self.snapshot_download)
+        app.router.add_delete("/api/shards/{id}/snapshots/{snap}", self.snapshot_delete)
+        app.router.add_post("/api/Shards/{id}/eula/{answer:accept|decline}", self.eula)
         app.router.add_get("/api/Shards", self.shards)
         app.router.add_get("/api/Health/status", self.health)
         app.router.add_post("/api/Shards/{id}/console", self.console)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "portcullis-api"
-version = "0.1.0"
+version = "0.2.0"
 description = "Async, typed Python client for the CubeCoders AMP 3 web API (REST and SignalR)"
 readme = "README.md"
 license = "MIT"

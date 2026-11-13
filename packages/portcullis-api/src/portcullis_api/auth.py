@@ -11,6 +11,11 @@ What AMP 3 does (docs/amp3-api/API_REFERENCE.md section 5):
 * ``POST /api/auth/hub-token`` (Bearer) returns ``{token, expiresAt}``: a ticket for the SignalR hubs
   that is accepted once and lives 60-90 seconds. Every connect and every reconnect needs a new one,
   so tickets are never cached here.
+* ``GET /api/auth/capabilities`` (anonymous) says what the panel offers at sign-in, including its
+  ``passkeyPolicy`` (``Optional``, ``Encouraged`` or ``Required``). It is read before each login: under
+  ``Required`` a password-only account gets at most an enrolment-only session, which a bot can't use, so
+  the login is refused up front with a message that says why. The answer is evaluated per caller origin,
+  so the bot may see a different ``passkeyStatus`` than a browser does; only the policy is acted on.
 """
 
 from __future__ import annotations
@@ -44,6 +49,10 @@ LOGIN_PATH = "/api/Auth/login"
 RENEW_PATH = "/api/Auth/renew"
 LOGOUT_PATH = "/api/Auth/logout"
 HUB_TOKEN_PATH = "/api/auth/hub-token"
+CAPABILITIES_PATH = "/api/auth/capabilities"
+
+# passkeyPolicy values the spec documents. Anything else is kept and logged, never acted on.
+PASSKEY_POLICIES = ("Optional", "Encouraged", "Required")
 
 Clock = Callable[[], datetime]
 
@@ -98,6 +107,64 @@ def jwt_expiry(token: str) -> datetime | None:
         return None
 
 
+@dataclass(frozen=True)
+class AuthCapabilities:
+    """What the panel offers at sign-in (``GET /api/auth/capabilities``), as seen from this client.
+
+    ``passkey_status`` is AMP's verdict for this caller's origin. The spec only gives ``IpAddressHost``
+    as an example; ``NotConfigured`` has been seen live. Unknown values are kept as they are.
+    """
+
+    passkeys_available: bool
+    passkey_status: str | None
+    passkey_policy: str | None
+    raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    @classmethod
+    def parse(cls, body: Any) -> AuthCapabilities | None:
+        if not isinstance(body, dict):
+            return None
+
+        def text(key: str) -> str | None:
+            value = body.get(key, body.get(key[:1].upper() + key[1:]))
+            return value if isinstance(value, str) and value else None
+
+        available = body.get("passkeysAvailable", body.get("PasskeysAvailable"))
+        return cls(passkeys_available=available is True, passkey_status=text("passkeyStatus"),
+                   passkey_policy=text("passkeyPolicy"), raw=body)
+
+    @property
+    def passkey_required(self) -> bool:
+        return (self.passkey_policy or "").strip().lower() == "required"
+
+
+# 200 bodies from login that carry no token. The spec names the markers but not their exact casing.
+_LOGIN_MARKERS = {
+    "passwordchangerequired": ("AMP wants the bot's account to change its password before it can sign in. "
+                               "Sign in to the panel as that account once, set a new password, and put "
+                               "the new one in the bot's settings."),
+    "passkeyrequired": ("AMP wants the bot's account to sign in with a passkey, which a bot can't do. Give "
+                        "the bot an account without a passkey, or set the panel's passkey policy to "
+                        "Optional or Encouraged."),
+    "secondfactorrequired": ("AMP wants a second factor for the bot's account, which a bot can't give. "
+                             "Turn two-factor sign-in off for that account."),
+    "twofactorrequired": ("AMP wants a second factor for the bot's account, which a bot can't give. "
+                          "Turn two-factor sign-in off for that account."),
+}
+
+
+def login_marker(body: Any) -> str | None:
+    """The explanation for a token-less login answer, when it names a flow we recognise."""
+    if not isinstance(body, dict):
+        return None
+    for key, value in body.items():
+        explanation = _LOGIN_MARKERS.get(str(key).lower())
+        if explanation and value not in (None, False, "", 0):
+            reason = body.get("reason", body.get("Reason"))
+            return f"{explanation} (AMP said: {reason})" if isinstance(reason, str) and reason else explanation
+    return None
+
+
 def _json_or_none(text: str) -> Any:
     try:
         return json.loads(text) if text else None
@@ -129,6 +196,7 @@ class TokenManager:
         clock: Clock = utcnow,
         timeout: float = 30.0,
         login_cooldown: timedelta = timedelta(seconds=60),
+        check_capabilities: bool = True,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self._session = session
@@ -146,6 +214,10 @@ class TokenManager:
         # answers repeated failed logins with 429 and can lock the account out.
         self.login_cooldown = login_cooldown
         self._refused: tuple[datetime, AmpError] | None = None
+        # Read GET /api/auth/capabilities before each login (see the module docstring). Turn it off only
+        # for a panel that answers it wrongly; a failed read never blocks the login.
+        self.check_capabilities = check_capabilities
+        self.capabilities: AuthCapabilities | None = None
         # Counters, handy for /admin diagnostics and for tests.
         self.logins = 0
         self.renewals = 0
@@ -184,9 +256,10 @@ class TokenManager:
     def _session_from(self, body: Any, path: str) -> SessionToken:
         if not isinstance(body, dict) or not isinstance(body.get("token"), str) or not body["token"]:
             keys = sorted(body.keys()) if isinstance(body, dict) else type(body).__name__
+            explained = login_marker(body)
             raise LoginNotSupported(
-                "AMP did not issue a token. The bot's account must not need a second factor, a passkey "
-                f"or a password change. Response fields: {keys}",
+                explained or "AMP did not issue a token. The bot's account must not need a second factor, "
+                f"a passkey or a password change. Response fields: {keys}",
                 method="POST",
                 path=path,
                 body=self.redactor.data(body),
@@ -199,7 +272,53 @@ class TokenManager:
             expires = self._clock() + timedelta(hours=1)
         return SessionToken(token, expires)
 
+    async def _get_anonymous(self, path: str) -> tuple[int, str]:
+        url = self.base_url + path
+        try:
+            async with self._session.get(url, headers={"Accept": "application/json"},
+                                         timeout=self._timeout) as resp:
+                return resp.status, await resp.text()
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise Unreachable(f"AMP did not answer: {type(exc).__name__}", method="GET", path=path) from exc
+
     # ------------------------------------------------------------------ flows
+
+    async def read_capabilities(self) -> AuthCapabilities | None:
+        """Read what the panel offers at sign-in. None when the panel doesn't answer it usefully
+        (an older build without the route, or a body we can't read)."""
+        status, text = await self._get_anonymous(CAPABILITIES_PATH)
+        if status != 200:
+            log.debug("GET %s answered %s; skipping the passkey policy check", CAPABILITIES_PATH, status)
+            return None
+        caps = AuthCapabilities.parse(_json_or_none(text))
+        if caps is not None:
+            if caps.passkey_policy is not None and caps.passkey_policy not in PASSKEY_POLICIES:
+                log.info("AMP reported an undocumented passkeyPolicy %r; treating it as not Required",
+                         caps.passkey_policy)
+            self.capabilities = caps
+        return caps
+
+    async def _check_capabilities(self) -> None:
+        """Refuse to log in when the panel requires passkeys. Any failure to read the answer is ignored:
+        the login itself then decides."""
+        if not self.check_capabilities:
+            return
+        try:
+            caps = await self.read_capabilities()
+        except AmpError as exc:
+            if isinstance(exc, Unreachable):
+                raise  # the login would fail the same way; say so once
+            log.debug("Could not read %s: %s", CAPABILITIES_PATH, exc)
+            return
+        if caps is not None and caps.passkey_required:
+            refused = LoginNotSupported(
+                "This AMP panel requires passkey sign-in (passkeyPolicy is Required). A bot can't use a "
+                "passkey, and a password-only account would only get an enrolment session. Set the policy "
+                "to Optional or Encouraged in the panel's sign-in settings, then start the bot again.",
+                method="GET", path=CAPABILITIES_PATH, body=caps.raw,
+            )
+            self._refused = (self._clock() + self.login_cooldown, refused)
+            raise refused
 
     async def login(self) -> SessionToken:
         body = {
@@ -211,9 +330,11 @@ class TokenManager:
             until, refused = self._refused
             left = (until - self._clock()).total_seconds()
             if left > 0:
-                raise type(refused)(refused.message, status=refused.status, code=refused.code, method="POST",
-                                    path=LOGIN_PATH, retry_after=left if isinstance(refused, RateLimited) else None)
+                raise type(refused)(refused.message, status=refused.status, code=refused.code,
+                                    method=refused.method or "POST", path=refused.path or LOGIN_PATH,
+                                    retry_after=left if isinstance(refused, RateLimited) else None)
             self._refused = None
+        await self._check_capabilities()
         status, text, wait = await self._post_with_wait(LOGIN_PATH, json_body=body)
         if status == 200:
             self._current = self._session_from(_json_or_none(text), LOGIN_PATH)
