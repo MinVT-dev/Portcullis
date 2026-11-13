@@ -265,7 +265,8 @@ class AdminModule(Module):
         embed.add_field(name="AMP", value="reachable" if summary.reachable else "not reachable")
         embed.add_field(name="Servers", value=summary.text())
         embed.add_field(name="Versions", value=f"Portcullis {version('portcullis')} · portcullis-api "
-                                               f"{portcullis_api.__version__} (AMP spec {portcullis_api.SPEC_BUILD})"
+                                               f"{portcullis_api.__version__} (AMP spec {portcullis_api.SPEC_BUILD}, "
+                                               f"{portcullis_api.SPEC_DATE})"
                                                f" · discord.py {discord.__version__} · Python "
                                                f"{platform.python_version()}", inline=False)
         embed.add_field(name="Database", value=f"schema version {self.ctx.db.version}")

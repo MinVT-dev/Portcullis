@@ -216,7 +216,7 @@ async def test_admin_bot_is_for_owners(h: Harness) -> None:
     i = FakeInteraction(owner())
     await h.m.admin.bot_action(i, "status")
     fields = {f.name: f.value for f in i.replies[-1]["embed"].fields}
-    assert "portcullis-api" in fields["Versions"] and "3.0.0.6" in fields["Versions"]
+    assert "portcullis-api" in fields["Versions"] and "2026-11-13" in fields["Versions"]
     assert fields["Discord latency"] == "50 ms"
 
     synced: list[object] = []

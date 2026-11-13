@@ -1,7 +1,8 @@
 {
-  "file": "webapi-3.0.0.6.json",
-  "amp_build": "3.0.0.6+f3d1a77cea",
-  "captured": "2026-11-07",
-  "source": "data/versions/3.0.0/webapi/webapi.json in the AMP install (not served over HTTP)",
-  "sha256": "4af7678fafa08b5702af6207eeaee8be272e2c23530f6a87e9c20ceff5c2854b"
+  "file": "webapi-live-2026-11-13.json",
+  "amp_build": "unknown (3.0 preview; the spec has info.version 1.0.0 and no build number)",
+  "captured": "2026-11-13",
+  "source": "Downloaded from the panel's Scalar API browser (POST /api/api-browser/ticket, then scalar/session). The servers entry (the panel address) was removed before committing.",
+  "previous": "webapi-3.0.0.6.json (3.0.0.6+f3d1a77cea, 2026-11-07)",
+  "sha256": "b986ced7657ca8307ffd5a499c3d34bdde91897d5807529f33bc48bddec62d3e"
 }

@@ -5,6 +5,7 @@ a factory for hub connections.
     async with AmpClient(url, Credentials(user, password)) as amp:
         shards = await amp.shards.get_shards()
         await amp.shards.post_shards_console(shard_id, {"command": "say hi"})
+        data = await amp.downloads.file(shard_id, "server.properties")
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 
 from portcullis_api.auth import Credentials, TokenManager
+from portcullis_api.downloads import Downloads
 from portcullis_api.redact import Redactor
 from portcullis_api.signalr import HubConnection, Mode
 from portcullis_api.transport import AmpTransport
@@ -45,6 +47,7 @@ class AmpClient:
         refresh_margin: timedelta = timedelta(minutes=30),
         timeout: float = 30.0,
         keep_session_renewed: bool = True,
+        check_capabilities: bool = True,
     ) -> None:
         from portcullis_api.api import GROUPS  # generated; imported lazily to keep start-up cheap
 
@@ -53,10 +56,13 @@ class AmpClient:
         self.session = session or aiohttp.ClientSession()
         self.redactor = redactor or Redactor()
         self.auth = TokenManager(self.base_url, self.session, credentials, redactor=self.redactor,
-                                 refresh_margin=refresh_margin, timeout=timeout)
+                                 refresh_margin=refresh_margin, timeout=timeout,
+                                 check_capabilities=check_capabilities)
         self.transport = AmpTransport(self.base_url, self.session, self.auth, timeout=timeout)
         for name, cls in GROUPS.items():
             setattr(self, name, cls(self.transport))
+        # Ticket-based downloads (files, zips, snapshots); see portcullis_api.downloads.
+        self.downloads = Downloads(self.transport, self.files_backups)
         self._keep_renewed = keep_session_renewed
         self._renewal: asyncio.Task[None] | None = None
 

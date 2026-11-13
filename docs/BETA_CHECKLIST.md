@@ -22,6 +22,15 @@ Tick each one on a real panel. For anything that fails, the bot's log line and t
 
 - [ ] Download the new spec and run spec-diff against the pinned one ([DEVELOPING.md](DEVELOPING.md)). A changed route or model is the most likely way for Portcullis to break, and the preview build expires on 7 December 2026.
 - [ ] Log in, open `/server list` and `/server status` on one running server.
+- [ ] Write the panel's build number into `packages/portcullis-api/src/portcullis_api/spec/PIN.json`. The client was regenerated on 2026-11-13 from the spec the live panel served, which names no build.
+
+### 1a. New in the live spec of 2026-11-13
+
+- [ ] A server waiting for its game licence (EULA): stop a Minecraft server, delete `eula.txt` or set it to false, and let a schedule or a reboot start it. `/server status` should say **Needs licence**, the alert channel should say so, and **Accept the licence…** (Manage Server) or **Decline** should answer it. The bot's AMP account needs `settings.write` to accept and `power.start` to decline.
+- [ ] A sleeping server shows **Sleeping**, not Unknown or Offline. Portcullis reads "not running but accepting traffic" as asleep, which the spec implies but nobody has seen.
+- [ ] `amp.downloads.file`, `.zip` and `.snapshot` from `portcullis_api` (not used by the bot yet): the download tickets work without a Bearer header.
+- [ ] Making, restoring or deleting a backup while another backup job runs gives "AMP is busy with another backup job", not a raw 409.
+- [ ] `GET /api/auth/capabilities` answers the bot's address with `passkeyPolicy` Optional or Encouraged; log in still works.
 
 ### 2. Actions labelled "unverified" in Discord
 

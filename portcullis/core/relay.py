@@ -54,6 +54,7 @@ STATE_ICONS = {
     ServerState.SLEEPING: "💤",
     ServerState.FAILED: "❌",
     ServerState.SUSPENDED: "⏸️",
+    ServerState.AWAITING_LICENCE: "📜",
     ServerState.UNKNOWN: "❔",
 }
 

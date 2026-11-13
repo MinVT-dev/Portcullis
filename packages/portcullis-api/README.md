@@ -23,6 +23,7 @@ Not affiliated with or endorsed by CubeCoders. "AMP" is their product name.
 - [How AMP 3 is organised](#how-amp-3-is-organised)
 - [The API groups](#the-api-groups)
 - [Login and sessions](#login-and-sessions)
+- [Downloads](#downloads)
 - [Live events](#live-events)
 - [Errors and retries](#errors-and-retries)
 - [Keeping secrets out of logs](#keeping-secrets-out-of-logs)
@@ -34,9 +35,10 @@ Not affiliated with or endorsed by CubeCoders. "AMP" is their product name.
 
 ## Features
 
-- **The whole API.** Every REST operation in the OpenAPI spec of AMP 3.0.0.6 (263 of them) is an `async` method with typed arguments, grouped the way the spec groups them (`amp.shards`, `amp.scheduling`, `amp.files_backups`, ...).
-- **Typed models.** Pydantic v2 models cover all 390 schemas, generated from a pinned copy of the spec. Responses are parsed into them, so your editor can autocomplete fields. The package ships `py.typed`.
-- **Login that looks after itself.** It logs in on start, renews the session 30 minutes before the roughly 8-hour expiry, and logs in again after a 401.
+- **The whole API.** Every REST operation in the OpenAPI spec served by a live AMP 3 panel on 13 November 2026 (269 of them) is an `async` method with typed arguments, grouped the way the spec groups them (`amp.shards`, `amp.scheduling`, `amp.files_backups`, ...).
+- **Typed models.** Pydantic v2 models cover all 392 schemas, generated from a pinned copy of the spec. Responses are parsed into them, so your editor can autocomplete fields. The package ships `py.typed`.
+- **Login that looks after itself.** It logs in on start, renews the session 30 minutes before the roughly 8-hour expiry, and logs in again after a 401. It reads the panel's sign-in capabilities first and stops with a clear message when the panel requires passkeys, or when AMP asks for a password change or a passkey.
+- **Downloads.** `amp.downloads` fetches files, zips of files and folders, and snapshots through AMP's single-use download tickets, in memory or streamed to disk with a size cap.
 - **Live events over SignalR**, through a small built-in client that fetches a fresh single-use hub ticket on every connect, rejoins after a reconnect and backs off when the panel is down.
 - **`watch_shard()`.** One `async for` loop gives you one server's console, players, metrics and state changes.
 - **Safe defaults:**
@@ -164,8 +166,30 @@ Not every operation has been run on a real panel; see [what has been checked](#w
 | `timeout` | 30 s | The time limit for each request. |
 | `session` | a new one | Pass your own `aiohttp.ClientSession` to share connections. The client won't close a session it didn't create. |
 | `redactor` | a new one | A shared `Redactor`, if you log secrets through other code too. |
+| `check_capabilities` | `True` | Read `GET /api/auth/capabilities` before each login (see below). |
 
 After a 401, the client renews the session or logs in again, then retries the call once. If that fails too, you get `AuthExpired`.
+
+**Accounts a program can't use.** Before each login the client reads `GET /api/auth/capabilities` (anonymous). When the panel's `passkeyPolicy` is `Required`, a password-only account would get at most an enrolment session, so the client raises `LoginNotSupported` without sending the password, and says to set the policy to `Optional` or `Encouraged`. The answer is kept in `amp.auth.capabilities`. AMP evaluates it per caller origin, so `passkey_status` can differ from what a browser sees (`NotConfigured` has been seen live; the spec only names `IpAddressHost`). Only the policy is acted on, and a panel that doesn't answer the route is logged in as before. When the login itself answers with a `PasswordChangeRequired` or `PasskeyRequired` marker instead of a token, `LoginNotSupported` names what to fix.
+
+## Downloads
+
+AMP 3 hands out downloads through tickets that are bound to your session, accepted once and valid for 60 seconds. `amp.downloads` asks for a fresh one and spends it straight away:
+
+```python
+props = await amp.downloads.file(shard_id, "server.properties")             # bytes
+size = await amp.downloads.zip(shard_id, ["world", "server.properties"], dest="backup.zip")
+await amp.downloads.snapshot(shard_id, snapshot_id, dest="snapshot.zip", max_bytes=5 * 2**30)
+```
+
+- Pass `dest` to stream to a file instead of holding the bytes in memory; the byte count is returned. A failed or oversized download removes the partial file.
+- `max_bytes` stops a download that is bigger than you expected.
+- Downloads are never retried, because a ticket only works once.
+- AMP may leave blocked file types out of a zip, or refuse a single file, unless the account holds `files.bypassrestrictions`.
+
+The old `POST .../files/zip` is gone from AMP. The ticket calls are also there as generated methods (`amp.files_backups.post_shards_files_zip_ticket` and friends) if you need the ticket itself.
+
+**Partial infra changes.** `PATCH /api/Shards/{id}/infra` now takes a partial `ShardInfraPatch`: fields you leave out are kept. The client sends only the fields you set on the model, so `amp.shards.patch_shards_infra(shard_id, models.ShardInfraPatch(memory_limit_mb=4096))` changes the memory limit and nothing else.
 
 ## Live events
 
@@ -323,12 +347,12 @@ The methods exist because the spec has them, but their payloads may not match wh
 
 ## A new AMP build
 
-The client is generated from the spec in `src/portcullis_api/spec/`. `PIN.json` holds its name and sha256, and `portcullis_api.SPEC_BUILD` names the build (`3.0.0.6`).
+The client is generated from the spec in `src/portcullis_api/spec/`. `PIN.json` holds its name, sha256 and source. `portcullis_api.SPEC_BUILD` and `SPEC_DATE` say where it came from: the spec a live panel served on 2026-11-13. That spec carries no build number (`info.version` is `1.0.0`), so the build is recorded as unknown; the previous pin was 3.0.0.6.
 
 To move to a new build:
 
-1. **Download and compare.** Download `webapi.json` from the new panel (it ships on disk at `data/versions/<version>/webapi/webapi.json`), then run `python -m codegen.spec_diff path/to/webapi.json`. It lists removed and changed operations, which would break callers.
-2. **Save it.** Save the file as `src/portcullis_api/spec/webapi-<build>.json`, update `PIN.json`, and delete the old file.
+1. **Download and compare.** Open the panel's API browser (Scalar) and download the OpenAPI document, or copy `data/versions/<version>/webapi/webapi.json` from the install. **Remove its `servers` entry**, which holds the panel's address. Then run `python -m codegen.spec_diff path/to/webapi.json`. It lists removed and changed operations, which would break callers.
+2. **Save it.** Save the file in `src/portcullis_api/spec/`, update `PIN.json` (write down the build from the panel's About page if the spec doesn't name it), and delete the old file.
 3. **Regenerate.** Run `python -m codegen.generate_client`. CI runs it with `--check` and fails if the committed code is out of date.
 
 Run these from this folder after `pip install -e ".[dev]"`.

@@ -57,6 +57,7 @@ class FakeAmpPort:
         self.backup_calls: list[tuple[str, ServerId, str]] = []
         self.schedule_calls: list[tuple[str, ServerId, str]] = []
         self.schedule_runs: dict[str, list[ScheduleRun]] = {}
+        self.licence_answers: list[tuple[ServerId, bool]] = []
         self._subs: dict[ServerId, set[asyncio.Queue[ServerEvent]]] = {}
 
     # ------------------------------------------------------------------ setup helpers
@@ -185,3 +186,9 @@ class FakeAmpPort:
 
     async def permissions(self) -> list[str]:
         return list(self.grants)
+
+    async def answer_licence(self, server: ServerId, accept: bool) -> None:
+        srv = self._get(server)
+        self.licence_answers.append((server, accept))
+        if srv.state is ServerState.AWAITING_LICENCE:
+            self._set_state(server, ServerState.STOPPED)

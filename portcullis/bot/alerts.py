@@ -69,6 +69,10 @@ class Alerts:
         name = escape(row.name) if row else server
         if event.state is ServerState.FAILED:
             await self._alert(server, "failed", f"🔥 **{name}** crashed: AMP reports it as Failed.")
+        elif event.state is ServerState.AWAITING_LICENCE:
+            await self._alert(server, "licence", f"📜 **{name}** is waiting for its game licence (EULA) to be "
+                                                 "accepted before it can start. An admin can answer it from "
+                                                 "`/server status`.")
         elif event.state is ServerState.STOPPED and previous is ServerState.RUNNING \
                 and not self.ctx.offline_expected(server):
             await self._alert(server, "offline", f"🔴 **{name}** went offline, and nobody stopped it through "

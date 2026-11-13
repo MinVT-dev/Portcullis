@@ -2,15 +2,16 @@
 
 **Decision (Min, 2026-11-07):** the AMP 3 edition of the bot is called **Portcullis**. Gatekeeper V2 and V3 keep their names.
 
-![Banner, Discord banner, icons at 128 to 16 px, and the mark and logo on dark and light](preview.png)
+![Banner, Discord banner, icons at 72 to 16 px, and the mark and logo on dark and light](preview.png)
 
-## Idea
+## Idea (v3, 2026-11-13)
 
-The mark is a gatehouse arch with its portcullis hanging inside it.
+The mark is a **gate tower**: a solid block with three merlons, a pointed arch cut through it, and the portcullis hanging inside the arch. It replaces the v2 outline arch, which read as thin line-work and blurred into a grid at avatar sizes.
 
-- **Fits next to CubeCoders, without copying them.** It borrows their visual language: deep navy, flat near-white shapes, one heavy stroke weight, hard mitred corners, and hexagon geometry. The arch's shoulders are the top half of a flat-topped hexagon at 60°, and the banner background is a faint isometric grid. It uses no cube, no hexagon badge, and no part of the CubeCoders or AMP logos. The wordmark is a different typeface from theirs.
-- **Built on a grid.** It sits on a 64-unit grid. Every member (frame, beam, bars, rail) is 5 units thick, and there is a 3-unit gap between the frame and the gate, so the two still read apart at 32 px.
-- **Status is built in.** With the gate raised, light shows underneath: cyan on the brand icon, green for online. With the gate down, the bars reach the ground and a red sill shows: offline.
+- **Solid, not outlined.** The tower is one filled shape with a sky-to-blue gradient, so it holds up at 16 px and on any background. The arch is navy and the gate is near-white, so the gate is always the brightest thing in the mark.
+- **The gate is its own piece.** It hangs 2.5 units inside the arch on a 64-unit grid (three bars, one rail, spiked feet), so the gap between gate and tower still shows at 32 px.
+- **Status is built in.** Raised, light shows under the spikes: cyan on the brand icon, green for online. Lowered, the spikes reach the ground and a red sill shows: offline.
+- **Clear of CubeCoders.** No cube, no hexagon, no part of the CubeCoders or AMP logos, and a different typeface from theirs. The v2 isometric grid behind the banners is now a plain dot grid.
 
 ## Files
 
@@ -24,28 +25,30 @@ SVG is the source. Upload-ready PNGs are in [`png/`](png/).
 | [portcullis-banner.svg](portcullis-banner.svg) | 1280×640 | GitHub social preview, release posts. |
 | [portcullis-discord-banner.svg](portcullis-discord-banner.svg) | 1360×480 | The bot's Discord profile banner (680×240 at 2×). The left third stays plain, because the avatar sits there. |
 | [portcullis-logo.svg](portcullis-logo.svg) / [-dark](portcullis-logo-dark.svg) | 1200 wide | The mark and wordmark together, for dark and light backgrounds. |
-| [portcullis-mark.svg](portcullis-mark.svg) / [-dark](portcullis-mark-dark.svg) | 512×512 | The mark on its own, with a transparent background. |
+| [portcullis-mark.svg](portcullis-mark.svg) | 512×512 | The full-colour mark on its own, transparent background. Works on dark and light. |
+| [portcullis-mark-light.svg](portcullis-mark-light.svg) / [-dark](portcullis-mark-dark.svg) | 512×512 | One-colour mark (near-white or navy) with a see-through arch, for places that take one colour. |
 | [portcullis-game-banner.svg](portcullis-game-banner.svg) | 920×430 | Placeholder banner for a game with no art of its own. The PNG is `portcullis/assets/fallback/game-banner.png`; see [GAME_ASSETS.md](../GAME_ASSETS.md). |
-| [portcullis-game-logo.svg](portcullis-game-logo.svg) | 512×512 | Placeholder logo for a game with no art of its own (`portcullis/assets/fallback/game-logo.png`). |
+| [portcullis-game-logo.svg](portcullis-game-logo.svg) | 512×512 | Placeholder logo for a game with no art of its own (`portcullis/assets/fallback/game-logo.png`): a grey stone tower, so it doesn't read as the bot's own avatar. |
 
-[`generate.py`](generate.py) rebuilds every SVG: `python3 generate.py OUT_DIR FONT_DIR` (it needs `fonttools` and `brotli`). FONT_DIR holds Exo 2 Bold and Roboto Regular from Google Fonts as `exo2.woff2` and `roboto.woff2`. All text is converted to outlines, so the SVGs look the same everywhere and don't need the fonts installed.
+[`generate.py`](generate.py) rebuilds everything: `python3 docs/branding/generate.py docs/branding FONT_DIR --png` from the repo root. It needs `fonttools`, and `cairosvg` for `--png` (which also writes `png/`, `preview.png` and the two fallback PNGs). FONT_DIR holds `Sora[wght].ttf` and `Roboto[wdth,wght].ttf` as they are named in [google/fonts](https://github.com/google/fonts) (`ofl/sora`, `ofl/roboto`). All text is converted to outlines, so the SVGs look the same everywhere and don't need the fonts installed.
 
 ## Palette
 
 | Role | Hex |
 |---|---|
-| Navy (background) | `#121A30`, lifted `#1A2442` |
-| Mark and text | `#E9EFF8` |
-| Secondary text | `#A6B2C9` |
+| Navy (background, the arch) | `#0F1629`, lifted `#18223F` |
+| Tower gradient | `#5CE1FF` (sky) to `#4C6BFF` (blue) |
+| Gate and text | `#EEF3FB` |
+| Secondary text | `#A9B4CB` |
 | Lines and pill borders | `#8CAADC` at low opacity |
-| Brand accent | `#4AD6FF` (cyan) |
+| Brand light | `#4AD6FF` (cyan) |
 | Online / success | `#4ADE80` |
 | Offline / error | `#FF5A5F` |
 
 ## Type
 
-- **Wordmark:** Exo 2 Bold (SIL Open Font License).
-- **Text and taglines:** Roboto Regular, which is also what CubeCoders' site uses for body text.
+- **Wordmark:** Sora ExtraBold (SIL Open Font License). It replaces Exo 2, whose squared letters fought the new pointed arch.
+- **Text and taglines:** Roboto Regular.
 
 **Tagline:** "Your game servers, in Discord." Keep "AMP" and CubeCoders' logos out of all Portcullis artwork, so nothing suggests it's an official CubeCoders product. Whether "Portcullis for AMP 3" is OK as a descriptive subtitle is a question for Mike.
 

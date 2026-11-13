@@ -18,7 +18,7 @@ from portcullis_api.transport import AmpTransport, encode_query
 
 def test_every_operation_is_generated() -> None:
     count = sum(1 for cls in GROUPS.values() for v in vars(cls).values() if inspect.iscoroutinefunction(v))
-    assert count == 263
+    assert count == 269  # live spec of 2026-11-13 (263 in 3.0.0.6)
 
 
 async def test_list_shards_parses_models_and_ignores_unknown_fields(

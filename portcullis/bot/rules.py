@@ -60,7 +60,7 @@ def condition(rule: AlertRule, state: ServerState | None, status: ServerStatus |
     if rule.metric == "offline":
         if state is None or state in (ServerState.UNKNOWN, ServerState.BUSY):
             return None
-        return state in (ServerState.STOPPED, ServerState.FAILED)
+        return state in (ServerState.STOPPED, ServerState.FAILED, ServerState.AWAITING_LICENCE)
     if state is not None and state not in (ServerState.RUNNING, ServerState.UNKNOWN):
         return False
     if status is None:

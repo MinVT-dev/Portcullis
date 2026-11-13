@@ -30,6 +30,9 @@ class ServerState(StrEnum):
     SLEEPING = "sleeping"
     FAILED = "failed"
     SUSPENDED = "suspended"
+    # A start no person was waiting on (boot, schedule, after an update) met the game's licence (EULA),
+    # and AMP holds the server until someone accepts or declines it (ShardState.awaitsLicence).
+    AWAITING_LICENCE = "licence"
     UNKNOWN = "unknown"
 
     @property
@@ -42,8 +45,14 @@ class ServerState(StrEnum):
             "sleeping": "Sleeping",
             "failed": "Failed",
             "suspended": "Suspended",
+            "licence": "Needs licence",
             "unknown": "Unknown",
         }[self.value]
+
+
+class TryLater(Exception):
+    """AMP can't do it right now, but may in a while (another job holds the server, or storage is down).
+    The message is written for the person who asked."""
 
 
 @dataclass(frozen=True)

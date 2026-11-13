@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 QUIET_FOR = 300.0  # seconds: at most one "online" DM per server this often (a crash loop must not spam)
 # Coming online from these counts. Unknown doesn't: that is usually Portcullis losing AMP, not the server.
 FROM_STATES = frozenset({ServerState.STOPPED, ServerState.BUSY, ServerState.SLEEPING, ServerState.FAILED,
-                         ServerState.SUSPENDED})
+                         ServerState.SUSPENDED, ServerState.AWAITING_LICENCE})
 
 
 class Notifier:
