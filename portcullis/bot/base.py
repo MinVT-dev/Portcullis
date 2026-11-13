@@ -316,11 +316,11 @@ def code(text: str) -> str:
 
 
 # Embed colours from the brand palette (docs/branding/README.md); the text always says it too.
-INFO, GOOD, WARN, BAD, MUTED = 0xFFB547, 0x4ADE80, 0xFF7A2F, 0xFF5A5F, 0x9AA6BD
+INFO, GOOD, WARN, BAD, MUTED = 0xE8710A, 0x4ADE80, 0xF2B33D, 0xFF5A5F, 0x8C857E
 
 
 def card(**kwargs: Any) -> discord.Embed:
-    """An embed in the house style: torch amber unless the caller picks a colour."""
+    """An embed in the house style: brand orange unless the caller picks a colour."""
     kwargs.setdefault("colour", INFO)
     return discord.Embed(**kwargs)
 
