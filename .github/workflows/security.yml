@@ -1,0 +1,159 @@
+name: Security checks
+
+# Three checks. What each one means and what to do when it fails: docs/SECURITY_CHECKS.md.
+# - dependency-audit: known vulnerabilities in the packages we install (pip-audit). Weekly, because new
+#   advisories appear without any change here. ci.yml runs the same audit on every push and pull request.
+# - secret-scan: passwords, tokens and keys anywhere in the git history (gitleaks).
+# - codeql: static analysis of the Python code and of these workflow files.
+# - workflow-lint: risky patterns in the workflow files themselves (zizmor), such as unpinned actions.
+#
+# A failure turns the check red. It only blocks a merge if a branch rule marks it as required.
+on:
+  schedule:
+    - cron: "41 4 * * 1"  # Mondays, 04:41 UTC
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-audit:
+    # On pull requests ci.yml already audits; this job adds the scheduled and manual runs.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [".", "packages/portcullis-api"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Install the project in a clean environment
+        working-directory: ${{ matrix.project }}
+        run: |
+          python -m venv /tmp/audit-env
+          /tmp/audit-env/bin/python -m pip install --upgrade pip setuptools
+          /tmp/audit-env/bin/python -m pip install ".[dev]" "pip-audit>=2.7"
+      - name: Audit installed packages
+        run: |
+          set +e
+          /tmp/audit-env/bin/pip-audit --desc on --format markdown --output audit.md
+          status=$?
+          {
+            echo "## pip-audit: \`${{ matrix.project }}\`"
+            if [ -s audit.md ]; then cat audit.md; else echo "No known vulnerabilities."; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      # sha256 of gitleaks_8.30.1_linux_x64.tar.gz, from the release's checksums file.
+      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0  # every commit, not just the latest
+          persist-credentials: false
+      - name: Install gitleaks (checksum verified)
+        run: |
+          curl -sSfL -o gitleaks.tgz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum --check --strict -
+          tar -xzf gitleaks.tgz -C /tmp gitleaks
+      - name: Scan the full git history
+        # --redact keeps any secret it finds out of this public-to-collaborators log.
+        run: /tmp/gitleaks git --config .gitleaks.toml --redact --verbose --no-banner --exit-code 1 .
+
+  workflow-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install "zizmor==1.32.0"
+      - name: Check the workflow files
+        run: zizmor --offline --format github --min-severity medium .github
+
+  codeql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      # GitHub's Security tab only accepts CodeQL results for public repositories on the Free and Pro
+      # plans. While the repo is private the results go to this run's summary and an artifact instead.
+      - name: Can results go to the Security tab?
+        id: repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          private=$(gh api "repos/${GITHUB_REPOSITORY}" --jq .private)
+          if [ "$private" = "false" ]; then echo "upload=always" >> "$GITHUB_OUTPUT"; else echo "upload=never" >> "$GITHUB_OUTPUT"; fi
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
+          upload: ${{ steps.repo.outputs.upload }}
+          output: sarif-results
+      - name: List findings
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, sys
+          found = []
+          for path in pathlib.Path("sarif-results").glob("*.sarif"):
+              for run in json.loads(path.read_text()).get("runs", []):
+                  for r in run.get("results", []):
+                      loc = r["locations"][0]["physicalLocation"]
+                      file = loc["artifactLocation"]["uri"]
+                      line = loc.get("region", {}).get("startLine", 1)
+                      msg = r["message"]["text"].splitlines()[0]
+                      found.append((r.get("ruleId", "?"), file, line, msg))
+                      print(f"::warning file={file},line={line},title=CodeQL {r.get('ruleId', '?')}::{msg}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+              out.write(f"## CodeQL ({os.environ['LANG_NAME']}): {len(found)} finding(s)\n\n")
+              for rule, file, line, msg in found:
+                  out.write(f"- `{rule}` at `{file}:{line}`: {msg}\n")
+          sys.exit(1 if found else 0)
+          PY
+        env:
+          LANG_NAME: ${{ matrix.language }}
+      - name: Keep the raw results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: codeql-${{ matrix.language }}
+          path: sarif-results
+          retention-days: 30
+          if-no-files-found: ignore

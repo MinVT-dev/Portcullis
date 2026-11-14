@@ -1,0 +1,52 @@
+# Dependabot version updates. Security updates are a separate repository setting
+# (see docs/SECURITY_CHECKS.md, "Settings to switch on").
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # Wait a week after a release before proposing it, so a hijacked release is usually pulled first.
+    cooldown:
+      default-days: 7
+    groups:
+      python-minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Pinned on purpose: a new version changes the generated client and breaks `generate_client --check`.
+      # Bump these by hand together with a regenerated client.
+      - dependency-name: datamodel-code-generator
+      - dependency-name: black
+      - dependency-name: isort
+
+  - package-ecosystem: pip
+    directory: "/packages/portcullis-api"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # Wait a week after a release before proposing it, so a hijacked release is usually pulled first.
+    cooldown:
+      default-days: 7
+    groups:
+      python-minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: datamodel-code-generator
+      - dependency-name: black
+      - dependency-name: isort
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # Wait a week after a release before proposing it, so a hijacked release is usually pulled first.
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]

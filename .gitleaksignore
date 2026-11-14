@@ -1,0 +1,7 @@
+# Reviewed false alarms from the secret scan, one fingerprint per line (commit:file:rule:line).
+# Each one is checked by a person first. See docs/SECURITY_CHECKS.md, "Secret scan fails".
+
+# `handed_out=key == LINK_ROLE` is a comparison with the constant "link_role", not a key.
+0d7ac71a508d6c888a0c3c135514ef58e62986db:portcullis/bot/setup.py:generic-api-key:328
+# 123456789012345678 is a made-up server id in a config test.
+e08de736c357901b679f411de48b3d1c849bc07d:tests/test_config.py:discord-client-id:13

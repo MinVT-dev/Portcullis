@@ -32,7 +32,7 @@ from portcullis.bot.base import (
 from portcullis.bot.cards import diagnostics_embed, status_embed
 from portcullis.bot.errors import plain_error
 from portcullis.bot.guard import Confirm, ask_power, needs_confirm
-from portcullis.bot.updates import follow_update, update_error
+from portcullis.bot.update_follow import follow_update, update_error
 from portcullis.core.console_rules import DENY_KEY, HIDE_KEY, blocked_word, hider, stored_denylist, stored_rules
 from portcullis.core.relay import console_safe, escape
 from portcullis.core.types import PowerAction, ServerState, ServerStatus

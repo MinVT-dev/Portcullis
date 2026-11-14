@@ -58,6 +58,10 @@ These use routes from the spec that have never run on a real panel. Try each on 
 - [ ] Leave the bot running for more than 8 hours, so the session token is renewed at least once, and check the relay still posts afterwards.
 - [ ] Restart the AMP panel while the bot is running. The relay should come back by itself within a few minutes.
 - [ ] Change the bot account's password in AMP while it runs. The log should say the login was refused, about once a minute and no faster.
+- [ ] Run `python -m portcullis --check` on Windows. Expect the banner (box characters in Windows Terminal, plain ASCII in an old `cmd` window with code page 437), `✓ Panel` and `✓ Discord`, exit code 0, and no new files under `data\`.
+- [ ] Start the bot with the panel stopped (or a wrong port in `AMP_URL`). Expect the bot to come online anyway, live cards greyed with "The panel isn't answering", one `The panel stopped answering` log line, and commands answering that AMP can't be reached. Start the panel: expect `The panel is answering again` and the cards back in colour within about a minute.
+- [ ] Close the console window (not Ctrl+C) while the bot runs, then start it again. Expect the banner's last-run line to say "ended without a clean stop". After a Ctrl+C stop, expect "stopped cleanly ... (Ctrl+C)".
+- [ ] With `PORTCULLIS_METRICS=on`, open `http://127.0.0.1:9464/healthz` and `/metrics` in a browser on the same PC. Expect JSON with `"status": "ok"` and Prometheus text.
 - [ ] Stop the bot with Ctrl+C on Windows while it shows at least one live status card. Expect `Stopping Portcullis (Ctrl+C)`, then `Portcullis stopped (Ctrl+C)` within a few seconds, no traceback, the card greyed with "Portcullis is stopped, so this card is not updating", and `echo %ERRORLEVEL%` printing 0. Start it again: the card should update at once.
 
 ## What must never be shared
@@ -80,6 +84,17 @@ The recorder redacts these, but look through a capture before sending it. If som
 - [ ] Rename one emoji in the portal: after **Check emojis**, that one falls back to its plain emoji and nothing else changes.
 - [ ] `/server diagnostics` shows a disk figure (`GET /api/Shards/{id}/disk` hasn't run on a real panel).
 - [ ] A schedule named with "restart" shows as **Next restart** on the card.
+
+## Alerts, limits, graphs and weekly summary (draft PR, 14 Nov 2026)
+
+- [ ] Capture one `Metrics` hub event with `tools/record_events.py` and check its keys (`cpuPercent`, `memoryMb`, `memoryLimitMb`, `activeUsers`). Portcullis reads them leniently, but limits and graphs depend on them.
+- [ ] Set a low CPU limit (`/monitor thresholds server:X cpu:5 minutes:1`) on a busy server: one alert after a minute, one "back to normal" after it drops 10 points for 2 minutes.
+- [ ] Kill a game process from the host so AMP reports Failed: the crash alert shows AMP's last error, and "back online" follows when AMP restarts it.
+- [ ] Add yourself with `/monitor alerts dm_add:@you` and run `/monitor test`: one channel post and one DM.
+- [ ] Restart the AMP host with several servers running: the offline alerts arrive as one grouped message.
+- [ ] Update a game from AMP's own panel and from `/server power … update`: "is updating" (at least for the second), then "finished updating" with versions within 5 minutes. Note the status message AMP shows while it updates.
+- [ ] Leave the bot running for a day, then `/graph metric:players` and `/graph metric:uptime`: the gaps match the times the bot was off.
+- [ ] Turn on the weekly summary for today's weekday and the next hour; it posts once.
 
 ## Confirmations, /players, audit log and secrets (draft PR, 14 Nov 2026)
 

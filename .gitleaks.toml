@@ -1,0 +1,11 @@
+# gitleaks settings for the secret-scan job in .github/workflows/security.yml.
+# Start from gitleaks' own rules and only add narrow exceptions here, each with a reason.
+title = "Portcullis gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Tests build fake JWTs to check expiry parsing and redaction. They sign nothing real."
+targetRules = ["jwt"]
+paths = ['''(^|/)tests/''']

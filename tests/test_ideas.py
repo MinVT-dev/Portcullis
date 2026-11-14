@@ -304,24 +304,11 @@ async def test_unreachable_alert_waits_and_recovers(h: Harness) -> None:
     assert len(channels[ALERTS].sent) == 2  # not yet: three minutes have not passed
 
 
-async def test_load_and_backup_alerts(h: Harness) -> None:
+async def test_backup_alerts(h: Harness) -> None:
+    # CPU and memory limits moved to bot/thresholds.py (tests/test_monitoring.py).
     channels = add_channels(h, ALERTS)
     await h.ctx.settings.set(ALERT_CHANNEL, ALERTS)
-    await h.ctx.settings.set(CPU_KEY, 90, scope=SURVIVAL)
-    await h.ctx.live.seed([await h.port.get_status(ServerId(SURVIVAL))], [SURVIVAL])
-    real = h.port.get_status
-
-    async def busy(server: ServerId):  # noqa: ANN202
-        return replace(await real(server), cpu_percent=97.0)
-
-    h.port.get_status = busy  # type: ignore[method-assign]
-    alerts = Alerts(h.ctx, sustain=0)
-    await alerts.check_load()
-    assert "CPU at 97%" in channels[ALERTS].sent[-1]["content"]
-    h.port.get_status = real  # type: ignore[method-assign]
-    await alerts.check_load()
-    assert "back under its load limits" in channels[ALERTS].sent[-1]["content"]
-
+    alerts = Alerts(h.ctx)
     await h.ctx.settings.set(BACKUP_DAYS, 3)
     h.port.servers[ServerId(SURVIVAL)].backups = [Backup("b", "Old", NOW - timedelta(days=5))]
     h.port.servers[ServerId(CREATIVE)].backups = [Backup("c", "New", NOW - timedelta(hours=2))]

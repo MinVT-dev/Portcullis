@@ -92,6 +92,19 @@ notepad .env
 | `AMP_PASSWORD_FILE`, `DISCORD_TOKEN_FILE` | bot | Optional: a file holding the secret, for Docker or systemd secrets (6.1). |
 | `PORTCULLIS_PLAINTEXT_SECRETS` | bot | Optional: `warn` (default) logs a warning at every start while a secret is in `.env`; `refuse` stops the bot instead; `allow` says nothing. |
 | `PORTCULLIS_KEYRING` | bot | Optional: `off` skips the OS keyring, for a machine where it would prompt or hang. |
+| `PORTCULLIS_LOG_FILE` | bot | Optional; the default is `data/logs/portcullis.log`. `off` logs to the console only. |
+| `PORTCULLIS_LOG_FORMAT` | bot | Optional: `text` (default) or `json` for the log file. |
+| `PORTCULLIS_LOG_CONSOLE` | bot | Optional: `text` (default) or `json` for the console, for Docker or systemd. |
+| `PORTCULLIS_LOG_MAX_MB`, `PORTCULLIS_LOG_KEEP` | bot | Optional: start a new log file every so many MB (default 5) and keep that many old ones (default 5). |
+| `PORTCULLIS_BANNER` | bot | Optional: `off` hides the welcome banner at start-up. |
+| `PORTCULLIS_STATE_FILE` | bot | Optional; the default is `data/state.json` (section 8.3). `off` turns restart recovery off. |
+| `PORTCULLIS_PANEL_RETRIES` | bot | Optional: extra tries when the panel doesn't answer a read, 0 to 5 (default 2). Actions are never retried. |
+| `PORTCULLIS_PANEL_TRIP_AFTER` | bot | Optional: failures in a row before the bot pauses calls to the panel, 1 to 20 (default 3). |
+| `PORTCULLIS_METRICS` | bot | Optional, **off by default**: `on` starts the health and metrics endpoint (section 8.3). |
+| `PORTCULLIS_METRICS_HOST`, `PORTCULLIS_METRICS_PORT` | bot | Optional: where it listens. Default `127.0.0.1` and `9464`, so only this PC can reach it. |
+| `PORTCULLIS_METRICS_TOKEN` | bot | Required if the host is anything but this PC; at least 16 characters. Callers send `Authorization: Bearer <token>`. |
+| `PORTCULLIS_UPDATE_CHECK` | bot | Optional, **off by default**: `notify` checks once a day for a newer release and posts in the alert channel. It never installs anything. |
+| `PORTCULLIS_UPDATE_REPO` | bot | Optional: the repository to check, default `MinVT-dev/Portcullis`. |
 
 Real environment variables override `.env` values.
 
@@ -216,6 +229,28 @@ If a setting is missing it lists every problem and stops. Otherwise it logs in t
 
 Ctrl+C (or Ctrl+Break, or SIGTERM from a service manager or `docker stop`) stops it cleanly: it greys out the live status cards, closes the Discord connection, leaves the AMP event streams, logs out of AMP and closes the database, then prints `Portcullis stopped` and exits with code 0. That takes a second or two, and each step is skipped after a few seconds if Discord or AMP don't answer. Press Ctrl+C a second time to stop at once. If you start it from a `.bat` file, Windows then asks `Terminate batch job (Y/N)?`; that question comes from Windows, not the bot, and either answer is fine.
 
+**Check the settings first.** `python -m portcullis --check` reads every setting, prints the banner, logs in to the panel and checks the Discord token and server, then exits. It doesn't bring the bot online, register commands or write any file. Add `--offline` to check the settings alone. It exits with 0 when all is well, 1 when a login failed and 2 when a setting is wrong. Every setting problem is listed at once, and a `PORTCULLIS_` name that looks like a typo of a real one (`PORTCULLIS_LOG_LEVLE`) gets a warning.
+
+**The banner.** At start-up the bot prints its version, the panel address and whether it answered, a summary of the settings (passwords and tokens are never shown), the optional features that are on, and how the last run ended. Consoles that can't draw box characters get a plain version, and `NO_COLOR` turns colour off. `PORTCULLIS_BANNER=off` hides it.
+
+**When the panel is down.** A wrong AMP password still stops the bot at once. A panel that doesn't answer does not: the bot starts anyway and keeps trying to log in. While it runs, a read that gets no answer (a timeout, a refused connection, a 5xx) is tried up to `PORTCULLIS_PANEL_RETRIES` more times; a start, stop, console line or backup is never sent twice. After `PORTCULLIS_PANEL_TRIP_AFTER` failures in a row the bot pauses calls to the panel: commands answer at once that AMP can't be reached, the log says so once, and one test call goes out every 10 to 60 seconds until the panel answers. Live cards keep the last status the panel gave, greyed out and marked with when it was said, instead of switching to Unknown. The alert channel notice for a panel outage is unchanged (after 3 minutes, and again when it's back).
+
+**Restart recovery.** `data\state.json` records when the bot started, a heartbeat every minute, and whether it stopped cleanly, plus the last status of every server. The next start's banner says "stopped cleanly 2 h ago (Ctrl+C)" or "ended without a clean stop (crash or power loss); last seen 5 min ago". If the panel is down at that start, the live cards show those saved statuses, marked stale. Live cards are edited in place after a restart (their message ids are in the database); a card someone deleted is posted again.
+
+**Logs.** The console shows short lines, coloured by level when the console supports it. The full log goes to `data\logs\portcullis.log`, which starts a new file every 5 MB and keeps the last 5. `PORTCULLIS_LOG_FORMAT=json` writes one JSON object per line (`time` in UTC, `level`, `logger`, `message`, and `error` with the traceback). Passwords and tokens are masked in every log.
+
+**Health and metrics (off by default).** With `PORTCULLIS_METRICS=on` the bot serves `http://127.0.0.1:9464/healthz` (JSON; status 200 while Discord is connected and the panel answers, 503 otherwise) and `/metrics` (Prometheus text: Discord connection and latency, panel reachability, request, retry and outage counters, servers by state, players online). Only this PC can reach it unless you set `PORTCULLIS_METRICS_HOST`, and then `PORTCULLIS_METRICS_TOKEN` is required. Neither page shows names, ids, addresses or secrets. If the port is taken the bot logs it and runs on without the endpoint.
+
+**Updating.** With `PORTCULLIS_UPDATE_CHECK=notify` the bot asks GitHub once a day for the latest release and, when it's newer than the running version, posts once in the alert channel with the link. It never downloads or installs anything: an update can bring a database migration or new settings to read first, and releases aren't signed yet, so there is nothing to verify a download against. To update:
+
+```powershell
+git pull
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe -m portcullis --check
+```
+
+Then stop the bot with Ctrl+C and start it again. The database is backed up to a `.bak` file before any schema upgrade.
+
 ### 8.4 Commands
 
 Three levels: **everyone** in the server; **operators** (members with a role in `PORTCULLIS_OPERATOR_ROLE_IDS`); **admins** (members with **Manage Server**). Owners (`PORTCULLIS_OWNER_IDS`) can do everything. Owners can also give extra roles a single task (for example moderators who may whitelist but not stop servers), or a role that may do everything on one server only (8.6). Replies are only visible to you unless the table says otherwise.
@@ -256,6 +291,13 @@ Three levels: **everyone** in the server; **operators** (members with a role in 
 | `/setup players <show> [server]` | admins | What `/players` shows members: names (the default), only the count, or nothing. Staff always see names. Leave out `server` to set the default. |
 | `/alert create <metric> [threshold] [minutes] [server] [channel] [role]` | admins | Your own alert: CPU or memory at or above a percentage, more or fewer players than a number, or offline, for `minutes` (default 5, 0 = at once). Leave out `server` to watch every server, and `channel` to post in the alert channel. It fires once, pings only `role`, and posts again when it clears. Up to 25 rules. These are Portcullis's own checks, once a minute, not AMP triggers. |
 | `/alert list` | admins | Your alert rules, with **Mute 1 hour**, **Unmute** and **Delete**. |
+| `/graph <server> [metric] [period] [share]` | everyone | A graph of players or uptime over the last day, week or month, from the history Portcullis records. CPU and memory graphs are for operators. Only you see it unless you set `share`. See [MONITORING.md](MONITORING.md). |
+| `/monitor alerts [server] [channel] [dm_add] [dm_remove] [reset_channel] [update_notices]` | admins | Where alerts go: a channel and DMs, bot-wide or for one server. |
+| `/monitor mute <server> <minutes>` | operators | Silences one server's alerts for up to a week. `0` turns them back on. |
+| `/monitor thresholds <server> [cpu] [memory] [disk] [gap] [minutes]` | admins | CPU, memory and disk limits for one server, with a gap before an alert clears. |
+| `/monitor weekly [enabled] [channel] [day] [hour] [preview]` | admins | The weekly summary (off by default): uptime, peak players, starts, crashes and alerts per server. |
+| `/monitor history [days]` | admins | How many days of history to keep for graphs (30 by default, 0 stops recording). |
+| `/monitor test [server]` | admins | Sends a test alert to the channel and DMs it would use. |
 | `/audit [member] [server] [action] [result] [export] [stats]` | admins | Who did what through Portcullis, refused attempts included. `export` sends it all as a JSON file. `stats` shows counts for the last 30 days instead: most common actions, most active members, and results. |
 | `/admin diagnostics` | admins | Checks the connection to AMP and every server, and shows the relays and the bot's status. A server line with a 403 names the AMP permission the bot lacks. It also lists what the bot's AMP account may do, and warns if it is a full admin account. |
 | `/admin export` / `/admin import <file>` | admins | Download all Portcullis settings as a file, and restore them. Gatekeeper V3 databases can't be imported yet. |
@@ -349,7 +391,8 @@ It lists breaking, changed and added API operations against the spec Portcullis 
 | `portcullis\bot\` | The Discord side: slash commands, buttons and panels. It never talks to AMP directly. |
 | `portcullis\assets\` | The game art registry and fallback images. |
 | `portcullis\db\` | The database code and its migrations. The bot keeps its file at `PORTCULLIS_DB` (default `data\portcullis.db`) and saves a `.bak` copy before each schema upgrade. |
-| `data\` | The bot's database. Git ignores it. |
+| `data\` | The bot's database, `state.json` (restart recovery) and `logs\`. Git ignores it. |
+| `portcullis\ops\` | Start-up checks and banner, logs, restart recovery, the metrics endpoint and the update check. |
 | `tools\` | The live-event recorder and the game art tools. Spec-diff and the client generator are in `packages\portcullis-api\codegen\`. |
 | `docs\` | The design ([DESIGN.md](DESIGN.md)), developer notes ([DEVELOPING.md](DEVELOPING.md)) and API notes. |
 
@@ -366,6 +409,7 @@ It lists breaking, changed and added API operations against the spec Portcullis 
 - **Game licences (EULA).** When a server starts without anyone waiting for it (on boot, from a schedule, after an update) and its game has a licence that isn't accepted yet, AMP holds it. `/server status` shows **Needs licence**, the alert channel says so, and an admin can accept or decline it from the status buttons. Accepting is recorded by AMP under the bot's account and by Portcullis under the person who pressed it. This follows the API spec and hasn't run on a real panel yet.
 - **Passkeys.** If the panel's passkey policy is set to Required, the bot refuses to log in and says why: a bot can't use a passkey. Keep the policy at Optional or Encouraged. Portcullis reads the expiry date from AMP once a day and, from 14 days before, posts a warning in the alert channel (pinging the alert role in the last 3 days). `/admin diagnostics` shows the date too. Reading that date has not run against a real panel yet.
 - **Channels that are gone.** If a relay, alert or log channel is deleted or closed to the bot, Portcullis stops trying it for a while (30 seconds, doubling up to 15 minutes for relays; 10 minutes for the channel lookup) and logs a warning. Lines relayed in that time are dropped. Pick a new channel in `/setup`.
+- **Alerts, limits, update status, graphs and the weekly summary** ([MONITORING.md](MONITORING.md)) are tested against a fake Discord and a fake AMP only. Game updates can't be seen as "available": AMP 3 doesn't expose that.
 - **Live cards and brand emojis.** These are tested against a fake Discord only. They haven't run on a real Discord server yet.
 - **Licence.** The pinned spec and generated client contain CubeCoders' text. That's fine while the repo is private. See [DEVELOPING.md](DEVELOPING.md#licence-note) before it goes public.
 
@@ -385,6 +429,10 @@ It lists breaking, changed and added API operations against the spec Portcullis 
 | `Stopped: gave up after 3 identical join failures` | The hub connection works but AMP refuses `JoinShard`. Try `--shard <id>` with one running server the bot has `view` and `console.read` on. If it still fails, send `lifecycle.jsonl` and `panel_hub_calls.txt`. |
 | `Hub task stopped: ...` | The live connection gave up. `lifecycle.jsonl` has the reason; send that line. |
 | `DISCORD_TOKEN is missing` or `DISCORD_GUILD_ID is missing` | Fill them in from section 8. |
+| `The panel at ... isn't answering ... Starting anyway` | The panel was down or slow at start-up. The bot keeps trying; check `AMP_URL` with `python -m portcullis --check`. |
+| `The panel stopped answering` in the log | Calls to the panel are paused until it answers again; the log says when it does. Live cards show the last known status, greyed. |
+| `The metrics endpoint can't listen on ...` | Another program uses that port. Set `PORTCULLIS_METRICS_PORT` to a free one. |
+| A setting `isn't a setting Portcullis knows` | A typo in `.env`. Use the name the warning suggests. |
 | `Discord refused the bot token` | The token was reset or mistyped. Reset it on the Bot tab and paste the new one. |
 | The slash commands don't appear | Check the bot is in the server set in `DISCORD_GUILD_ID` (the log warns if not), then press Ctrl+R in Discord. Commands only exist in that server. |
 | `Portcullis only works in the Discord server it was set up for` | The command was used in another server. Use it in the one from `DISCORD_GUILD_ID`. |

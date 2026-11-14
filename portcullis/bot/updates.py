@@ -1,82 +1,125 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Updating a game server from Discord: the result report after ``/server power action:update``.
+"""Game update status: updating, finished and failed, posted through the alert router.
 
-AMP 3 (``POST /api/Shards/{id}/update``, checked against the 2026-11-13 API) accepts the update and
-runs it in the background as a task. The task's body shape has not been seen on a real panel, so the
-result is read from the server's state instead: Portcullis waits for the server to go busy, then for it
-to settle, and reports where it ended up. What AMP 3 cannot do: say which game version was installed,
-or update a game that needs a Steam login unless the server has a Steam credential in the panel.
+What AMP 3 lets Portcullis see, and how each state is found:
+
+* **Updating.** An update started through Portcullis (``server.power.update`` in the audit log), or a
+  state change to Busy whose ``statusMessage`` mentions updating, downloading or installing. The status
+  message is free text from AMP's agent and its wording has not been captured yet, so an update started
+  from AMP's own panel may only show up when it finishes.
+* **Finished.** ``installedVersion`` or ``installedAt`` on the server changes between two reads of the
+  server list. Portcullis already reads that list every 5 minutes, so this costs no extra calls. The last
+  value seen is stored, so an update that ran while Portcullis was off is still reported once.
+* **Failed.** The server goes to Failed while an update is in progress.
+* **Update available: not detectable.** AMP 3 has no field or event for it. Templates carry an
+  ``updateAvailableRegex`` that AMP applies to console output itself, but the result isn't exposed.
+
+While an update runs, the offline alert stays quiet (an update stops the server on purpose).
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+import re
+import time
+from collections.abc import Callable, Iterable
 from typing import Any
 
-import discord
-
-from portcullis.bot.base import reply, scrub, state_text
-from portcullis.bot.errors import plain_error
+from portcullis.bot.alerting import Alert, AlertRouter
+from portcullis.bot.base import Ctx, code
 from portcullis.core.relay import escape
-from portcullis.core.types import ServerState
-from portcullis.db.repos import ServerRow
+from portcullis.core.types import ServerEvent, ServerInfo, ServerState, StateChanged
+from portcullis.db.repos import AuditEntry
 
 log = logging.getLogger(__name__)
 
-POLL = 15.0
-START_CHECKS = 4  # about a minute for the update to show up as busy
-# Discord lets the bot answer an interaction for 15 minutes; the last check is a little before that.
-FINISH_CHECKS = 54
+SEEN_KEY = "installed_seen"  # server scope: {"version": str|None, "at": str|None}
+NOTICES_KEY = "update_notices"  # bot scope: false turns update posts off (default on)
+UPDATING_WORDS = re.compile(r"(?i)\b(updat\w*|download\w*|install\w*)")
+GIVE_UP = 7200.0  # an update with no result after 2 hours is forgotten without a post
 
 
-def update_error(exc: BaseException) -> str:
-    """AMP's two update-specific refusals in plain words; anything else as usual."""
-    text = str(exc)
-    if "steamLoginRequired" in text:
-        return ("This game needs a Steam account to download updates. Add a SteamCMD login to the server in "
-                "the AMP panel, then try again.")
-    if "suspended" in text.lower() and getattr(exc, "status", None) == 409:
-        return "The server is suspended in AMP, so it can't be updated. Unsuspend it in the panel first."
-    return plain_error(exc)
+class Updates:
+    def __init__(self, ctx: Ctx, router: AlertRouter, *, clock: Callable[[], float] = time.monotonic) -> None:
+        self.ctx = ctx
+        self.router = router
+        self.clock = clock
+        self.updating: dict[str, float] = {}
+        self.tasks: set[asyncio.Task[None]] = set()
 
+    async def _enabled(self) -> bool:
+        return await self.ctx.settings.get(NOTICES_KEY, True) is not False
 
-async def follow_update(ctx: Any, interaction: discord.Interaction, row: ServerRow, *,
-                        sleep: Callable[[float], Awaitable[None]]) -> None:
-    """Report how an update ended, in the channel where it was asked for."""
-    seen_busy = False
-    status = None
-    for check in range(START_CHECKS + FINISH_CHECKS):
-        await sleep(POLL)
-        try:
-            status = await ctx.port.get_status(row.shard_id)
-        except Exception as exc:  # noqa: BLE001 - one failed read is not the update failing
-            log.info("following the update of %s: %s", row.name, exc)
-            continue
-        if status.state is ServerState.BUSY:
-            seen_busy = True
-            continue
-        if seen_busy or check + 1 >= START_CHECKS:
-            break
-    name = escape(row.name)
-    if status is None or status.state is ServerState.BUSY:
-        outcome = "unknown"
-        text = (f"**{name}** is still updating after {int(POLL * (START_CHECKS + FINISH_CHECKS) // 60)} minutes, "
-                "or AMP stopped answering. Check the server in AMP.")
-    elif status.state is ServerState.FAILED:
-        outcome = "failed"
-        why = f" AMP says: {escape(scrub(status.last_error))[:300]}" if status.last_error else ""
-        text = f"The update of **{name}** failed.{why}"
-    elif not seen_busy:
-        outcome = "unknown"
-        text = (f"AMP accepted the update of **{name}**, but the server never showed as updating. It may "
-                f"have had nothing to update. It is now {state_text(status.state)}.")
-    else:
-        outcome = "ok"
-        text = f"The update of **{name}** finished. It is now {state_text(status.state)}."
-    await ctx.audit.record("server.power.update.finished", actor_id=interaction.user.id, shard_id=row.shard_id,
-                           result="failed" if outcome == "failed" else "ok", detail={"outcome": outcome})
-    try:
-        await reply(interaction, text, ephemeral=False)
-    except Exception as exc:  # noqa: BLE001 - the interaction may have expired
-        log.warning("could not post how the update of %s ended: %s", row.name, exc)
+    async def _name(self, server: str) -> str:
+        row = await self.ctx.servers.get(server)
+        return escape(row.name) if row else server
+
+    async def started(self, server: str, how: str) -> None:
+        server = server.lower()
+        if server in self.updating and self.clock() - self.updating[server] < GIVE_UP:
+            return
+        self.updating[server] = self.clock()
+        self.ctx.expect_offline(server)
+        if await self._enabled():
+            await self.router.send(Alert(kind="update", server=server, severity="info", ping=False,
+                                         title="Updating", text=f"⬇️ **{await self._name(server)}** is updating "
+                                                                f"({how})."))
+
+    def on_audit(self, entry: AuditEntry) -> None:
+        """``AuditRepo.listeners`` hook: an update someone started through Portcullis."""
+        if entry.action == "server.power.update" and entry.result == "ok" and entry.shard_id:
+            task = asyncio.create_task(self.started(entry.shard_id, "started through Portcullis"),
+                                       name="portcullis-update-started")
+            self.tasks.add(task)
+            task.add_done_callback(self.tasks.discard)
+
+    async def __call__(self, event: ServerEvent) -> None:
+        if not isinstance(event, StateChanged):
+            return
+        server = event.server.lower()
+        if event.state is ServerState.BUSY and event.message and UPDATING_WORDS.search(event.message):
+            await self.started(server, f"AMP says: {event.message[:100]}")
+            return
+        since = self.updating.get(server)
+        if since is None:
+            return
+        if self.clock() - since > GIVE_UP:
+            self.updating.pop(server, None)
+            return
+        if event.state is ServerState.FAILED:
+            self.updating.pop(server, None)
+            fields = (("AMP says", event.message[:300]),) if event.message else ()
+            await self.router.send(Alert(kind="update_failed", server=server, severity="bad", title="Update failed",
+                                         text=f"❌ **{await self._name(server)}**: the game update failed.",
+                                         fields=fields))
+        elif event.state is not ServerState.BUSY:
+            self.ctx.expect_offline(server)  # the stop at the end of an update is still expected
+
+    async def seen(self, servers: Iterable[ServerInfo]) -> None:
+        """Called after each read of AMP's server list. A new installed version or time means an update finished."""
+        for info in servers:
+            server = info.id.lower()
+            now: dict[str, Any] = {"version": info.installed_version, "at": info.installed_at}
+            if now["version"] is None and now["at"] is None:
+                continue
+            before = await self.ctx.settings.get(SEEN_KEY, scope=server)
+            if before == now:
+                continue
+            await self.ctx.settings.set(SEEN_KEY, now, scope=server)
+            if not isinstance(before, dict):
+                continue  # first sighting: nothing to compare with
+            self.updating.pop(server, None)
+            if not await self._enabled():
+                continue
+            old, new = before.get("version"), now["version"]
+            change = f"{code(str(old))} → {code(str(new))}" if old and new and old != new else \
+                (code(str(new)) if new else "version not reported")
+            await self.router.send(Alert(kind="update_done", server=server, severity="good", ping=False,
+                                         cooldown=False, title="Update finished",
+                                         text=f"✅ **{escape(info.name)}** finished updating: {change}."))
+
+    async def close(self) -> None:
+        for task in list(self.tasks):
+            task.cancel()
+        await asyncio.gather(*self.tasks, return_exceptions=True)

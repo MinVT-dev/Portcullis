@@ -152,5 +152,7 @@ def parse_hub_event(event: HubEvent, joined: Collection[str]) -> ServerEvent | N
             return cls(server=server, at=at, player=player)
     elif event.target == "ShardStateChanged":
         state, raw = state_from(payload)
-        return StateChanged(server=server, at=at, state=state, raw_status=raw)
+        message = field_of(payload, "statusMessage")
+        return StateChanged(server=server, at=at, state=state, raw_status=raw,
+                            message=message if isinstance(message, str) and message else None)
     return OtherEvent(server=server, at=at, name=event.target, payload=payload)

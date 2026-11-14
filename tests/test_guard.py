@@ -22,7 +22,7 @@ from portcullis.bot.guard import (
     action_label,
 )
 from portcullis.bot.players import VISIBILITY_KEY, names_text
-from portcullis.bot.updates import follow_update, update_error
+from portcullis.bot.update_follow import follow_update, update_error
 from portcullis.core.types import Player, PowerAction, ServerId, ServerState, ServerStatus
 from portcullis.db.repos import AuditEntry
 from tests.fakes.discord import FakeChannel, FakeInteraction, FakeMember, FakeRole, press_yes

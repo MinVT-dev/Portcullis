@@ -13,6 +13,7 @@ from collections.abc import Awaitable, Callable
 from discord import app_commands
 
 from portcullis.bot.admin import AdminModule
+from portcullis.bot.alerting import GROUP_WINDOW, AlertRouter
 from portcullis.bot.alerts import Alerts
 from portcullis.bot.auditlog import AuditLog
 from portcullis.bot.backups import ScheduleModule
@@ -24,6 +25,7 @@ from portcullis.bot.events import EventCancel, EventGoing, EventModule
 from portcullis.bot.guard import StaffAlerts
 from portcullis.bot.joins import JoinWatch
 from portcullis.bot.livecard import LiveCards
+from portcullis.bot.monitor import Monitor
 from portcullis.bot.notify import NotifyModule
 from portcullis.bot.players import PlayersModule
 from portcullis.bot.polls import PollClose, PollModule, PollVote
@@ -55,7 +57,10 @@ class Modules:
         self.notify = NotifyModule(ctx)
         self.events = EventModule(ctx)
         self.schedules = ScheduleModule(ctx)
-        self.alerts = Alerts(ctx)
+        # One router for every alert, so grouping and cooldowns see crashes, load and updates together.
+        self.router = AlertRouter(ctx, window=GROUP_WINDOW)
+        self.alerts = Alerts(ctx, router=self.router)
+        self.monitor = Monitor(ctx, self.router)
         self.rules = AlertRuleModule(ctx)
         self.joins = JoinWatch(ctx)
         self.digest = Digest(ctx)
@@ -67,12 +72,13 @@ class Modules:
 
     def all(self) -> list[Module]:
         return [self.server, self.setup, self.community, self.polls, self.notify, self.events, self.schedules,
-                self.rules, self.admin, self.players, self.safety]
+                self.rules, self.monitor, self.admin, self.players, self.safety]
 
     async def tick(self) -> None:
         """Once a minute: event reminders, load and backup alerts, alert rules, the daily summary and milestones."""
         for name, job in (("events", self.events.tick), ("alerts", self.alerts.tick),
-                          ("alert rules", self.rules.tick), ("digest", self.digest.tick)):
+                          ("alert rules", self.rules.tick), ("digest", self.digest.tick),
+                          ("monitoring", self.monitor.tick)):
             try:
                 await job()
             except Exception:  # one failing job must not stop the others
@@ -84,6 +90,8 @@ class Modules:
             ("server countdowns and restore watchers", self.server.close),
             ("audit feed", self.audit_feed.close),
             ("staff alerts", self.staff_alerts.close),
+            ("history and update watch", self.monitor.close),
+            ("pending alerts", self.router.close),
         ]
         if self.ctx.live_cards is not None:
             steps.insert(0, ("live cards", self.ctx.live_cards.close))

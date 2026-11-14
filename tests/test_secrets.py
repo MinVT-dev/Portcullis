@@ -133,3 +133,13 @@ def test_remove_from_env_file_handles_export_and_comments(tmp_path: Path) -> Non
     assert remove_from_env_file(path, ["AMP_PASSWORD"]) == ["AMP_PASSWORD"]
     lines = path.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "# AMP_PASSWORD=old note" and "'x'" not in lines[1] and lines[2] == "AMP_URL=http://a"
+
+
+def test_startup_check_still_sees_plaintext_env(tmp_path: Path) -> None:
+    from portcullis.ops.settings import check
+
+    env_file = write_env(tmp_path, AMP_PASSWORD=PASSWORD, DISCORD_TOKEN=TOKEN)
+    checked = check({**BASE, "PORTCULLIS_DB": str(tmp_path / "p.db"), "PORTCULLIS_LOG_FILE": "off",
+                     "PORTCULLIS_STATE_FILE": "off"}, env_file=env_file)
+    assert dict(checked.settings.secret_sources)["AMP_PASSWORD"] == ".env"
+    assert any("plain text" in w for w in checked.warnings) and not any(PASSWORD in w for w in checked.warnings)
