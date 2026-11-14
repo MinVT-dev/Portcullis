@@ -15,7 +15,7 @@ dependencies = [
     "aiosqlite>=0.20,<1",
     "discord.py>=2.5,<3",
     # Status banners (/server banner and the image board). Pillow's licence (HPND) is AGPL-compatible.
-    "pillow>=10.1",
+    "pillow>=13.0.0",
 ]
 
 [project.optional-dependencies]
