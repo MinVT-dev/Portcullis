@@ -244,7 +244,7 @@ async def test_list_with_players_and_address(h: Harness) -> None:
     await h.ctx.settings.set(CONNECT_KEY, "play.example.com:27015", scope=SURVIVAL)
     i = FakeInteraction(member())
     await h.m.server.server_status(i, "Survival")
-    assert {f.name: f.value for f in i.embed.fields}["Address"] == "`play.example.com:27015`"
+    assert {f.name: f.value for f in i.embed.fields}["Connect"] == "```\nplay.example.com:27015\n```"
 
 
 # ------------------------------------------------------------------------------ alerts

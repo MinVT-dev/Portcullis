@@ -99,6 +99,7 @@ class PortcullisBot(discord.Client):
         self.board = self.ctx.board
         self.notifier = Notifier(self.ctx)
         self.relay = Relay(port, DiscordSink(self, self.ctx.channel), hooks=hooks, follow_all=True)
+        self.relay.state_icon = self.ctx.emojis.state  # brand emojis once they're found, Unicode until then
         # JoinWatch first: it needs to know whether a join is someone's first, before PlayerTracker records it.
         self.relay.listeners += [
             self.modules.joins,
@@ -127,7 +128,9 @@ class PortcullisBot(discord.Client):
         closed = await self.ctx.players.close_all()  # sessions still open from before a restart
         if closed:
             log.info("closed %d player session(s) left open by the last run", closed)
+        await self.ctx.emojis.fetch(self)  # never raises; missing emojis fall back to Unicode
         await self.refresh()
+        self.ctx.live_cards.start()
         self._refresher = asyncio.create_task(self._refresh_loop(), name="portcullis-refresh")
         self._ticker = asyncio.create_task(self._tick_loop(), name="portcullis-tick")
 
@@ -218,6 +221,7 @@ class PortcullisBot(discord.Client):
         await self.update_presence()
         if self.is_ready():
             await self.board.changed()
+            self.ctx.live_cards.nudge()
 
     def presence(self) -> tuple[discord.Status, discord.BaseActivity]:
         summary = self.live.summary()

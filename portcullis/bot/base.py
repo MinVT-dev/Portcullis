@@ -14,9 +14,10 @@ from typing import Any
 import discord
 from discord import app_commands
 
+from portcullis.bot.emojis import EMOJI, Emojis
 from portcullis.core.live import LiveState
 from portcullis.core.port import AmpPort
-from portcullis.core.relay import STATE_ICONS, escape
+from portcullis.core.relay import escape
 from portcullis.core.types import ServerState
 from portcullis.db.database import Database
 from portcullis.db.features import LinkCodeRepo, NotifyRepo, PlayerRepo, PollRepo, WhitelistRepo
@@ -183,6 +184,8 @@ class Ctx:
     # Channel id -> when to ask Discord about it again. A deleted or closed channel is otherwise fetched
     # (and refused) on every relay batch, alert and audit entry, which Discord counts against the bot.
     missing_channels: dict[int, float] = field(default_factory=dict)
+    emojis: Emojis = field(default_factory=lambda: EMOJI)
+    live_cards: Any = None  # LiveCards, set by Modules
 
     def __post_init__(self) -> None:
         self.servers = ServerRepo(self.db)
@@ -316,13 +319,29 @@ def code(text: str) -> str:
 
 
 # Embed colours from the brand palette (docs/branding/README.md); the text always says it too.
+# The colour bar on the left of an embed is the same colour the folds of the mark take: orange for
+# Portcullis's own notices, green online, red offline or failed, mustard for "needs you", ash for done.
 INFO, GOOD, WARN, BAD, MUTED = 0xE8710A, 0x4ADE80, 0xF2B33D, 0xFF5A5F, 0x8C857E
+KINDS = {"info": INFO, "good": GOOD, "warn": WARN, "bad": BAD, "muted": MUTED}
+STATE_COLOURS = {
+    ServerState.RUNNING: GOOD,
+    ServerState.STOPPED: BAD,
+    ServerState.BUSY: WARN,
+    ServerState.SLEEPING: MUTED,
+    ServerState.FAILED: BAD,
+    ServerState.SUSPENDED: MUTED,
+    ServerState.AWAITING_LICENCE: WARN,
+    ServerState.UNKNOWN: MUTED,
+}
 
 
-def card(**kwargs: Any) -> discord.Embed:
-    """An embed in the house style: brand orange unless the caller picks a colour."""
-    kwargs.setdefault("colour", INFO)
-    return discord.Embed(**kwargs)
+def card(*, kind: str = "info", footer: str | None = None, **kwargs: Any) -> discord.Embed:
+    """An embed in the house style. ``kind`` picks the colour bar (``KINDS``) unless ``colour`` is given."""
+    kwargs.setdefault("colour", KINDS.get(kind, INFO))
+    embed = discord.Embed(**kwargs)
+    if footer:
+        embed.set_footer(text=footer)
+    return embed
 
 
 def problem_text(ref: str) -> str:
@@ -360,9 +379,9 @@ def short_error(exc: BaseException) -> str:
     return text if len(text) <= 300 else text[:299] + "…"
 
 
-def state_text(state: ServerState) -> str:
-    """Status is never colour-only (DESIGN.md section 7): icon plus a word."""
-    return f"{STATE_ICONS.get(state, '❔')} {state.label}"
+def state_text(state: ServerState, *, going_down: bool = False) -> str:
+    """Status is never colour-only (DESIGN.md section 7): icon plus a word. Brand emojis when uploaded."""
+    return f"{EMOJI.state(state, going_down=going_down)} {state.label}"
 
 
 def duration(seconds: float) -> str:

@@ -125,8 +125,12 @@ def console_safe(text: str) -> str:
     return text if len(text) <= LINE_LIMIT else text[: LINE_LIMIT - 1] + "…"
 
 
-def state_line(name: str, state: ServerState) -> str:
-    return f"{STATE_ICONS.get(state, '❔')} **{escape(name)}** is now {state.label}"
+def default_icon(state: ServerState) -> str:
+    return STATE_ICONS.get(state, "❔")
+
+
+def state_line(name: str, state: ServerState, icon: Callable[[ServerState], str] = default_icon) -> str:
+    return f"{icon(state)} **{escape(name)}** is now {state.label}"
 
 
 # ------------------------------------------------------------------------------ batching
@@ -237,6 +241,8 @@ class Relay:
         self._last_state: dict[ServerId, ServerState] = {}
         self.follow_all = follow_all  # follow servers without relay channels too, for the listeners
         self.listeners: list[Listener] = []
+        # How a state is drawn in the events channel. The bot swaps in its brand emojis (bot/emojis.py).
+        self.state_icon: Callable[[ServerState], str] = default_icon
 
     @property
     def targets(self) -> dict[ServerId, RelayTarget]:
@@ -310,7 +316,7 @@ class Relay:
             previous = self._last_state.get(target.server)
             self._last_state[target.server] = event.state
             if target.event_channel and previous is not None and previous != event.state:
-                out.append((target.event_channel, "text", state_line(target.name, event.state)))
+                out.append((target.event_channel, "text", state_line(target.name, event.state, self.state_icon)))
         return out
 
     async def _follow(self, target: RelayTarget) -> None:

@@ -21,6 +21,7 @@ import discord
 from discord import app_commands
 
 from portcullis.bot.base import Module, OwnedView, card, reply, short_error
+from portcullis.bot.errors import plain_error
 from portcullis.core.relay import escape
 from portcullis.core.types import Backup, Schedule
 from portcullis.db.repos import ServerRow
@@ -207,9 +208,8 @@ class ScheduleModule(Module):
             items = await self.ctx.port.list_schedules(row.shard_id)
         except Exception as exc:  # noqa: BLE001
             log.warning("listing schedules for %s failed: %s", row.name, exc)
-            await reply(interaction, f"Couldn't read the schedules of {escape(row.name)}: "
-                                     f"{escape(short_error(exc))}\nThe bot's AMP account may lack the schedule "
-                                     "permission.")
+            await reply(interaction, f"Couldn't read the schedules of {escape(row.name)}. "
+                                     f"{plain_error(exc)}")
             return
         if not items:
             await reply(interaction, f"{escape(row.name)} has no schedules. Create them in AMP's panel; "
@@ -241,7 +241,7 @@ class ScheduleModule(Module):
             log.warning("%s on %s failed: %s", node, row.name, exc)
             await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, result="failed",
                                         detail={"schedule": schedule.name, "error": short_error(exc)})
-            await reply(interaction, f"AMP didn't take that: {escape(short_error(exc))}")
+            await reply(interaction, f"That didn't go through. {plain_error(exc)}")
             return
         await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id,
                                     detail={"schedule": schedule.name})
@@ -255,7 +255,7 @@ class ScheduleModule(Module):
         try:
             runs = await self.ctx.port.schedule_history(row.shard_id, schedule.id, limit=10)
         except Exception as exc:  # noqa: BLE001
-            await reply(interaction, f"Couldn't read the run history: {escape(short_error(exc))}")
+            await reply(interaction, f"Couldn't read the run history. {plain_error(exc)}")
             return
         if not runs:
             await reply(interaction, f"**{escape(schedule.name)}** hasn't run yet.")

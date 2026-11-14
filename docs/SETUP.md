@@ -188,6 +188,7 @@ Three levels: **everyone** in the server; **operators** (members with a role in 
 |---|---|---|
 | `/server list [players]` | everyone | Every server with its state and player count. With `players`, also names everyone online. |
 | `/server status <server>` | everyone | State, players, CPU, memory and how long it has been up. Operators also get Start, Stop and Restart buttons, plus the server's quick commands (8.6). If the server allows it, members get a Start button while it is stopped. Shows the address players connect to, when one is set. |
+| `/server diagnostics <server>` | operators | CPU, memory and disk as bars against their limits, how long it has been up, and AMP's last error message. AMP 3 has no TPS figure, so none is shown. The disk figure hasn't been seen on a real panel. |
 | `/server banner [server] [theme] [public]` | everyone | A picture with a card per server (up to 10): state in words, players, CPU, memory, uptime and address. Dark or light. Only you see it, unless an operator sets `public`. |
 | `/server power <server> <action>` | operators | Start, stop, restart, or restart with a warning (says so in game chat 5 minutes and 1 minute before, with a Cancel button). Also update the game, sleep and wake, which ask first (update and sleep) and haven't been seen working on a real panel. Stopping or restarting asks first when players are online. The reply is public, so the channel sees who did it. |
 | `/server power-all <action> [tag]` | operators | Starts or stops every server you may run, or only those with an AMP tag. Asks first. |
@@ -211,6 +212,8 @@ Three levels: **everyone** in the server; **operators** (members with a role in 
 | `/event create <title> <when> [details] [server]` | operators | Posts an event with Going and Cancel buttons. `when` takes `in 2h 30m`, `20:00`, `tomorrow 20:00` or `2026-12-24 20:00`, in the time zone set in `/setup bot`. Everyone who pressed Going is pinged 30 minutes before. |
 | `/event list` | everyone | Upcoming events. |
 | `/user <member>`, or right-click a member → **Apps → Portcullis user** | operators | Linked names, flags and recent actions, with buttons to mark them as a donator, block them from whitelist requests, or remove their links. |
+| `/setup start` | admins | The first-run wizard: five steps (AMP, alerts, live status cards, Panel and Support links, brand emojis), each marked done or not. Each pick saves at once. |
+| `/setup live <server> [channel]` | admins | Posts a live status card for one server in a channel, or with no channel, removes its card (8.6). |
 | `/setup relay`, `/setup server <server>`, `/setup bot` | admins | Relay channels, per-server settings, and bot-wide settings (8.6). |
 | `/alert create <metric> [threshold] [minutes] [server] [channel] [role]` | admins | Your own alert: CPU or memory at or above a percentage, more or fewer players than a number, or offline, for `minutes` (default 5, 0 = at once). Leave out `server` to watch every server, and `channel` to post in the alert channel. It fires once, pings only `role`, and posts again when it clears. Up to 25 rules. These are Portcullis's own checks, once a minute, not AMP triggers. |
 | `/alert list` | admins | Your alert rules, with **Mute 1 hour**, **Unmute** and **Delete**. |
@@ -218,6 +221,7 @@ Three levels: **everyone** in the server; **operators** (members with a role in 
 | `/admin diagnostics` | admins | Checks the connection to AMP and every server, and shows the relays and the bot's status. A server line with a 403 names the AMP permission the bot lacks. It also lists what the bot's AMP account may do, and warns if it is a full admin account. |
 | `/admin export` / `/admin import <file>` | admins | Download all Portcullis settings as a file, and restore them. Gatekeeper V3 databases can't be imported yet. |
 | `/admin bot <status\|sync\|stop>` | owners | Status (uptime, Discord latency, versions, database), re-sync the slash commands to this Discord server, or stop the bot (asks first; a service manager or AMP starts it again). |
+| `/health` | everyone | One line each for AMP, Discord, the servers, the live status cards, the brand emojis and the database, with ✅ ⚠️ ❌. Details are in `/admin diagnostics`. |
 | `/help [v3]` | everyone | Lists the commands you can use. With `v3`, says where a Gatekeeper V3 command went. |
 
 Not built: creating schedules (the scheduler's step and trigger formats haven't been checked on a real panel), a Discord-to-game chat bridge (it needs a privileged Discord intent, and `/server send as:chat` covers it), and giveaways, vote-to-restart and managing AMP accounts from Discord (not game-server features, or too easy to abuse).
@@ -254,7 +258,18 @@ Mentions never ping: everything the bot posts has `@everyone`, `@here`, user and
 - **Server operators (owners)**: roles that may do everything on this server and nothing elsewhere. Only owners can set them.
 - **Quick commands**: up to 5 one-click console commands, one per line as `Label = command`, for example `Save world = save`. They show as buttons under `/server status` for operators, and each press is logged with its label.
 
-`/setup bot` also has a channel picker for the **live server board**: one message that Portcullis keeps editing with every server's state and player count (hidden servers left out). It updates at most every 30 seconds. If someone deletes the message, the next update posts a new one. **Turn the server board off** stops it; delete the old message yourself.
+`/setup bot` also has a channel picker for the **live server board**: one message that Portcullis keeps editing with every server's state and player count (hidden servers left out). It updates at most every 2 minutes, and waits longer after a Discord rate limit. If someone deletes the message, the next update posts a new one. **Turn the server board off** stops it; delete the old message yourself.
+
+**Live status cards** are one message per server, in a channel you pick in `/setup start` or with `/setup live`. Each card shows:
+- the state in words, players, how long the server has been up, and the next restart;
+- CPU and memory, the connect address, and who is online;
+- the game's logo.
+
+Portcullis edits the cards in place. It edits them every 2 to 5 minutes (3 by default, your choice in `/setup start`), and every 5 minutes while nobody is playing. After a Discord rate limit or a failed edit, it waits twice as long each time, up to 15 minutes. When a server changes state, the cards may update sooner, but never within a minute of the last edit. The footer says how often a card updates. Up to 25 cards. If someone deletes a card, the next pass posts a new one.
+
+Two notes:
+- **Next restart.** AMP doesn't mark what a schedule is for, so the card shows the soonest enabled schedule with "restart" in its name.
+- **Buttons.** **Panel** and **Support** link buttons under the cards are optional (Links in `/setup start`). A link button can't carry a game address, so the address is shown in the card to copy instead.
 
 The rest of `/setup bot`:
 
@@ -301,7 +316,7 @@ It lists breaking, changed and added API operations against the spec Portcullis 
 
 - **In-memory restart warnings.** A warned restart counts down inside the bot; restarting Portcullis during the countdown cancels it.
 - **Not every planned command exists.** Creating schedules is still to come (see 8.4); create them in AMP's panel.
-- **Unverified AMP actions.** Update, sleep, wake, making, restoring and deleting backups, and the schedule buttons (including run history and delete) use routes from the API spec that haven't run on a real panel.
+- **Unverified AMP actions.** Update, sleep, wake, restoring and deleting backups (making one works on a real panel), and the schedule buttons (including run history and delete) use routes from the API spec that haven't run on a real panel.
 - **Play time starts now.** `/player` only knows what the bot has seen since it started recording. Sessions still open when the bot stops are closed at its next start, so a long restart can count a little extra time.
 - **Leaves are not verified.** AMP's player-left event hasn't been captured yet for any game; if it never arrives, a player's session ends when the server stops.
 - **Partly tested against a real AMP 3.** Login, the live hub, the server list, power, the console and listing backups have run on a real 3.0.0.6 panel. Everything else is only tested against a fake AMP built from the API docs. What is left to check is in the [real-panel checklist](BETA_CHECKLIST.md).
@@ -310,6 +325,7 @@ It lists breaking, changed and added API operations against the spec Portcullis 
 - **Game licences (EULA).** When a server starts without anyone waiting for it (on boot, from a schedule, after an update) and its game has a licence that isn't accepted yet, AMP holds it. `/server status` shows **Needs licence**, the alert channel says so, and an admin can accept or decline it from the status buttons. Accepting is recorded by AMP under the bot's account and by Portcullis under the person who pressed it. This follows the API spec and hasn't run on a real panel yet.
 - **Passkeys.** If the panel's passkey policy is set to Required, the bot refuses to log in and says why: a bot can't use a passkey. Keep the policy at Optional or Encouraged. Portcullis reads the expiry date from AMP once a day and, from 14 days before, posts a warning in the alert channel (pinging the alert role in the last 3 days). `/admin diagnostics` shows the date too. Reading that date has not run against a real panel yet.
 - **Channels that are gone.** If a relay, alert or log channel is deleted or closed to the bot, Portcullis stops trying it for a while (30 seconds, doubling up to 15 minutes for relays; 10 minutes for the channel lookup) and logs a warning. Lines relayed in that time are dropped. Pick a new channel in `/setup`.
+- **Live cards and brand emojis.** These are tested against a fake Discord only. They haven't run on a real Discord server yet.
 - **Licence.** The pinned spec and generated client contain CubeCoders' text. That's fine while the repo is private. See [DEVELOPING.md](DEVELOPING.md#licence-note) before it goes public.
 
 ## 12. Troubleshooting

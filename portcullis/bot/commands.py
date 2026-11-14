@@ -20,6 +20,7 @@ from portcullis.bot.community import CommunityModule, WhitelistDecision
 from portcullis.bot.digest import Digest
 from portcullis.bot.events import EventCancel, EventGoing, EventModule
 from portcullis.bot.joins import JoinWatch
+from portcullis.bot.livecard import LiveCards
 from portcullis.bot.notify import NotifyModule
 from portcullis.bot.polls import PollClose, PollModule, PollVote
 from portcullis.bot.rules import AlertRuleModule
@@ -38,6 +39,8 @@ class Modules:
     def __init__(self, ctx: Ctx) -> None:
         if ctx.board is None:
             ctx.board = StatusBoard(ctx)
+        if ctx.live_cards is None:
+            ctx.live_cards = LiveCards(ctx)
         self.server = ServerModule(ctx)
         self.setup = SetupModule(ctx)
         self.community = CommunityModule(ctx)
@@ -67,6 +70,7 @@ class Modules:
                 log.exception("the %s job failed", name)
 
     async def close(self) -> None:
+        await self.ctx.live_cards.close()
         await self.server.close()
         await self.audit_feed.close()
 

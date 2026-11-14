@@ -179,7 +179,7 @@ async def test_power_failure_and_bad_action(h: Harness) -> None:
     h.port.power = broken  # type: ignore[method-assign]
     i = FakeInteraction(operator())
     await h.m.server.server_power(i, "Survival", "restart")
-    assert "AMP didn't restart Survival" in i.text
+    assert "Couldn't restart Survival" in i.text
     i = FakeInteraction(owner())
     await h.m.server.server_power(i, "Survival", "explode")
     assert "Choose one of the actions in the list" in i.text
@@ -594,10 +594,12 @@ def test_command_tree() -> None:
     for c in tree.get_commands():
         names[c.name] = sorted(x.name for x in getattr(c, "commands", []))
     assert names == {
-        "server": ["banner", "console", "list", "power", "power-all", "send", "status"], "backups": [],
-        "setup": ["bot", "relay", "server"], "whitelist": ["add", "list", "remove", "request"], "link": [],
+        "server": ["banner", "console", "diagnostics", "list", "power", "power-all", "send", "status"],
+        "backups": [], "setup": ["bot", "live", "relay", "server", "start"],
+        "whitelist": ["add", "list", "remove", "request"], "link": [],
         "player": ["id", "lookup", "moderate", "top", "watch", "watchlist"], "user": [], "Portcullis user": [],
-        "poll": ["create", "list"], "notify": [], "event": ["create", "list"], "help": [], "audit": [],
+        "poll": ["create", "list"], "notify": [], "event": ["create", "list"], "help": [], "health": [],
+        "audit": [],
         "admin": ["bot", "diagnostics", "export", "import"],
     }
     groups = {c.name: c for c in tree.get_commands()}

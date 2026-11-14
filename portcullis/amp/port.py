@@ -17,6 +17,7 @@ from portcullis.amp.events import field_of, parse_hub_event, state_from, to_int
 from portcullis.core.types import (
     Backup,
     BackupTimeline,
+    DiskUsage,
     Player,
     PowerAction,
     Schedule,
@@ -207,7 +208,12 @@ class AmpServerPort:
             memory_limit_mb=to_int(metrics.memory_limit_mb) if metrics else None,
             message=state.status_message or state.last_error_message,
             started_at=state.started_at,
+            last_error=state.last_error_message,
         )
+
+    async def disk_usage(self, server: ServerId) -> DiskUsage:
+        usage = await self.client.shards.get_shards_disk(server)
+        return DiskUsage(size_mb=to_int(usage.size_mb), limit_mb=to_int(usage.limit_mb))
 
     async def power(self, server: ServerId, action: PowerAction) -> None:
         calls = {

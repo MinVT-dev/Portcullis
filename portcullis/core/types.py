@@ -83,10 +83,20 @@ class ServerStatus:
     message: str | None = None
     started_at: datetime | None = None
     raw_status: int | None = None  # AMP's ApplicationState number, kept until its values are mapped
+    last_error: str | None = None  # AMP's lastErrorMessage: why the last start or run failed
+
 
     @property
     def player_count(self) -> int:
         return len(self.players)
+
+
+@dataclass(frozen=True)
+class DiskUsage:
+    """A server's disk use against its budget (``GET /api/Shards/{id}/disk``). ``limit_mb`` 0 or None: no limit."""
+
+    size_mb: int | None
+    limit_mb: int | None = None
 
 
 @dataclass(frozen=True)

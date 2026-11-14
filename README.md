@@ -136,6 +136,25 @@ Still to come (placeholders for now, see [docs/images](docs/images/README.md)):
   <img src="docs/images/server-banner-dark.png" alt="Server banner: Survival and Creative online with players, CPU, memory and uptime; Modded busy; Event map offline; Old world sleeping" width="560">
 </p>
 
+### The new cards (mock-ups)
+
+These come from the bot's own embed code, drawn with **sample data** by [`tools/render_embeds.py`](tools/render_embeds.py). They are not captures from a real Discord server yet. The game logo is the bot's placeholder.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/embeds/live-card.png" alt="Mock-up of a live status card: Valheim online, 3 of 10 players, uptime, next restart, CPU, memory, connect address, Panel and Support buttons"><br><sub>A live status card, edited every 2 to 5 minutes</sub></td>
+    <td width="50%"><img src="docs/images/embeds/live-card-states.png" alt="Mock-up of live cards for an offline server, a busy server and one waiting for its licence"><br><sub>Offline, busy, and waiting for the licence (EULA)</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/embeds/diagnostics.png" alt="Mock-up of /server diagnostics: CPU, memory and disk bars and the last error"><br><sub><code>/server diagnostics</code></sub></td>
+    <td><img src="docs/images/embeds/health.png" alt="Mock-up of /health: AMP, Discord, servers, live cards, brand emojis and database, each with a mark"><br><sub><code>/health</code></sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/embeds/setup-start.png" alt="Mock-up of the /setup start wizard with five steps"><br><sub><code>/setup start</code>, the first-run wizard</sub></td>
+    <td><img src="docs/images/embeds/live-card-fallback.png" alt="Mock-up of the live card with plain emojis, before the brand emojis are uploaded"><br><sub>Before the brand emojis are uploaded</sub></td>
+  </tr>
+</table>
+
 ## Coming from Gatekeeper V3
 
 Portcullis covers almost all of Gatekeeper V3's 117 commands. Many are grouped differently: there are fewer slash commands, and more buttons and setup panels.
@@ -184,8 +203,15 @@ On Windows, use `py -3 -m venv .venv` and `.\.venv\Scripts\python.exe` instead.
 Invite the bot with only **View Channels** and **Send Messages** (`permissions=3072`). It needs no admin rights and no privileged intents.
 
 Then, in Discord:
-1. Run `/setup relay`, `/setup server` and `/setup bot`.
-2. Press **Check setup**.
+1. Run **`/setup start`**. It walks through five steps and marks each one done as you go:
+   - the connection to AMP;
+   - an alerts channel;
+   - a channel for the live status cards, and how often they update (every 2 to 5 minutes);
+   - optional Panel and Support buttons under the cards;
+   - the brand emojis.
+2. Optional: upload the eight brand emojis to your application in the Discord Developer Portal. [docs/EMOJIS.md](docs/EMOJIS.md) shows how. Until then the cards use plain emojis.
+3. Run `/setup relay` and `/setup server` for the relays and the settings of each server.
+4. Run `/health` any time for a one-glance check, or press **Check setup** in `/setup bot`.
 
 ## Commands
 
