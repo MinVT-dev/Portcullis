@@ -28,6 +28,7 @@ The code has three parts:
 | `portcullis/config.py` | Reads `.env` and the environment, reports every problem at once without echoing secrets, and sets up redacted logging. |
 | `tests/fakes/amp.py` | `FakeAmpPort`: an in-memory `AmpPort` for testing core and command code without AMP. |
 | `tools/record_events.py` | Records live hub events from your own AMP 3 to `captures/`. |
+| `tools/check_spec_drift.py` | Fetches the live spec from your panel and diffs it against the pinned one. |
 
 Generated code is committed, so a regenerate after a new AMP build shows up as a reviewable diff. Only `portcullis/amp/` imports `portcullis_api`; the rest of the bot uses its own types (DESIGN.md section 6), and a test enforces it. The client package never imports the bot (also tested).
 
@@ -88,6 +89,25 @@ Add a new file `portcullis/db/migrations/NNNN_what_it_does.sql` with the next nu
 2. From `packages/portcullis-api/`: `python -m codegen.spec_diff path/to/webapi.json` lists what changed against the pinned spec. Exit code 1 means something breaking.
 3. Save it as `src/portcullis_api/spec/webapi-<build>.json`, update `PIN.json` (file, build, sha256), delete the old file, and run `python -m codegen.generate_client`.
 4. Run the tests and review the diff in `models.py` and `api/`.
+
+### Checking for spec drift
+
+`python -m tools.check_spec_drift` logs in with the AMP settings in `.env`, reads the spec through the
+panel's API browser, and prints the same report as `spec_diff` against the pinned spec. Exit code 0
+means nothing breaking, 1 breaking, 2 the spec couldn't be read. It removes the panel address
+(`servers`) from anything it saves with `--save`. If it can't find the spec, download it from the API
+browser and pass the file: `python -m tools.check_spec_drift webapi.json`.
+
+This can't be a GitHub Actions job. GitHub's runners are on the internet, the panel is on a private
+network, and the spec is only served after a login with the bot's password. A self-hosted runner on
+the same network would work, but it would run workflow code from pull requests next to the panel and
+its credentials, so it isn't set up. Schedule the script locally instead:
+
+* Windows (Task Scheduler, every Monday at 09:00):
+  `schtasks /Create /SC WEEKLY /D MON /ST 09:00 /TN "Portcullis spec drift" /TR "cmd /c cd /d C:\path\to\portcullis && .venv\Scripts\python.exe -m tools.check_spec_drift > spec-drift.txt 2>&1"`
+* Linux or macOS (crontab): `0 9 * * 1 cd /path/to/portcullis && .venv/bin/python -m tools.check_spec_drift > spec-drift.txt 2>&1`
+
+Read `spec-drift.txt` afterwards; a "Breaking" section means the steps above are due.
 
 ## Licence note
 

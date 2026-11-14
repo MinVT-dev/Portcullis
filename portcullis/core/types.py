@@ -117,6 +117,15 @@ class Backup:
     sticky: bool = False
 
 
+@dataclass(frozen=True)
+class BackupTimeline:
+    """A server's backups plus what AMP has on disk now (``head_id``) and what it is restoring."""
+
+    backups: list[Backup]
+    head_id: str | None = None
+    restoring_id: str | None = None
+
+
 # --------------------------------------------------------------------------- events
 
 

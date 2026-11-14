@@ -83,7 +83,7 @@ The design budget is about 25 slash commands (DESIGN.md, Appendix B), so most ne
 |---|---|---|
 | `/backups` list | Recent backups with size and date. | ✅ Built |
 | Make a backup | A button on `/backups`. | ✅ Built on `/backups`. It copies the settings of the newest existing backup because the spec doesn't name them. Not yet seen working on a real panel. |
-| Restore a backup | With a confirmation and its own permission. | ✅ Built on `/backups` for Manage Server holders, with a confirm. AMP saves the current state first. Not yet seen working. |
+| Restore a backup | With a confirmation and its own permission. | ✅ Built on `/backups` for Manage Server holders with the backups power: type the server's name to confirm, then the bot follows AMP and reports the outcome and AMP's PreRestore copy. Not yet seen working (docs/RESTORE_TEST.md). |
 | `/schedule` | Create and list schedules on AMP's own scheduler. | 🟡 Partly built: `/schedule list` with Run now, On and Off. Creating schedules needs the step and trigger formats checked on a real panel. |
 | Schedule run history and delete | Buttons on `/schedule list`. | ✅ Built (delete needs Manage Server and a confirm). Not yet seen working on a real panel. |
 | Delete a backup | A picker on `/backups`. | ✅ Built for Manage Server holders, with a confirm. Not yet seen working on a real panel. |

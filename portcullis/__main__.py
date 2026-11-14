@@ -15,6 +15,7 @@ import discord
 from portcullis.amp import AmpClient, Credentials
 from portcullis.amp.port import AmpServerPort
 from portcullis.bot import Access, PortcullisBot
+from portcullis.bot.base import use_scrubber
 from portcullis.config import ConfigError, Settings, load, setup_logging
 from portcullis.core.games import game_hooks
 from portcullis.db.database import Database
@@ -25,6 +26,7 @@ log = logging.getLogger("portcullis")
 
 async def run(settings: Settings) -> None:
     redactor = setup_logging(settings)
+    use_scrubber(redactor.text)  # error text shown in Discord and the audit log is masked too
     assert settings.discord_token is not None and settings.guild_id is not None  # checked by config.load
     db = await Database.open(settings.database)
     try:

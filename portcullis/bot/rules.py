@@ -17,7 +17,7 @@ from typing import Any
 import discord
 from discord import app_commands
 
-from portcullis.bot.base import ALERT_CHANNEL, Module, card, reply, role_problem
+from portcullis.bot.base import ALERT_CHANNEL, Module, OwnedView, card, reply, role_problem
 from portcullis.bot.setup import can_post
 from portcullis.core.relay import escape
 from portcullis.core.types import ServerState, ServerStatus
@@ -144,9 +144,9 @@ class AlertRuleModule(Module):
     async def list_rules(self, interaction: discord.Interaction) -> None:
         if not await self.in_guild(interaction) or not await self.require_admin(interaction, "alert.view"):
             return
-        await reply(interaction, **await self.listing())
+        await reply(interaction, **await self.listing(owner_id=interaction.user.id))
 
-    async def listing(self, note: str | None = None) -> dict[str, Any]:
+    async def listing(self, note: str | None = None, *, owner_id: int) -> dict[str, Any]:
         rules = await self.repo.all()
         if not rules:
             text = "No alert rules yet. Add one with `/alert create`."
@@ -163,7 +163,7 @@ class AlertRuleModule(Module):
             lines.append(f"**{rule.id}.** {await self.summary(rule)} → {where}{ping}{muted}")
         embed = card(title="Alert rules", description="\n".join(lines)[:4000])
         embed.set_footer(text="Pick a rule, then Mute for 1 hour, Unmute or Delete. Works for 5 minutes.")
-        return {"content": note, "embed": embed, "view": RuleView(self, rules)}
+        return {"content": note, "embed": embed, "view": RuleView(self, rules, owner_id)}
 
     async def act(self, interaction: discord.Interaction, rule_id: int, action: str) -> None:
         if not self.ctx.access.is_admin(interaction.user):
@@ -186,7 +186,7 @@ class AlertRuleModule(Module):
             await self.ctx.audit.record("alert.mute", actor_id=interaction.user.id, shard_id=rule.shard_id,
                                         target=str(rule_id), detail={"muted": until is not None})
             note = f"Muted alert {rule_id} for an hour." if until else f"Alert {rule_id} is no longer muted."
-        await interaction.response.edit_message(**await self.listing(note))
+        await interaction.response.edit_message(**await self.listing(note, owner_id=interaction.user.id))
 
     def forget(self, rule_id: int) -> None:
         for key in [k for k in (*self.since, *self.fired) if k[0] == rule_id]:
@@ -289,9 +289,9 @@ class AlertRuleModule(Module):
         tree.add_command(group)
 
 
-class RuleView(discord.ui.View):
-    def __init__(self, module: AlertRuleModule, rules: list[AlertRule]) -> None:
-        super().__init__(timeout=300)
+class RuleView(OwnedView):
+    def __init__(self, module: AlertRuleModule, rules: list[AlertRule], owner_id: int) -> None:
+        super().__init__(owner_id, timeout=300)
         self.module = module
         self.chosen: int | None = None
         options = [discord.SelectOption(label=f"Alert {r.id}", value=str(r.id), description=describe(r)[:100])
