@@ -1,0 +1,9 @@
+# CodeQL settings for .github/workflows/security.yml.
+name: Portcullis CodeQL config
+
+# The generated AMP client is produced from CubeCoders' spec and checked by
+# `python -m codegen.generate_client --check`, not by reading it. Findings there are noise.
+paths-ignore:
+  - packages/portcullis-api/src/portcullis_api/models.py
+  - packages/portcullis-api/src/portcullis_api/api
+  - packages/portcullis-api/src/portcullis_api/spec
