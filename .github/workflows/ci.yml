@@ -29,6 +29,20 @@ jobs:
       - name: Dependency audit
         run: pip-audit --skip-editable
 
+  # Stopping with Ctrl+C behaves differently on Windows (no loop signal handlers, the proactor loop),
+  # and Windows is where most people run the bot, so the shutdown tests run there too.
+  shutdown-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - name: Shutdown tests
+        run: pytest -q tests/test_shutdown.py
+
   # The AMP client on its own, installed without the bot, as a third party would use it.
   api-package:
     runs-on: ubuntu-latest

@@ -130,6 +130,21 @@ def grant_covers(grant: str, node: str) -> bool:
             or _nats_match(parts, ["shard", None, *tail])
             or _nats_match(parts, list(tail)))
 
+async def stop_soon(client: Any) -> None:
+    """``/admin bot stop``: give Discord a second to show the reply, grey the live cards, then close.
+
+    Closing makes ``bot.start`` return, and ``__main__`` then closes AMP and the database as for Ctrl+C.
+    """
+    await asyncio.sleep(1)
+    mark = getattr(client, "mark_stopped", None)
+    if mark is not None:
+        try:
+            await asyncio.wait_for(mark(), 3)
+        except Exception as exc:  # noqa: BLE001 - cosmetic; the stop goes ahead
+            log.debug("could not grey the live cards: %r", exc)
+    await client.close()
+
+
 class AdminModule(Module):
     _health_amp: tuple[float, tuple[str, str]] | None = None
 
@@ -254,7 +269,7 @@ class AdminModule(Module):
                                                               "AMP, it will start again by itself.", view=None)
                 log.warning("stopped from Discord by %s", confirmed.user.id)
                 if client is not None:
-                    asyncio.get_running_loop().call_later(1, lambda: asyncio.ensure_future(client.close()))
+                    self._stopping = asyncio.create_task(stop_soon(client), name="portcullis-admin-stop")
 
             await reply(interaction, "Stop Portcullis? Relays, alerts and commands stop until it is started "
                                      "again.", view=Confirm(interaction.user.id, stop, "Stop it"))

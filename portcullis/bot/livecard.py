@@ -19,7 +19,7 @@ from typing import Any
 
 import discord
 
-from portcullis.bot.base import NONE, Ctx, as_id
+from portcullis.bot.base import MUTED, NONE, Ctx, as_id
 from portcullis.bot.cards import PANEL_URL, SUPPORT_URL, link_buttons, next_restart, status_embed
 from portcullis.bot.refresh import EVERY_KEY, Pacer, clamp_every
 from portcullis.bot.server import CONNECT_KEY
@@ -32,6 +32,7 @@ CARD_KEY = "live_card"  # server setting: {"channel": id, "message": id}
 STATUS_TIMEOUT = 8.0
 SCHEDULES_EVERY = 900.0  # schedules rarely change; read them at most every 15 minutes per server
 MAX_CARDS = 25
+STOPPED_FOOTER = "Portcullis is stopped, so this card is not updating"
 
 
 def stored_card(value: object) -> tuple[int, int | None] | None:
@@ -56,6 +57,7 @@ class LiveCards:
         self._task: asyncio.Task[None] | None = None
         self._schedules: dict[str, tuple[float, list[Schedule]]] = {}
         self._states: dict[str, ServerState] = {}
+        self._shown: dict[str, tuple[int, int, discord.Embed]] = {}  # shard -> channel, message, last embed
 
     # ---------------------------------------------------------------- placing and removing
 
@@ -121,6 +123,7 @@ class LiveCards:
                 try:
                     message = channel.get_partial_message(message_id)
                     await message.edit(**({"view": None} | extra))
+                    self._shown[row.shard_id] = (channel_id, message_id, embed)
                     return True
                 except discord.NotFound:
                     pass  # someone deleted the card: post a new one
@@ -134,7 +137,33 @@ class LiveCards:
             log.warning("could not update the live card of %s in channel %s: %s", row.name, channel_id, exc)
             return False
         await self.ctx.settings.set(CARD_KEY, {"channel": channel_id, "message": posted.id}, scope=row.shard_id)
+        self._shown[row.shard_id] = (channel_id, posted.id, embed)
         return True
+
+    async def mark_stopped(self) -> int:
+        """Grey every card this run edited and say it has stopped updating. Returns how many changed.
+
+        Uses the embed already in memory, so it costs one edit per card and no reads. The next start
+        refreshes every card at once, which replaces this footer. Errors are logged, never raised; the
+        caller wraps this in a short timeout so a slow Discord can't hold up the exit.
+        """
+        client = self.ctx.client
+        if client is None or not self._shown:
+            return 0
+
+        async def grey(channel_id: int, message_id: int, embed: discord.Embed) -> bool:
+            stopped = embed.copy()
+            stopped.colour = MUTED
+            stopped.set_footer(text=STOPPED_FOOTER)
+            try:
+                await client.get_partial_messageable(channel_id).get_partial_message(message_id).edit(embed=stopped)
+                return True
+            except Exception as exc:  # noqa: BLE001 - a gone card or a 429: leave it as it is
+                log.debug("could not mark the live card %s as stopped: %s", message_id, exc)
+                return False
+
+        done = await asyncio.gather(*(grey(*shown) for shown in self._shown.values()))
+        return sum(done)
 
     # ---------------------------------------------------------------- the loop
 
