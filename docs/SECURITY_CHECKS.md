@@ -41,7 +41,10 @@ A Dependabot pull request for the same package usually follows. It waits seven d
 The log shows the rule, the file, the commit and the line. The secret itself is replaced with `REDACTED`.
 
 - **A real secret:** treat it as stolen. Rotate it first (reset the Discord bot token, change the AMP password), then remove it from the code. Rewriting history does not undo the leak, because anyone who cloned the repository already has it.
-- **A false alarm**, such as a made-up token in a test: add a narrow entry to `.gitleaks.toml` with a `description` saying why. Allow one rule in one path, never a whole folder for every rule. To skip a single line instead, end it with the comment `# gitleaks:allow`.
+- **A false alarm**, such as a made-up token in a test, has three possible fixes. Pick the narrowest:
+  - **In an old commit:** copy the `Fingerprint:` line from the log into `.gitleaksignore`, with a comment saying why. This silences that one hit only.
+  - **In code you are changing now:** end the line with the comment `# gitleaks:allow`.
+  - **A pattern that keeps coming back:** add an entry to `.gitleaks.toml` with a `description`. Allow one rule in one path, never a whole folder for every rule.
 
 ### CodeQL fails
 
