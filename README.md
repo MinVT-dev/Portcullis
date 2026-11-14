@@ -5,7 +5,7 @@
 <p align="center">
   <b>Your game servers, in Discord.</b><br>
   A Discord bot for CubeCoders AMP 3, and the successor to
-  <a href="https://github.com/k8thekat/GatekeeperV2">Gatekeeper V2</a> and Gatekeeper V3.
+  <a href="https://github.com/k8thekat/GatekeeperV2">Gatekeeper V2</a> and <a href="https://github.com/MinVT-dev/GatekeeperV3-Beta">Gatekeeper V3</a>.
 </p>
 
 <p align="center">
