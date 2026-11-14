@@ -58,6 +58,10 @@ These use routes from the spec that have never run on a real panel. Try each on 
 - [ ] Leave the bot running for more than 8 hours, so the session token is renewed at least once, and check the relay still posts afterwards.
 - [ ] Restart the AMP panel while the bot is running. The relay should come back by itself within a few minutes.
 - [ ] Change the bot account's password in AMP while it runs. The log should say the login was refused, about once a minute and no faster.
+- [ ] Run `python -m portcullis --check` on Windows. Expect the banner (box characters in Windows Terminal, plain ASCII in an old `cmd` window with code page 437), `✓ Panel` and `✓ Discord`, exit code 0, and no new files under `data\`.
+- [ ] Start the bot with the panel stopped (or a wrong port in `AMP_URL`). Expect the bot to come online anyway, live cards greyed with "The panel isn't answering", one `The panel stopped answering` log line, and commands answering that AMP can't be reached. Start the panel: expect `The panel is answering again` and the cards back in colour within about a minute.
+- [ ] Close the console window (not Ctrl+C) while the bot runs, then start it again. Expect the banner's last-run line to say "ended without a clean stop". After a Ctrl+C stop, expect "stopped cleanly ... (Ctrl+C)".
+- [ ] With `PORTCULLIS_METRICS=on`, open `http://127.0.0.1:9464/healthz` and `/metrics` in a browser on the same PC. Expect JSON with `"status": "ok"` and Prometheus text.
 - [ ] Stop the bot with Ctrl+C on Windows while it shows at least one live status card. Expect `Stopping Portcullis (Ctrl+C)`, then `Portcullis stopped (Ctrl+C)` within a few seconds, no traceback, the card greyed with "Portcullis is stopped, so this card is not updating", and `echo %ERRORLEVEL%` printing 0. Start it again: the card should update at once.
 
 ## What must never be shared

@@ -23,6 +23,7 @@ from portcullis.bot.base import MUTED, NONE, Ctx, as_id
 from portcullis.bot.cards import PANEL_URL, SUPPORT_URL, link_buttons, next_restart, status_embed
 from portcullis.bot.refresh import EVERY_KEY, Pacer, clamp_every
 from portcullis.bot.server import CONNECT_KEY
+from portcullis.core.guard import PanelUnavailable
 from portcullis.core.types import Schedule, ServerId, ServerState, ServerStatus
 from portcullis.db.repos import ServerRow
 
@@ -42,6 +43,15 @@ def stored_card(value: object) -> tuple[int, int | None] | None:
     if channel is None:
         return None
     return channel, as_id(value.get("message"))
+
+
+def mark_stale(embed: discord.Embed, at: datetime) -> discord.Embed:
+    """Grey the card and say the data is old, so nobody reads a frozen status as current."""
+    embed.colour = MUTED
+    note = (f"The panel isn't answering. This is what it said {discord.utils.format_dt(at, 'R')}; "
+            "the card updates by itself once it answers again.")
+    embed.description = f"{embed.description}\n\n{note}" if embed.description else note
+    return embed
 
 
 def retry_after(exc: BaseException) -> float | None:
@@ -87,25 +97,44 @@ class LiveCards:
                 items = await asyncio.wait_for(self.ctx.port.list_schedules(ServerId(shard_id)), STATUS_TIMEOUT)
             except Exception as exc:  # noqa: BLE001 - no schedule permission: the field is just left out
                 log.debug("schedules for %s unavailable: %s", shard_id, exc)
-                items = []
+                items = cached[1] if cached is not None else []  # keep the last list through a panel outage
             cached = (now, items)
             self._schedules[shard_id] = cached
         return next_restart(cached[1], datetime.now(UTC))
 
     async def build(self, row: ServerRow) -> tuple[discord.Embed, discord.ui.View | None]:
+        stale_at: datetime | None = None
         try:
             status = await asyncio.wait_for(self.ctx.port.get_status(ServerId(row.shard_id)), STATUS_TIMEOUT)
         except Exception as exc:  # noqa: BLE001 - the card says AMP didn't answer instead of going stale silently
-            log.warning("status for the live card of %s failed: %s", row.name, exc)
-            status = ServerStatus(id=ServerId(row.shard_id), state=ServerState.UNKNOWN,
-                                  message="AMP didn't answer the last check.")
-        self._states[row.shard_id] = status.state
+            if isinstance(exc, PanelUnavailable):
+                log.debug("live card of %s: panel paused", row.name)  # the guard logged the outage once
+            else:
+                log.warning("status for the live card of %s failed: %s", row.name, exc)
+            cached = self._cached(row.shard_id)
+            if cached is not None:
+                status, stale_at = cached
+            else:
+                status = ServerStatus(id=ServerId(row.shard_id), state=ServerState.UNKNOWN,
+                                      message="AMP didn't answer the last check.")
+        if stale_at is None:
+            self._states[row.shard_id] = status.state
         address = await self.ctx.settings.get(CONNECT_KEY, scope=row.shard_id)
         embed = status_embed(row, status, address if isinstance(address, str) else None,
                              restart=await self._restart(row.shard_id), every=self.pacer.every,
                              going_down=self.ctx.offline_expected(row.shard_id), emojis=self.ctx.emojis)
+        if stale_at is not None:
+            mark_stale(embed, stale_at)
         view = link_buttons(await self.ctx.settings.get(PANEL_URL), await self.ctx.settings.get(SUPPORT_URL))
         return embed, view
+
+    def _cached(self, shard_id: str) -> tuple[ServerStatus, datetime] | None:
+        """The last status the panel gave, if the port keeps one (``core.guard.GuardedPort`` does)."""
+        lookup = getattr(self.ctx.port, "cached_status", None)
+        if not callable(lookup):
+            return None
+        found = lookup(shard_id)
+        return found if isinstance(found, tuple) and len(found) == 2 else None
 
     async def refresh_one(self, row: ServerRow) -> bool:
         """Edit (or post) one card. Returns False on any failure; a 429 raises so the pass stops."""

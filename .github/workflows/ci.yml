@@ -40,8 +40,8 @@ jobs:
           python-version: "3.13"
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
-      - name: Shutdown tests
-        run: pytest -q tests/test_shutdown.py
+      - name: Shutdown, start-up and logging tests
+        run: pytest -q tests/test_shutdown.py tests/test_ops.py
 
   # The AMP client on its own, installed without the bot, as a third party would use it.
   api-package:
