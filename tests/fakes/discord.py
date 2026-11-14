@@ -101,10 +101,21 @@ class FakeFollowup:
     def __init__(self, interaction: FakeInteraction) -> None:
         self._i = interaction
 
-    async def send(self, content: str | None = None, **kwargs: Any) -> None:
+    async def send(self, content: str | None = None, **kwargs: Any) -> FakeSent:
         assert self._i.response.is_done(), "followup before the first response"
         assert kwargs.get("view", ...) is not None, "discord.py fails on view=None for a new message"
         self._i.replies.append({"content": content, **kwargs})
+        return FakeSent(self._i)
+
+
+class FakeSent:
+    """A followup message (``wait=True``); its edits are recorded on the interaction."""
+
+    def __init__(self, interaction: FakeInteraction) -> None:
+        self._i = interaction
+
+    async def edit(self, **kwargs: Any) -> None:
+        self._i.edits.append(kwargs)
 
 
 class FakeInteraction:
@@ -160,3 +171,10 @@ class FakeClient:
     async def fetch_channel(self, channel_id: int) -> FakeChannel:
         self.fetched.append(channel_id)
         return self.channels[channel_id]
+
+
+async def press_yes(asked: FakeInteraction, user: FakeMember | None = None) -> FakeInteraction:
+    """Press the first button (the "yes") of the question in ``asked``'s last reply. Returns the press."""
+    press = FakeInteraction(user or asked.user)
+    await asked.replies[-1]["view"].children[0].callback(press)
+    return press

@@ -229,6 +229,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["secrets"]:  # python -m portcullis secrets ... (portcullis/secretstore.py)
+        from portcullis.secretstore import cli
+
+        return cli(argv[1:])
     args = parse_args(argv)
     try:
         checked = check_settings()

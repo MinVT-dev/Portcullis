@@ -188,7 +188,9 @@ def check(env: Mapping[str, str] | None = None, *, env_file: Path | None = Path(
     problems: list[str] = []
     settings: Settings | None = None
     try:
-        settings = load(merged, env_file=None, require_discord=require_discord)
+        # .env passed separately so a secret found there is still known as plain text (secretstore).
+        settings = load(dict(os.environ if env is None else env), env_file=env_file,
+                        require_discord=require_discord)
     except ConfigError as exc:
         problems.extend(exc.problems)
     raw_db = (merged.get("PORTCULLIS_DB") or "").strip() or "data/portcullis.db"
@@ -201,4 +203,4 @@ def check(env: Mapping[str, str] | None = None, *, env_file: Path | None = Path(
         writable_dir(ops.state_file, "PORTCULLIS_STATE_FILE", problems)
     if problems or settings is None:
         raise ConfigError(problems)
-    return Checked(settings, ops, typos(list(merged)))
+    return Checked(settings, ops, list(settings.notes) + typos(list(merged)))

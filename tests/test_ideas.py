@@ -27,7 +27,7 @@ from portcullis.bot.server import CONNECT_KEY, SAY_KEY, START_KEY, valid_address
 from portcullis.bot.setup import AUTO_APPROVE_ROLE, WHITELIST_CHANNEL, WL_ADD
 from portcullis.core.types import Backup, Player, PlayerJoined, PowerAction, ServerId, ServerState, StateChanged
 from portcullis.db.ops import Event
-from tests.fakes.discord import FakeChannel, FakeInteraction, FakeMember, FakeRole
+from tests.fakes.discord import FakeChannel, FakeInteraction, FakeMember, FakeRole, press_yes
 from tests.test_bot import (  # noqa: F401
     CREATIVE,
     OWNER,
@@ -75,6 +75,7 @@ async def test_role_grants_and_server_operators(h: Harness) -> None:
     powerful = with_role(50, POWER_ROLE)
     i = FakeInteraction(powerful)
     await h.m.server.server_power(i, "Creative", "start")
+    await press_yes(i)
     assert h.port.power_calls == [(CREATIVE, PowerAction.START)]
     i = FakeInteraction(powerful)
     await h.m.server.server_send(i, "Creative", "save")
@@ -150,9 +151,10 @@ async def test_members_can_start_but_not_stop(h: Harness) -> None:
     assert [b.label for b in i.replies[-1]["view"].children] == ["Start"]
     i = FakeInteraction(member())
     await h.m.server.server_power(i, "Creative", "start")
+    await press_yes(i)
     assert h.port.power_calls == [(CREATIVE, PowerAction.START)]
     [entry] = [e for e in await h.ctx.audit.query() if e.result == "ok"]
-    assert entry.detail == {"member_start": True}
+    assert entry.detail == {"member_start": True, "confirmed": True}
     h.port.servers[ServerId(CREATIVE)].state = ServerState.STOPPED
     i = FakeInteraction(member(21))
     await h.m.server.server_power(i, "Creative", "start")
@@ -162,9 +164,12 @@ async def test_members_can_start_but_not_stop(h: Harness) -> None:
     assert "operator role" in i.text
 
 
-async def test_stop_without_players_needs_no_confirmation(h: Harness) -> None:
+async def test_stop_asks_even_without_players(h: Harness) -> None:
     i = FakeInteraction(operator())
     await h.m.server.server_power(i, "Survival", "stop")  # running, nobody on
+    fields = {f.name: f.value for f in i.embed.fields}
+    assert h.port.power_calls == [] and fields["Players online"] == "0"
+    await press_yes(i)
     assert h.port.power_calls == [(SURVIVAL, PowerAction.STOP)]
     assert h.ctx.offline_expected(SURVIVAL)
 
@@ -184,7 +189,9 @@ async def test_restart_with_warning(h: Harness) -> None:
     await h.ctx.settings.set(SAY_KEY, "say {message}", scope=SURVIVAL)
     i = FakeInteraction(operator())
     await h.m.server.server_power(i, "Survival", "restart_warned")
-    assert "Restarting **Survival** in 5 minutes" in i.text
+    assert i.embed.title == "Restart Survival?" and h.port.sent == []
+    i = await press_yes(i)
+    assert "Restarting **Survival** in 5 minutes" in i.text and i.replies[-1]["wait"] is True
     await h.m.server.restarts[SURVIVAL]
     assert h.port.sent == [(SURVIVAL, "say Server restart in 5 minutes."),
                            (SURVIVAL, "say Server restart in 1 minute.")]
@@ -205,6 +212,7 @@ async def test_restart_with_warning_can_be_cancelled(h: Harness) -> None:
     await h.ctx.settings.set(SAY_KEY, "say {message}", scope=SURVIVAL)
     i = FakeInteraction(operator())
     await h.m.server.server_power(i, "Survival", "restart_warned")
+    i = await press_yes(i)
     await asyncio.sleep(0)
     again = FakeInteraction(operator())
     await h.m.server.server_power(again, "Survival", "restart_warned")
@@ -319,8 +327,12 @@ async def test_audit_channel(h: Harness) -> None:
     await h.ctx.settings.set(AUDIT_CHANNEL, AUDIT)
     i = FakeInteraction(operator())
     await h.m.server.server_power(i, "Creative", "start")
+    await press_yes(i)
     await asyncio.gather(*h.m.audit_feed.tasks)
-    assert channels[AUDIT].sent[-1]["content"] == "`server.power.start` by <@30> on **Creative**"
+    assert channels[AUDIT].sent[-1]["content"] == "✅ ok · `server.power.start` · **Creative** · by <@30> · confirmed"
+    await h.m.server.server_power(FakeInteraction(member()), "Creative", "stop")
+    await asyncio.gather(*h.m.audit_feed.tasks)
+    assert channels[AUDIT].sent[-1]["content"] == "⛔ denied · `server.power.stop` · **Creative** · by <@20>"
     await h.ctx.audit.record("link.verified", actor_id=1)
     assert not h.m.audit_feed.tasks  # member noise isn't copied
 
@@ -556,16 +568,22 @@ async def test_help_lists_new_commands_for_granted_roles(h: Harness) -> None:
     assert "/event list" in i.embed.description and "/event create" not in i.embed.description
 
 
-async def test_update_and_sleep_ask_first_wake_does_not(h: Harness) -> None:
+async def test_update_sleep_and_wake_ask_first(h: Harness) -> None:
+    async def no_wait(seconds: float) -> None:
+        pass
+
+    h.m.server.sleep = no_wait
     i = FakeInteraction(operator())
     await h.m.server.server_power(i, "Survival", "update")
-    assert "hasn't seen this work" in i.text and h.port.power_calls == []
-    confirm = FakeInteraction(operator())
-    await i.replies[-1]["view"].children[0].callback(confirm)
+    assert i.embed.title == "Update Survival?" and h.port.power_calls == []
+    i = await press_yes(i)
     assert h.port.power_calls == [(SURVIVAL, PowerAction.UPDATE)]
     assert h.ctx.offline_expected(SURVIVAL)
+    await h.m.server.update_watch[SURVIVAL]
+    assert "never showed as updating" in i.text  # the fake AMP stays running
     i = FakeInteraction(operator())
     await h.m.server.server_power(i, "Survival", "wake")
+    await press_yes(i)
     assert h.port.power_calls[-1] == (SURVIVAL, PowerAction.WAKE)
     i = FakeInteraction(member())
     await h.m.server.server_power(i, "Survival", "sleep")

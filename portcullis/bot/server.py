@@ -31,6 +31,8 @@ from portcullis.bot.base import (
 )
 from portcullis.bot.cards import diagnostics_embed, status_embed
 from portcullis.bot.errors import plain_error
+from portcullis.bot.guard import Confirm, ask_power, needs_confirm
+from portcullis.bot.update_follow import follow_update, update_error
 from portcullis.core.console_rules import DENY_KEY, HIDE_KEY, blocked_word, hider, stored_denylist, stored_rules
 from portcullis.core.relay import console_safe, escape
 from portcullis.core.types import PowerAction, ServerState, ServerStatus
@@ -40,10 +42,9 @@ log = logging.getLogger(__name__)
 
 POWER_ACTIONS = (PowerAction.START, PowerAction.STOP, PowerAction.RESTART)
 # AMP has routes for these but none has been run on a real panel yet, so they're single-server only and
-# update and sleep always ask first.
+# every power action asks first (guard.needs_confirm).
 UNVERIFIED_ACTIONS = {PowerAction.UPDATE: "Update the game (unverified)", PowerAction.SLEEP: "Sleep (unverified)",
                       PowerAction.WAKE: "Wake from sleep (unverified)"}
-ASK_FIRST = {PowerAction.UPDATE: "Update it", PowerAction.SLEEP: "Put it to sleep"}
 # Actions that take the server down on purpose, so the offline alert stays quiet.
 GOES_DOWN = (PowerAction.STOP, PowerAction.RESTART, PowerAction.UPDATE, PowerAction.SLEEP)
 VERBS = {"start": "Starting", "stop": "Stopping", "restart": "Restarting", "update": "Updating",
@@ -130,33 +131,6 @@ class PowerButtons(discord.ui.View):
         return press
 
 
-class Confirm(discord.ui.View):
-    """Yes/No under an ephemeral question. Only the person who asked can answer."""
-
-    def __init__(self, owner_id: int, on_yes: Callable[[discord.Interaction], Awaitable[None]],
-                 yes_label: str) -> None:
-        super().__init__(timeout=120)
-        self.owner_id = owner_id
-        self.on_yes = on_yes
-        yes: discord.ui.Button[Confirm] = discord.ui.Button(label=yes_label, style=discord.ButtonStyle.danger)
-        yes.callback = self._yes  # type: ignore[method-assign]
-        no: discord.ui.Button[Confirm] = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary)
-        no.callback = self._no  # type: ignore[method-assign]
-        self.add_item(yes)
-        self.add_item(no)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.owner_id
-
-    async def _yes(self, interaction: discord.Interaction) -> None:
-        self.stop()
-        await self.on_yes(interaction)
-
-    async def _no(self, interaction: discord.Interaction) -> None:
-        self.stop()
-        await interaction.response.edit_message(content="Cancelled. Nothing was changed.", view=None)
-
-
 class LicenceButtons(discord.ui.View):
     """Under the status of a server waiting for its game licence (EULA): accept (admins, after a
     confirmation) or decline (admins and anyone who may power the server)."""
@@ -201,6 +175,7 @@ class ServerModule(Module):
         self.restart_pending: set[str] = set()  # warned restarts between "asked" and "counting down"
         self.sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
         self.restore_watch: dict[str, asyncio.Task[None]] = {}
+        self.update_watch: dict[str, asyncio.Task[None]] = {}
 
     async def players_online(self, row: ServerRow, timeout: float = STATUS_TIMEOUT) -> int | None:
         """How many players are on, or None if AMP couldn't say (in time)."""
@@ -330,23 +305,21 @@ class ServerModule(Module):
             if last is not None and time.monotonic() - last < START_COOLDOWN:
                 await reply(interaction, f"Someone started {escape(row.name)} a moment ago. Give it a minute.")
                 return
-            self.member_starts[row.shard_id] = time.monotonic()
-        if power is PowerAction.STOP and not confirmed:
-            online = await self.players_online(row, QUICK_TIMEOUT)
-            if online != 0:
-                who = "someone may be playing (AMP didn't say)" if online is None else \
-                    f"{online} player{'s are' if online != 1 else ' is'} online"
-                await reply(interaction, f"Stop **{escape(row.name)}**? {who}.",
-                            view=Confirm(interaction.user.id,
-                                         lambda i: self.do_power(i, row, power, confirmed=True), "Stop it"))
-                return
-        if power in ASK_FIRST and not confirmed:
-            await reply(interaction, f"{UNVERIFIED_ACTIONS[power].split(' (')[0]}: **{escape(row.name)}**? "
-                                     "Portcullis hasn't seen this work on a real panel yet.",
-                        view=Confirm(interaction.user.id,
-                                     lambda i: self.do_power(i, row, power, confirmed=True), ASK_FIRST[power]))
+        if not confirmed and await needs_confirm(self.ctx, power):
+            online = None if power in (PowerAction.START, PowerAction.WAKE) else \
+                await self.players_online(row, QUICK_TIMEOUT)
+            await ask_power(interaction, row.name, power, online,
+                            lambda i: self.do_power(i, row, power, confirmed=True))
             return
-        await interaction.response.defer(thinking=True)  # public, so everyone sees who did it
+        if interaction.response.is_done():
+            pass  # a warned restart with nobody online: its question was already answered
+        elif confirmed:  # the press on the private question: close it, then answer in public below
+            await interaction.response.edit_message(content=f"Confirmed: {power.value} **{escape(row.name)}**.",
+                                                    embed=None, view=None)
+        else:
+            await interaction.response.defer(thinking=True)  # public, so everyone sees who did it
+        if on_demand:
+            self.member_starts[row.shard_id] = time.monotonic()  # once it runs, not when it was asked
         if power in GOES_DOWN:
             self.ctx.expect_offline(row.shard_id)
         try:
@@ -355,13 +328,29 @@ class ServerModule(Module):
             log.warning("%s on %s failed: %s", node, row.name, exc)
             await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, result="failed",
                                         detail={"error": short_error(exc)})
-            await reply(interaction, f"Couldn't {power.value} {escape(row.name)}. {plain_error(exc)}",
-                        ephemeral=False)
+            why = update_error(exc) if power is PowerAction.UPDATE else plain_error(exc)
+            await reply(interaction, f"Couldn't {power.value} {escape(row.name)}. {why}", ephemeral=False)
             return
-        await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id,
-                                    detail={"member_start": True} if on_demand else None)
+        detail = {"member_start": True} if on_demand else None
+        if confirmed:
+            detail = {**(detail or {}), "confirmed": True}
+        await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, detail=detail)
         await reply(interaction, f"{VERBS[power.value]} **{escape(row.name)}** (asked by {interaction.user.mention}).",
                     ephemeral=False)
+        if power is PowerAction.UPDATE:
+            self._follow(row, follow_update(self.ctx, interaction, row, sleep=self.sleep))
+
+    async def _confirmed_warned(self, interaction: discord.Interaction, row: ServerRow) -> None:
+        await interaction.response.edit_message(content=f"Confirmed: restart **{escape(row.name)}** with a warning.",
+                                                embed=None, view=None)
+        await self.warned_restart(interaction, row, confirmed=True)
+
+    def _follow(self, row: ServerRow, job: Awaitable[None]) -> None:
+        """Run a follow-up (an update's result) in the background; ``close`` cancels it."""
+        old = self.update_watch.get(row.shard_id)
+        if old is not None and not old.done():
+            old.cancel()
+        self.update_watch[row.shard_id] = asyncio.create_task(job, name=f"portcullis-update-{row.shard_id[:8]}")
 
     # ---------------------------------------------------------------- game licence (EULA)
 
@@ -405,7 +394,7 @@ class ServerModule(Module):
 
     # ---------------------------------------------------------------- restart with warning
 
-    async def warned_restart(self, interaction: discord.Interaction, row: ServerRow) -> None:
+    async def warned_restart(self, interaction: discord.Interaction, row: ServerRow, confirmed: bool = False) -> None:
         node = "server.power.restart"
         if not await self.require_mod(interaction, node, row.shard_id):
             return
@@ -419,24 +408,35 @@ class ServerModule(Module):
         if (task is not None and not task.done()) or row.shard_id in self.restart_pending:
             await reply(interaction, f"A restart of {escape(row.name)} is already counting down.")
             return
+        if not confirmed:
+            online = await self.players_online(row, QUICK_TIMEOUT)
+            await ask_power(interaction, row.name, PowerAction.RESTART, online,
+                            lambda i: self._confirmed_warned(i, row), warned=True)
+            return
         # Claimed before the first await below, so two members asking at once can't start two countdowns.
         self.restart_pending.add(row.shard_id)
         try:
             if await self.players_online(row, QUICK_TIMEOUT) == 0:
-                await self.do_power(interaction, row, PowerAction.RESTART)
+                await self.do_power(interaction, row, PowerAction.RESTART, confirmed=True)
                 return
             await self.ctx.audit.record("server.power.restart.warned", actor_id=interaction.user.id,
-                                        shard_id=row.shard_id)
+                                        shard_id=row.shard_id, detail={"confirmed": True})
             first = WARN_STEPS[0][1]
-            await reply(interaction, f"Restarting **{escape(row.name)}** in {first} (asked by "
-                                     f"{interaction.user.mention}). Players get a warning in game chat.",
-                        ephemeral=False, view=CancelRestart(self, row))
-            self.restarts[row.shard_id] = asyncio.create_task(self._count_down(interaction, row, template),
+            text = (f"Restarting **{escape(row.name)}** in {first} (asked by {interaction.user.mention}). "
+                    "Players get a warning in game chat.")
+            message = None
+            if interaction.response.is_done():  # after the question: a new public message we can edit later
+                message = await interaction.followup.send(text, view=CancelRestart(self, row), allowed_mentions=NONE,
+                                                          wait=True)
+            else:
+                await reply(interaction, text, ephemeral=False, view=CancelRestart(self, row))
+            self.restarts[row.shard_id] = asyncio.create_task(self._count_down(interaction, row, template, message),
                                                               name=f"portcullis-restart-{row.shard_id[:8]}")
         finally:
             self.restart_pending.discard(row.shard_id)
 
-    async def _count_down(self, interaction: discord.Interaction, row: ServerRow, template: str) -> None:
+    async def _count_down(self, interaction: discord.Interaction, row: ServerRow, template: str,
+                          message: object = None) -> None:
         try:
             for index, (seconds, label) in enumerate(WARN_STEPS):
                 try:
@@ -452,19 +452,22 @@ class ServerModule(Module):
                 await self.ctx.audit.record("server.power.restart", actor_id=interaction.user.id,
                                             shard_id=row.shard_id, result="failed", detail={"error": short_error(exc)})
                 await self._update(interaction, f"Couldn't restart **{escape(row.name)}**. "
-                                                f"{plain_error(exc)}")
+                                                f"{plain_error(exc)}", message)
                 return
             await self.ctx.audit.record("server.power.restart", actor_id=interaction.user.id, shard_id=row.shard_id)
             await self._update(interaction, f"Restarted **{escape(row.name)}** after warning players "
-                                            f"(asked by {interaction.user.mention}).")
+                                            f"(asked by {interaction.user.mention}).", message)
         finally:
             if self.restarts.get(row.shard_id) is asyncio.current_task():  # never a newer countdown's entry
                 self.restarts.pop(row.shard_id, None)
 
     @staticmethod
-    async def _update(interaction: discord.Interaction, text: str) -> None:
+    async def _update(interaction: discord.Interaction, text: str, message: object = None) -> None:
         try:
-            await interaction.edit_original_response(content=text, view=None, allowed_mentions=NONE)
+            if message is not None:  # the public countdown message sent after a confirmation
+                await message.edit(content=text, view=None, allowed_mentions=NONE)  # type: ignore[attr-defined]
+            else:
+                await interaction.edit_original_response(content=text, view=None, allowed_mentions=NONE)
         except Exception as exc:  # noqa: BLE001 - the message may be gone; the restart still happened
             log.info("could not update the restart message: %s", exc)
 
@@ -549,12 +552,13 @@ class ServerModule(Module):
         await interaction.followup.send(text[:2000], allowed_mentions=NONE)
 
     async def close(self) -> None:
-        tasks = [*self.restarts.values(), *self.restore_watch.values()]
+        tasks = [*self.restarts.values(), *self.restore_watch.values(), *self.update_watch.values()]
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         self.restarts.clear()
         self.restore_watch.clear()
+        self.update_watch.clear()
 
     async def server_send(self, interaction: discord.Interaction, server: str, text: str, as_: str = "console") -> None:
         if not await self.in_guild(interaction):
