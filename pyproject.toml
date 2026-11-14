@@ -20,7 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8",
+    "pytest>=9.2.0",
     "pytest-asyncio>=0.23",
     "ruff>=0.6",
     # Pinned so regenerating from the same spec gives the same code.
