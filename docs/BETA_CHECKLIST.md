@@ -80,3 +80,15 @@ The recorder redacts these, but look through a capture before sending it. If som
 - [ ] Rename one emoji in the portal: after **Check emojis**, that one falls back to its plain emoji and nothing else changes.
 - [ ] `/server diagnostics` shows a disk figure (`GET /api/Shards/{id}/disk` hasn't run on a real panel).
 - [ ] A schedule named with "restart" shows as **Next restart** on the card.
+
+## Alerts, limits, graphs and weekly summary (draft PR, 14 Nov 2026)
+
+- [ ] Capture one `Metrics` hub event with `tools/record_events.py` and check its keys (`cpuPercent`, `memoryMb`, `memoryLimitMb`, `activeUsers`). Portcullis reads them leniently, but limits and graphs depend on them.
+- [ ] Set a low CPU limit (`/monitor thresholds server:X cpu:5 minutes:1`) on a busy server: one alert after a minute, one "back to normal" after it drops 10 points for 2 minutes.
+- [ ] Kill a game process from the host so AMP reports Failed: the crash alert shows AMP's last error, and "back online" follows when AMP restarts it.
+- [ ] Add yourself with `/monitor alerts dm_add:@you` and run `/monitor test`: one channel post and one DM.
+- [ ] Restart the AMP host with several servers running: the offline alerts arrive as one grouped message.
+- [ ] Update a game from AMP's own panel and from `/server power … update`: "is updating" (at least for the second), then "finished updating" with versions within 5 minutes. Note the status message AMP shows while it updates.
+- [ ] Leave the bot running for a day, then `/graph metric:players` and `/graph metric:uptime`: the gaps match the times the bot was off.
+- [ ] Turn on the weekly summary for today's weekday and the next hour; it posts once.
+

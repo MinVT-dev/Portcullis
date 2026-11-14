@@ -186,6 +186,8 @@ class AmpServerPort:
             template=shard.template_slug,
             suspended=bool(shard.suspended),
             tags=tuple(shard.tags or ()),
+            installed_version=shard.installed_version or None,
+            installed_at=str(shard.installed_at) if shard.installed_at else None,
         )
 
     async def get_status(self, server: ServerId) -> ServerStatus:

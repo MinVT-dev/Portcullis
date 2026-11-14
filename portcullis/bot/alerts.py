@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Alerts for admins, and the live audit log channel.
 
-``Alerts`` is a relay listener (offline and crash alerts) and is also called by the bot's loops:
-``reachability`` after every refresh, ``tick`` once a minute (high load, old backups).
-Alerts go to the alert channel from ``/setup bot`` and ping its alert role, if one is set.
+``Alerts`` is a relay listener (crash, offline, needs-licence and back-online alerts) and is also called
+by the bot's loops: ``reachability`` after every refresh, ``tick`` once a minute (old backups, the preview
+build's expiry). Server alerts go through ``alerting.AlertRouter``, which picks the channel and DMs and
+handles mutes, cooldowns, crash loops and grouping. CPU, memory and disk limits live in ``thresholds.py``.
 """
 
 from __future__ import annotations
@@ -13,20 +14,20 @@ import logging
 import time
 from datetime import UTC, datetime, timedelta
 
-from portcullis.bot.base import ALERT_CHANNEL, ALERT_ROLE, AUDIT_CHANNEL, Ctx, as_id, duration
+from portcullis.bot.alerting import Alert, AlertRouter
+from portcullis.bot.base import ALERT_CHANNEL, ALERT_ROLE, AUDIT_CHANNEL, Ctx, as_id, duration, short_error
 from portcullis.core.relay import escape
 from portcullis.core.types import ServerEvent, ServerState, StateChanged
 from portcullis.db.repos import AuditEntry
 
 log = logging.getLogger(__name__)
 
-CPU_KEY, MEMORY_KEY = "cpu_alert", "memory_alert"  # per server: percent, alert when above it for SUSTAIN
+CPU_KEY, MEMORY_KEY = "cpu_alert", "memory_alert"  # per server: percent; checked by thresholds.Thresholds
 BACKUP_DAYS = "backup_reminder_days"  # bot: warn when a server's newest backup is older than this
 BACKUP_CHECKED = "backup_checked_at"  # bot: when the backup check last ran (ISO), so restarts don't repeat it
 
 QUIET_FOR = 300.0  # at most one alert of a kind per server this often
 UNREACHABLE_AFTER = 180.0  # AMP must be unreachable this long before anyone is told
-SUSTAIN = 300.0  # load must stay high this long before it's an alert
 BACKUP_EVERY = timedelta(days=1)
 PREVIEW_CHECKED = "preview_checked_at"  # bot: when the preview-build expiry was last checked (ISO)
 PREVIEW_WARN_DAYS = 14  # start warning this many days before the AMP preview build stops working
@@ -34,28 +35,35 @@ PREVIEW_PING_DAYS = 3  # and ping the alert role from this many days before
 BACKUP_TIMEOUT = 15.0
 
 
+LAST_ERROR_TIMEOUT = 5.0
+
+
 class Alerts:
     def __init__(self, ctx: Ctx, *, quiet_for: float = QUIET_FOR, unreachable_after: float = UNREACHABLE_AFTER,
-                 sustain: float = SUSTAIN) -> None:
+                 router: AlertRouter | None = None) -> None:
         self.ctx = ctx
-        self.quiet_for = quiet_for
+        self.router = router or AlertRouter(ctx, quiet_for=quiet_for)
         self.unreachable_after = unreachable_after
-        self.sustain = sustain
         self.last: dict[str, ServerState] = {}
-        self.sent_at: dict[tuple[str, str], float] = {}
+        self.down: dict[str, tuple[str, float]] = {}  # server -> (what was alerted, when), for "back online"
         self.unreachable_since: float | None = None
         self.unreachable_told = False
-        self.high_since: dict[str, float] = {}
-        self.high_told: set[str] = set()
 
-    async def _alert(self, server: str, kind: str, text: str, *, ping: bool = True) -> bool:
-        now = time.monotonic()
-        key = (server, kind)
-        if now - self.sent_at.get(key, -self.quiet_for) < self.quiet_for:
-            return False
-        self.sent_at[key] = now
-        role = as_id(await self.ctx.settings.get(ALERT_ROLE)) if ping else None
-        return await self.ctx.post(ALERT_CHANNEL, text, ping_role=role)
+    async def _alert(self, server: str, kind: str, text: str, *, title: str, severity: str = "bad",
+                     fields: tuple[tuple[str, str], ...] = ()) -> bool:
+        self.down[server] = (kind, time.monotonic())
+        return await self.router.send(Alert(kind=kind, text=text, server=server, severity=severity, title=title,
+                                            fields=fields))
+
+    async def _last_error(self, server: str) -> tuple[tuple[str, str], ...]:
+        """AMP's own reason for a crash, when it gives one. One status read, only when a server crashed."""
+        try:
+            status = await asyncio.wait_for(self.ctx.port.get_status(server), LAST_ERROR_TIMEOUT)  # type: ignore[arg-type]
+        except Exception as exc:  # noqa: BLE001 - the alert goes out without the reason
+            log.debug("could not read the last error of %s: %s", server, exc)
+            return ()
+        error = status.last_error or status.message
+        return (("AMP says", short_error(Exception(error))[:300]),) if error else ()
 
     async def __call__(self, event: ServerEvent) -> None:
         if not isinstance(event, StateChanged):
@@ -67,16 +75,26 @@ class Alerts:
             return  # the first state after start-up says nothing about a change
         row = await self.ctx.servers.get(server)
         name = escape(row.name) if row else server
+        when = (("When", f"<t:{int(event.at.timestamp())}:f>"),)
         if event.state is ServerState.FAILED:
-            await self._alert(server, "failed", f"🔥 **{name}** crashed: AMP reports it as Failed.")
+            await self._alert(server, "crash", f"🔥 **{name}** crashed: AMP reports it as Failed.", title="Crashed",
+                              fields=when + await self._last_error(server))
         elif event.state is ServerState.AWAITING_LICENCE:
             await self._alert(server, "licence", f"📜 **{name}** is waiting for its game licence (EULA) to be "
                                                  "accepted before it can start. An admin can answer it from "
-                                                 "`/server status`.")
+                                                 "`/server status`.", title="Needs licence", severity="warn")
         elif event.state is ServerState.STOPPED and previous is ServerState.RUNNING \
                 and not self.ctx.offline_expected(server):
             await self._alert(server, "offline", f"🔴 **{name}** went offline, and nobody stopped it through "
-                                                 "Portcullis. (A stop from AMP's own panel also counts.)")
+                                                 "Portcullis. (A stop from AMP's own panel also counts.)",
+                              title="Offline", fields=when)
+        elif event.state is ServerState.RUNNING and server in self.down:
+            kind, since = self.down.pop(server)
+            why = {"crash": "it crashed", "offline": "it went offline", "licence": "it waited for its licence"}
+            await self.router.send(Alert(
+                kind="recovered", server=server, severity="good", ping=False, cooldown=False, title="Back online",
+                text=f"🟢 **{name}** is back online after {duration(time.monotonic() - since)} "
+                     f"({why.get(kind, kind)})."))
 
     async def reachability(self, reachable: bool) -> None:
         """Called after each refresh with whether AMP answered."""
@@ -84,20 +102,21 @@ class Alerts:
         if reachable:
             if self.unreachable_told:
                 down = duration(now - (self.unreachable_since or now))
-                await self.ctx.post(ALERT_CHANNEL, f"✅ Portcullis can reach AMP again (it was gone for about {down}).")
+                await self.router.send(Alert(kind="reachable", severity="good", ping=False, cooldown=False,
+                                             text=f"✅ Portcullis can reach AMP again (it was gone for about {down})."))
             self.unreachable_since = None
             self.unreachable_told = False
             return
         if self.unreachable_since is None:
             self.unreachable_since = now
         if not self.unreachable_told and now - self.unreachable_since >= self.unreachable_after:
-            self.unreachable_told = await self.ctx.post(
-                ALERT_CHANNEL, "⚠️ Portcullis can't reach AMP. Commands and relays are down until it's back; "
-                               "I'll post here when it is.", ping_role=as_id(await self.ctx.settings.get(ALERT_ROLE)))
+            self.unreachable_told = await self.router.send(Alert(
+                kind="unreachable", severity="warn", cooldown=False,
+                text="⚠️ Portcullis can't reach AMP. Commands and relays are down until it's back; "
+                     "I'll post here when it is."))
 
     async def tick(self, now: datetime | None = None) -> None:
         now = now or datetime.now(UTC)
-        await self.check_load()
         await self.check_backups(now)
         await self.check_preview(now)
 
@@ -131,44 +150,6 @@ class Alerts:
         ping = expires is not None and (expires - now) <= timedelta(days=PREVIEW_PING_DAYS)
         await self.ctx.post(ALERT_CHANNEL, f"⏳ {text}",
                             ping_role=as_id(await self.ctx.settings.get(ALERT_ROLE)) if ping else None)
-
-    async def check_load(self) -> None:
-        for row in await self.ctx.servers.list():
-            cpu_limit = await self.ctx.settings.get(CPU_KEY, scope=row.shard_id)
-            memory_limit = await self.ctx.settings.get(MEMORY_KEY, scope=row.shard_id)
-            if not cpu_limit and not memory_limit:
-                continue
-            if self.ctx.live.states.get(row.shard_id) is not ServerState.RUNNING:
-                self.high_since.pop(row.shard_id, None)
-                self.high_told.discard(row.shard_id)
-                continue
-            try:
-                status = await asyncio.wait_for(self.ctx.port.get_status(row.shard_id), 8)
-            except Exception as exc:  # noqa: BLE001 - the unreachable alert covers AMP being down
-                log.debug("load check for %s failed: %s", row.name, exc)
-                continue
-            reasons = []
-            if cpu_limit and status.cpu_percent is not None and status.cpu_percent >= cpu_limit:
-                reasons.append(f"CPU at {status.cpu_percent:.0f}%")
-            if memory_limit and status.memory_mb is not None and status.memory_limit_mb:
-                used = 100 * status.memory_mb / status.memory_limit_mb
-                if used >= memory_limit:
-                    reasons.append(f"memory at {used:.0f}% of its limit")
-            await self._load(row.shard_id, row.name, reasons)
-
-    async def _load(self, server: str, name: str, reasons: list[str]) -> None:
-        now = time.monotonic()
-        if not reasons:
-            self.high_since.pop(server, None)
-            if server in self.high_told:
-                self.high_told.discard(server)
-                await self.ctx.post(ALERT_CHANNEL, f"✅ **{escape(name)}** is back under its load limits.")
-            return
-        since = self.high_since.setdefault(server, now)
-        if server not in self.high_told and now - since >= self.sustain:
-            self.high_told.add(server)
-            await self._alert(server, "load", f"🟠 **{escape(name)}** has been busy for {duration(now - since)}: "
-                                              f"{', '.join(reasons)}.")
 
     async def check_backups(self, now: datetime) -> None:
         days = await self.ctx.settings.get(BACKUP_DAYS)

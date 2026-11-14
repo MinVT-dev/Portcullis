@@ -62,6 +62,10 @@ class ServerInfo:
     template: str | None = None
     suspended: bool = False
     tags: tuple[str, ...] = ()
+    # From DeployedShard: what the last successful game update installed, and when. A change between two
+    # reads of the server list means an update finished (bot/updates.py).
+    installed_version: str | None = None
+    installed_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -167,6 +171,7 @@ class PlayerLeft(ServerEvent):
 class StateChanged(ServerEvent):
     state: ServerState
     raw_status: int | None = None
+    message: str | None = None  # ShardState.statusMessage: what the agent says it is doing (free text)
 
 
 @dataclass(frozen=True)
