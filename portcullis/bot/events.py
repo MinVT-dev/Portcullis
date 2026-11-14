@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import discord
 from discord import app_commands
 
-from portcullis.bot.base import MUTED, NONE, Ctx, Module, card, reply, valid_line
+from portcullis.bot.base import NONE, Ctx, Module, card, reply, valid_line
 from portcullis.core.relay import escape
 from portcullis.db.ops import Event
 
@@ -84,7 +84,7 @@ def parse_when(text: str, tz: ZoneInfo, now: datetime | None = None) -> datetime
 def event_embed(event: Event, going: list[int], server_name: str | None) -> discord.Embed:
     start = datetime.fromisoformat(event.starts_at)
     embed = card(title=event.title[:256], description=escape(event.description or "")[:2000] or None,
-                          colour=MUTED if event.cancelled else 0x9B59B6)
+                          kind="muted" if event.cancelled else "info")
     embed.add_field(name="When", value=f"{discord.utils.format_dt(start, 'F')} ({discord.utils.format_dt(start, 'R')})",
                     inline=False)
     if server_name:

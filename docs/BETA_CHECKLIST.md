@@ -12,6 +12,7 @@ Checked on a real 3.0.0.6 panel on 2026-11-07 and 2026-11-08:
 - The shard hub in `direct` mode, with `JoinShard(tenantId, shardId)` and one connection per shard.
 - The shapes of `Metrics`, `UserRoster`, `ShardStateChanged` and `ConsoleLine`.
 - The server list, status, start, stop and restart, sending a console line, and listing backups.
+- Making a backup from `/backups` (Min, 14 Nov 2026). Restoring and deleting are still to check.
 - Unturned: `UserJoined`, and chat read from the console.
 
 ## Still to check, most important first
@@ -37,7 +38,7 @@ Tick each one on a real panel. For anything that fails, the bot's log line and t
 These use routes from the spec that have never run on a real panel. Try each on a server you can afford to lose.
 
 - [ ] `/server power`: update, sleep and wake.
-- [ ] `/backups`: make a backup, restore one, delete one. Making a backup copies the kind and content values from an existing backup, because the spec doesn't document them; check the new backup looks like the one it copied.
+- [ ] `/backups`: restore one, delete one (making one works). Making a backup copies the kind and content values from an existing backup, because the spec doesn't document them; check the new backup looks like the one it copied.
 - [ ] Schedules: run now, turn on and off, run history, delete.
 
 ### 3. Player events per game
@@ -67,3 +68,13 @@ These use routes from the spec that have never run on a real panel. Try each on 
 - Public addresses of your real servers, and player names you may not share.
 
 The recorder redacts these, but look through a capture before sending it. If something leaks, rotate it first and say so afterwards.
+
+## Cards, emojis and setup (draft PR, 14 Nov 2026)
+
+- [ ] `/setup start` places live status cards, and they edit in place every few minutes without a new message each time.
+- [ ] A card's footer and the gap between edits match the interval chosen (2 to 5 minutes), and 5 minutes while nobody is online.
+- [ ] Delete a card: the next pass posts a new one.
+- [ ] Upload the eight emojis (docs/EMOJIS.md); **Check emojis** and `/health` report 8 of 8, and the cards show them.
+- [ ] Rename one emoji in the portal: after **Check emojis**, that one falls back to its plain emoji and nothing else changes.
+- [ ] `/server diagnostics` shows a disk figure (`GET /api/Shards/{id}/disk` hasn't run on a real panel).
+- [ ] A schedule named with "restart" shows as **Next restart** on the card.

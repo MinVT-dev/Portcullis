@@ -53,6 +53,9 @@ class FakeChannel:
     async def fetch_message(self, message_id: int) -> FakeMessage:
         return FakeMessage(self, message_id)
 
+    def get_partial_message(self, message_id: int) -> FakeMessage:
+        return FakeMessage(self, message_id)
+
 
 @dataclass
 class FakeMessage:

@@ -8,6 +8,7 @@ Admins only (Manage Server). Every change is audited. Panels are ephemeral and s
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import discord
@@ -31,12 +32,16 @@ from portcullis.bot.base import (
     id_list,
     reply,
     role_problem,
+    thinking,
     valid_line,
     valid_template,
 )
 from portcullis.bot.board import BOARD_CHANNEL, BOARD_STYLE, STYLES
+from portcullis.bot.cards import PANEL_URL, SUPPORT_URL
+from portcullis.bot.emojis import SET as EMOJI_SET
 from portcullis.bot.events import TIMEZONE, valid_zone
 from portcullis.bot.joins import NAME_RULES, WELCOME_KEY, name_rules, parse_rules
+from portcullis.bot.refresh import EVERY_KEY, clamp_every, minutes
 from portcullis.bot.server import (
     CONNECT_KEY,
     QUICK_KEY,
@@ -58,6 +63,15 @@ from portcullis.core.relay import escape
 from portcullis.db.repos import ServerRow
 
 log = logging.getLogger(__name__)
+
+URL_MAX = 512
+LIVE_MAX = 25  # one card per server, at most this many from the wizard
+_URL = re.compile(r"^https?://[^\s<>\"']{3,500}$")
+
+
+def valid_url(text: str) -> bool:
+    return bool(_URL.match(text))
+
 
 def clip(text: str, limit: int = 1024) -> str:
     """``text`` cut to an embed field's limit. Discord rejects the whole message when one field is over."""
@@ -536,9 +550,151 @@ class SetupModule(Module):
         await self.ctx.audit.record("setup.bot.board_channel", actor_id=interaction.user.id,
                                     target=str(channel_id) if channel_id else None)
 
+    # ---------------------------------------------------------------- /setup start (first-run wizard)
+
+    async def wizard_embed(self, interaction: discord.Interaction) -> discord.Embed:
+        """The five steps, each marked done or not from what is saved now."""
+        settings = await self.ctx.settings.all()
+        done, todo = "✅", "⬜"
+        embed = card(title="Set up Portcullis",
+                     description="Each step saves as soon as you pick. Run `/setup start` again any time to see "
+                                 "what is left.")
+        rows = await self.ctx.servers.list()
+        if self.ctx.live.reachable and rows:
+            amp = f"{done} AMP answers and Portcullis sees {len(rows)} server(s)."
+        elif self.ctx.live.reachable:
+            amp = (f"{todo} AMP answers but shows no servers. The bot's AMP account may lack the view permission: "
+                   "`/admin diagnostics` lists what it has.")
+        else:
+            amp = f"{todo} Portcullis can't reach AMP. Check AMP_URL in the bot's .env, then `/admin diagnostics`."
+        embed.add_field(name="1 · Connection to AMP", value=amp, inline=False)
+        alert = as_id(settings.get(ALERT_CHANNEL))
+        embed.add_field(name="2 · Alerts", inline=False,
+                        value=f"{done} Outages, crashes and high load go to <#{alert}>." if alert else
+                        f"{todo} Pick a channel below for outages, crashes and high load.")
+        cards = await self.ctx.live_cards.rows() if self.ctx.live_cards is not None else []
+        every = clamp_every(settings.get(EVERY_KEY))
+        if cards:
+            where = ", ".join(sorted({f"<#{channel}>" for _row, channel, _msg in cards}))
+            live = f"{done} {len(cards)} card(s) in {where}, updated every {minutes(every)}."
+        else:
+            live = (f"{todo} Pick a channel below. Portcullis posts one card per server there and edits it every "
+                    f"{minutes(every)} (2 to 5, your choice).")
+        embed.add_field(name="3 · Live status cards", value=live, inline=False)
+        links = [label for label, key in (("Panel", PANEL_URL), ("Support", SUPPORT_URL)) if settings.get(key)]
+        embed.add_field(name="4 · Buttons under the cards (optional)", inline=False,
+                        value=f"{done} {' and '.join(links)} set." if links else
+                        f"{todo} A Panel and a Support link button under each card. Press Links.")
+        emojis = self.ctx.emojis
+        found = len(EMOJI_SET) - len(emojis.missing())
+        embed.add_field(name="5 · Brand emojis (optional)", inline=False,
+                        value=f"{done} All {found} found." if found == len(EMOJI_SET) else
+                        f"{todo} {found} of {len(EMOJI_SET)} found. Upload the PNGs from `docs/branding/emoji` to "
+                        "the bot's Emojis page in the Discord Developer Portal, then press Check emojis. Until "
+                        "then Portcullis uses plain emojis.")
+        problems = await self.check_setup(interaction)
+        if problems:
+            embed.add_field(name="Also worth a look", value=clip("\n".join(f"• {p}" for p in problems)), inline=False)
+        embed.set_footer(text="Relays and per-server settings: /setup relay and /setup server")
+        return embed
+
+    async def setup_start(self, interaction: discord.Interaction) -> None:
+        if not await self.in_guild(interaction) or not await self.require_admin(interaction, "setup.start"):
+            return
+        await reply(interaction, embed=await self.wizard_embed(interaction), view=StartPanel(self))
+
+    async def place_live_cards(self, interaction: discord.Interaction, channel_id: int) -> str:
+        """A card for every server members can see, in one channel. Cards elsewhere move here."""
+        if can_post(interaction, channel_id) is False:
+            return f"I can't post in <#{channel_id}>. Give Portcullis View Channel and Send Messages there."
+        rows = [r for r in await self.ctx.servers.list() if not r.hidden][:LIVE_MAX]
+        if not rows:
+            return "There are no servers to show yet."
+        posted = 0
+        for row in rows:
+            posted += await self.ctx.live_cards.place(row, channel_id, by=interaction.user.id)
+        await self.ctx.audit.record("setup.live", actor_id=interaction.user.id, target=str(channel_id),
+                                    detail={"servers": len(rows)})
+        if posted < len(rows):
+            return f"Posted {posted} of {len(rows)} cards in <#{channel_id}>. The bot log says why the rest failed."
+        return f"Posted {posted} card(s) in <#{channel_id}>."
+
+    async def remove_live_cards(self, interaction: discord.Interaction) -> str:
+        cards = await self.ctx.live_cards.rows()
+        for row, _channel, _message in cards:
+            await self.ctx.live_cards.remove(row)
+        await self.ctx.audit.record("setup.live.off", actor_id=interaction.user.id, detail={"cards": len(cards)})
+        return f"Stopped updating {len(cards)} card(s). Delete the old messages by hand."
+
+    async def set_live_every(self, interaction: discord.Interaction, minutes_: int) -> str:
+        seconds = clamp_every(minutes_ * 60)
+        await self.ctx.settings.set(EVERY_KEY, seconds, by=interaction.user.id)
+        await self.ctx.audit.record("setup.live.every", actor_id=interaction.user.id, target=str(int(seconds)))
+        return f"Cards update every {minutes(seconds)} from the next pass."
+
+    async def save_links(self, interaction: discord.Interaction, panel: str, support: str) -> str | None:
+        """Problem text, or None when saved. Empty clears a link."""
+        values = {PANEL_URL: panel.strip(), SUPPORT_URL: support.strip()}
+        for value in values.values():
+            if value and not valid_url(value):
+                return f"{escape(value[:100])} isn't a web link. It must start with https:// or http://."
+        for key, value in values.items():
+            if value:
+                await self.ctx.settings.set(key, value, by=interaction.user.id)
+            else:
+                await self.ctx.settings.delete(key)
+        await self.ctx.audit.record("setup.links", actor_id=interaction.user.id,
+                                    detail={k: bool(v) for k, v in values.items()})
+        return None
+
+    async def check_emojis(self) -> str:
+        client = self.ctx.client
+        if client is None:
+            return "Not connected to Discord."
+        missing = await self.ctx.emojis.fetch(client)
+        if self.ctx.emojis.error:
+            return "Discord didn't answer, so plain emojis stay in use. Try again in a minute."
+        if not missing:
+            return "All brand emojis found. Cards pick them up on their next update."
+        return "Still missing: " + ", ".join(code(m) for m in missing) + ". The names must match exactly."
+
+    async def setup_live(self, interaction: discord.Interaction, server: str,
+                         channel: discord.TextChannel | None) -> None:
+        if not await self.in_guild(interaction) or not await self.require_admin(interaction, "setup.live"):
+            return
+        row = await self.server(interaction, server)
+        if row is None:
+            return
+        if channel is None:
+            await self.ctx.live_cards.remove(row)
+            await self.ctx.audit.record("setup.live.off", actor_id=interaction.user.id, shard_id=row.shard_id)
+            await reply(interaction, f"The live card of {escape(row.name)} stops updating. Delete its message by "
+                                     "hand.")
+            return
+        if can_post(interaction, channel.id) is False:
+            await reply(interaction, f"I can't post in {channel.mention}.")
+            return
+        await thinking(interaction)
+        ok = await self.ctx.live_cards.place(row, channel.id, by=interaction.user.id)
+        await self.ctx.audit.record("setup.live", actor_id=interaction.user.id, shard_id=row.shard_id,
+                                    target=str(channel.id), result="ok" if ok else "failed")
+        await reply(interaction, f"Live card for {escape(row.name)} posted in {channel.mention}." if ok else
+                    f"Couldn't post in {channel.mention}. The bot log says why.")
+
     def register(self, tree: app_commands.CommandTree) -> None:
         group = app_commands.Group(name="setup", description="Portcullis settings (admins)", guild_only=True,
                                    default_permissions=discord.Permissions(manage_guild=True))
+
+        @group.command(name="start", description="First-run setup: alerts, live status cards, links, emojis")
+        async def setup_start(interaction: discord.Interaction) -> None:
+            await self.setup_start(interaction)
+
+        @group.command(name="live", description="A live status card for one server, edited every few minutes")
+        @app_commands.describe(server="The game server", channel="Where to post it. Leave out to stop updating it.")
+        @app_commands.autocomplete(server=self.autocomplete_server)
+        async def setup_live(interaction: discord.Interaction, server: str,
+                             channel: discord.TextChannel | None = None) -> None:
+            await self.setup_live(interaction, server, channel)
 
         @group.command(name="relay", description="Post a server's console, events or chat in a channel")
         @app_commands.describe(server="The game server", kind="What to relay",
@@ -1017,3 +1173,71 @@ class GrantsPanel(OwnerView):
     async def roles(self, interaction: discord.Interaction, select: discord.ui.RoleSelect[GrantsPanel]) -> None:
         note = await self.module.set_grant(interaction, self.group or "", list(select.values))
         await interaction.response.edit_message(content=note, view=self)
+
+
+class StartPanel(AdminView):
+    """Under the /setup start checklist. Every control saves at once and redraws the checklist."""
+
+    async def redraw(self, interaction: discord.Interaction, note: str) -> None:
+        embed = await self.module.wizard_embed(interaction)
+        if interaction.response.is_done():
+            await interaction.edit_original_response(content=note, embed=embed, view=self)
+        else:
+            await interaction.response.edit_message(content=note, embed=embed, view=self)
+
+    @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="2 · Channel for alerts…",
+                       channel_types=[discord.ChannelType.text], min_values=1, max_values=1, row=0)
+    async def alert_channel(self, interaction: discord.Interaction,
+                            select: discord.ui.ChannelSelect[StartPanel]) -> None:
+        channel_id = select.values[0].id
+        if can_post(interaction, channel_id) is False:
+            await self.redraw(interaction, f"I can't post in <#{channel_id}>.")
+            return
+        await self.module.set_bot_channel(interaction, ALERT_CHANNEL, channel_id)
+        await self.redraw(interaction, f"Alerts go to <#{channel_id}>.")
+
+    @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="3 · Channel for live status cards…",
+                       channel_types=[discord.ChannelType.text], min_values=1, max_values=1, row=1)
+    async def live_channel(self, interaction: discord.Interaction,
+                           select: discord.ui.ChannelSelect[StartPanel]) -> None:
+        await interaction.response.defer()
+        note = await self.module.place_live_cards(interaction, select.values[0].id)
+        await self.redraw(interaction, note)
+
+    @discord.ui.select(placeholder="How often the cards update…", row=2,
+                       options=[discord.SelectOption(label=f"Every {n} minutes", value=str(n)) for n in (2, 3, 4, 5)])
+    async def every(self, interaction: discord.Interaction, select: discord.ui.Select[StartPanel]) -> None:
+        await self.redraw(interaction, await self.module.set_live_every(interaction, int(select.values[0])))
+
+    @discord.ui.button(label="Links", style=discord.ButtonStyle.primary, row=3)
+    async def links(self, interaction: discord.Interaction, button: discord.ui.Button[StartPanel]) -> None:
+        settings = self.module.ctx.settings
+        await interaction.response.send_modal(LinksModal(self, str(await settings.get(PANEL_URL) or ""),
+                                                         str(await settings.get(SUPPORT_URL) or "")))
+
+    @discord.ui.button(label="Check emojis", style=discord.ButtonStyle.secondary, row=3)
+    async def emojis(self, interaction: discord.Interaction, button: discord.ui.Button[StartPanel]) -> None:
+        await interaction.response.defer()
+        await self.redraw(interaction, await self.module.check_emojis())
+
+    @discord.ui.button(label="Stop the live cards", style=discord.ButtonStyle.danger, row=3)
+    async def live_off(self, interaction: discord.Interaction, button: discord.ui.Button[StartPanel]) -> None:
+        await self.redraw(interaction, await self.module.remove_live_cards(interaction))
+
+
+class LinksModal(discord.ui.Modal, title="Buttons under the live cards"):
+    def __init__(self, panel: StartPanel, panel_url: str, support_url: str) -> None:
+        super().__init__()
+        self.panel = panel
+        self.panel_url: discord.ui.TextInput[LinksModal] = discord.ui.TextInput(
+            label="Panel link (empty = no button)", default=panel_url, required=False, max_length=URL_MAX,
+            placeholder="https://panel.example.com")
+        self.support_url: discord.ui.TextInput[LinksModal] = discord.ui.TextInput(
+            label="Support link (empty = no button)", default=support_url, required=False, max_length=URL_MAX,
+            placeholder="https://discord.gg/… or a help page")
+        self.add_item(self.panel_url)
+        self.add_item(self.support_url)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        problem = await self.panel.module.save_links(interaction, self.panel_url.value, self.support_url.value)
+        await self.panel.redraw(interaction, problem or "Links saved. Cards show them on their next update.")

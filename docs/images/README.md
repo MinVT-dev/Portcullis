@@ -19,6 +19,24 @@ To replace a placeholder, save the real screenshot as a PNG under **the same fil
 | `help-v3.png` | `/help v3:` suggesting old V3 commands as you type |
 | `server-banner-dark.png`, `server-banner-light.png` | Real output from the bot's own `/server banner` renderer (`portcullis/bot/banners.py`), drawn with example servers |
 
+## Mock-ups (sample data)
+
+`embeds/` holds pictures of the cards drawn from the bot's own embed code, using made-up servers and players. They are not captures. Rebuild them from the repo root with:
+
+```sh
+python3 tools/render_embeds.py /tmp/embeds_html
+NODE_PATH=$(npm root -g) node tools/screenshot_embeds.js /tmp/embeds_html docs/images/embeds
+```
+
+| File | Shows |
+|---|---|
+| `embeds/live-card.png` | A live status card for a running server, with Panel and Support buttons |
+| `embeds/live-card-states.png` | The card offline, busy and waiting for the licence |
+| `embeds/live-card-fallback.png` | The card with plain emojis, before the brand emojis are uploaded |
+| `embeds/diagnostics.png` | `/server diagnostics` |
+| `embeds/health.png` | `/health` |
+| `embeds/setup-start.png` | `/setup start` |
+
 ## Screenshots still to take
 
 | File | What to capture | Shown in the README |

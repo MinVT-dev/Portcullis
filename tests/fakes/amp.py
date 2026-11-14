@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from portcullis.core.types import (
     Backup,
     ConsoleLine,
+    DiskUsage,
     Player,
     PlayerJoined,
     PlayerLeft,
@@ -52,6 +53,7 @@ class FakeAmpPort:
         self.grants: list[str] = [">"]
         self.preview_expires: datetime | None = None
         self.servers: dict[ServerId, FakeServer] = {}
+        self.disk: dict[ServerId, DiskUsage] = {}
         self.sent: list[tuple[ServerId, str]] = []
         self.power_calls: list[tuple[ServerId, PowerAction]] = []
         self.backup_calls: list[tuple[str, ServerId, str]] = []
@@ -105,6 +107,10 @@ class FakeAmpPort:
     async def get_status(self, server: ServerId) -> ServerStatus:
         srv = self._get(server)
         return ServerStatus(id=server, state=srv.state, players=tuple(srv.players))
+
+    async def disk_usage(self, server: ServerId) -> DiskUsage:
+        self._get(server)
+        return self.disk.get(server, DiskUsage(size_mb=None))
 
     async def power(self, server: ServerId, action: PowerAction) -> None:
         srv = self._get(server)

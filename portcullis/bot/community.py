@@ -36,6 +36,7 @@ from portcullis.bot.base import (
     valid_reason,
     when,
 )
+from portcullis.bot.errors import plain_error
 from portcullis.bot.ids import MojangLookup, is_vanity_link, steam_ids
 from portcullis.bot.setup import (
     AUTO_APPROVE_ROLE,
@@ -245,7 +246,8 @@ class CommunityModule(Module):
                     raise RuntimeError("the server has no whitelist add command any more")
                 await self.ctx.port.send_console(req.shard_id, fill(template, name=req.ingame_name))
             except Exception as exc:  # noqa: BLE001
-                note = f"Approved, but AMP didn't take the command ({short_error(exc)}). Add the name by hand."
+                note = ("Approved, but the whitelist command didn't go through, so add the name by hand. "
+                        f"{plain_error(exc)}")
             else:
                 await self.ctx.whitelisted.add(req.shard_id, req.ingame_name, by=interaction.user.id,
                                                discord_id=req.discord_id)
@@ -286,7 +288,7 @@ class CommunityModule(Module):
         except Exception as exc:  # noqa: BLE001
             await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, target=name,
                                         result="failed")
-            await reply(interaction, f"AMP didn't take the command: {escape(short_error(exc))}")
+            await reply(interaction, f"The command didn't go through. {plain_error(exc)}")
             return
         await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, target=name)
         if add:
@@ -350,7 +352,7 @@ class CommunityModule(Module):
         except Exception as exc:  # noqa: BLE001
             await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, target=name,
                                         result="failed", detail={"error": short_error(exc)})
-            await reply(interaction, f"AMP didn't take the command: {escape(short_error(exc))}")
+            await reply(interaction, f"The command didn't go through. {plain_error(exc)}")
             return
         await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, target=name,
                                     detail={"reason": reason} if reason else None)

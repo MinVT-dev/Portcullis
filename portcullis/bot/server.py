@@ -17,22 +17,20 @@ from portcullis.assets import game_art
 from portcullis.bot.backups import BackupView
 from portcullis.bot.banners import MAX_CARDS, THEMES, card_from, render_banner
 from portcullis.bot.base import (
-    BAD,
-    GOOD,
-    MUTED,
     NONE,
-    WARN,
     Ctx,
     Module,
     card,
-    code,
     fill,
     reply,
     short_error,
     state_text,
+    thinking,
     valid_line,
     valid_template,
 )
+from portcullis.bot.cards import diagnostics_embed, status_embed
+from portcullis.bot.errors import plain_error
 from portcullis.core.console_rules import DENY_KEY, HIDE_KEY, blocked_word, hider, stored_denylist, stored_rules
 from portcullis.core.relay import console_safe, escape
 from portcullis.core.types import PowerAction, ServerState, ServerStatus
@@ -40,16 +38,6 @@ from portcullis.db.repos import ServerRow
 
 log = logging.getLogger(__name__)
 
-STATE_COLOURS = {
-    ServerState.RUNNING: GOOD,
-    ServerState.STOPPED: BAD,
-    ServerState.BUSY: WARN,
-    ServerState.SLEEPING: MUTED,
-    ServerState.FAILED: 0xC0392B,
-    ServerState.SUSPENDED: MUTED,
-    ServerState.AWAITING_LICENCE: WARN,
-    ServerState.UNKNOWN: MUTED,
-}
 POWER_ACTIONS = (PowerAction.START, PowerAction.STOP, PowerAction.RESTART)
 # AMP has routes for these but none has been run on a real panel yet, so they're single-server only and
 # update and sleep always ask first.
@@ -104,32 +92,6 @@ def console_block(lines: list[str]) -> str:
         kept.append(safe)
         size += len(safe) + 1
     return "```\n" + "\n".join(reversed(kept)) + "\n```"
-
-
-def status_embed(row: ServerRow, status: ServerStatus, address: str | None = None) -> discord.Embed:
-    embed = card(title=row.name, colour=STATE_COLOURS.get(status.state, MUTED))
-    embed.add_field(name="State", value=state_text(status.state))
-    count = f"{status.player_count}" + (f" / {status.max_players}" if status.max_players else "")
-    embed.add_field(name="Players", value=count)
-    if status.cpu_percent is not None:
-        embed.add_field(name="CPU", value=f"{status.cpu_percent:.0f}%")
-    if status.memory_mb is not None:
-        limit = f" / {status.memory_limit_mb} MB" if status.memory_limit_mb else " MB"
-        embed.add_field(name="Memory", value=f"{status.memory_mb}{limit}")
-    if status.started_at is not None and status.state is ServerState.RUNNING:
-        embed.add_field(name="Up since", value=discord.utils.format_dt(status.started_at, "R"))
-    if status.players:
-        names = ", ".join(escape(p.name) for p in status.players)
-        embed.add_field(name="Online now", value=names if len(names) <= 1000 else names[:999] + "…", inline=False)
-    if address:
-        embed.add_field(name="Address", value=code(address))
-    if status.message:
-        embed.add_field(name="Message", value=escape(status.message)[:1000], inline=False)
-    art = game_art(row.template, name=row.amp_name)
-    if art.thumbnail_url:
-        embed.set_thumbnail(url=art.thumbnail_url)
-    embed.set_footer(text=f"{art.name} · server id {row.shard_id}")
-    return embed
 
 
 class PowerButtons(discord.ui.View):
@@ -315,8 +277,8 @@ class ServerModule(Module):
             status = await asyncio.wait_for(self.ctx.port.get_status(row.shard_id), STATUS_TIMEOUT)
         except Exception as exc:  # noqa: BLE001
             log.warning("status for %s failed: %s", row.name, exc)
-            await reply(interaction, f"Couldn't get the status of {escape(row.name)} from AMP: "
-                                     f"{escape(short_error(exc))}")
+            await reply(interaction, f"Couldn't get the status of {escape(row.name)}. "
+                                     f"{plain_error(exc)}")
             return
         extra = {}
         user = interaction.user
@@ -388,7 +350,7 @@ class ServerModule(Module):
             log.warning("%s on %s failed: %s", node, row.name, exc)
             await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, result="failed",
                                         detail={"error": short_error(exc)})
-            await reply(interaction, f"AMP didn't {power.value} {escape(row.name)}: {escape(short_error(exc))}",
+            await reply(interaction, f"Couldn't {power.value} {escape(row.name)}. {plain_error(exc)}",
                         ephemeral=False)
             return
         await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id,
@@ -426,8 +388,8 @@ class ServerModule(Module):
             log.warning("%s on %s failed: %s", node, row.name, exc)
             await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, result="failed",
                                         detail={"error": short_error(exc)})
-            await reply(interaction, f"AMP didn't take the answer for {escape(row.name)}: "
-                                     f"{escape(short_error(exc))}", ephemeral=False)
+            await reply(interaction, f"The licence answer for {escape(row.name)} didn't go through. "
+                                     f"{plain_error(exc)}", ephemeral=False)
             return
         await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id)
         done = "accepted the game licence for" if accept else "declined the game licence for"
@@ -484,8 +446,8 @@ class ServerModule(Module):
             except Exception as exc:  # noqa: BLE001
                 await self.ctx.audit.record("server.power.restart", actor_id=interaction.user.id,
                                             shard_id=row.shard_id, result="failed", detail={"error": short_error(exc)})
-                await self._update(interaction, f"AMP didn't restart **{escape(row.name)}**: "
-                                                f"{escape(short_error(exc))}")
+                await self._update(interaction, f"Couldn't restart **{escape(row.name)}**. "
+                                                f"{plain_error(exc)}")
                 return
             await self.ctx.audit.record("server.power.restart", actor_id=interaction.user.id, shard_id=row.shard_id)
             await self._update(interaction, f"Restarted **{escape(row.name)}** after warning players "
@@ -569,7 +531,7 @@ class ServerModule(Module):
             try:
                 await self.ctx.port.power(row.shard_id, power)
             except Exception as exc:  # noqa: BLE001 - keep going; report the failures together
-                failed.append(f"{escape(row.name)} ({escape(short_error(exc))[:100]})")
+                failed.append(f"{escape(row.name)} ({plain_error(exc)[:160]})")
                 await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id,
                                             result="failed", detail={"error": short_error(exc), "all": True})
                 continue
@@ -621,7 +583,7 @@ class ServerModule(Module):
         except Exception as exc:  # noqa: BLE001
             await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, result="failed",
                                         detail={"error": short_error(exc)})
-            await reply(interaction, f"AMP didn't take the command: {escape(short_error(exc))}")
+            await reply(interaction, f"The command didn't go through. {plain_error(exc)}")
             return
         # Only the command word is audited: arguments can hold passwords (DESIGN.md, audit table).
         await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id,
@@ -640,7 +602,7 @@ class ServerModule(Module):
             await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id,
                                         target=item["label"][:40], result="failed",
                                         detail={"error": short_error(exc)})
-            await reply(interaction, f"AMP didn't take {escape(item['label'])}: {escape(short_error(exc))}")
+            await reply(interaction, f"{escape(item['label'])} didn't go through. {plain_error(exc)}")
             return
         await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id,
                                     target=item["label"][:40])
@@ -659,7 +621,7 @@ class ServerModule(Module):
         try:
             history = await asyncio.wait_for(self.ctx.port.recent_console(row.shard_id, limit=lines), STATUS_TIMEOUT)
         except Exception as exc:  # noqa: BLE001
-            await reply(interaction, f"Couldn't read the console of {escape(row.name)}: {escape(short_error(exc))}")
+            await reply(interaction, f"Couldn't read the console of {escape(row.name)}. {plain_error(exc)}")
             return
         hide = hider(stored_rules(await self.ctx.settings.get(HIDE_KEY, scope=row.shard_id)))
         history = [t for t in history if t.strip() and not (hide and hide(t))]
@@ -667,7 +629,8 @@ class ServerModule(Module):
             await reply(interaction, f"{escape(row.name)} has no recent console output.")
             return
         await self.ctx.audit.record("server.console.read", actor_id=interaction.user.id, shard_id=row.shard_id)
-        await reply(interaction, f"Last console lines of **{escape(row.name)}**:\n{console_block(history)}")
+        await reply(interaction, f"{self.ctx.emojis['console']} Last console lines of **{escape(row.name)}**:\n"
+                                 f"{console_block(history)}")
 
     async def backups(self, interaction: discord.Interaction, server: str) -> None:
         if not await self.in_guild(interaction):
@@ -679,7 +642,7 @@ class ServerModule(Module):
         try:
             items = await self.ctx.port.list_backups(row.shard_id)
         except Exception as exc:  # noqa: BLE001
-            await reply(interaction, f"Couldn't list backups for {escape(row.name)}: {escape(short_error(exc))}")
+            await reply(interaction, f"Couldn't list backups for {escape(row.name)}. {plain_error(exc)}")
             return
         if not items:
             await reply(interaction, f"{escape(row.name)} has no backups.")
@@ -689,10 +652,11 @@ class ServerModule(Module):
             when = discord.utils.format_dt(b.created_at, "f") if b.created_at else "unknown time"
             size = f" · {b.size_mb} MB" if b.size_mb is not None else ""
             pin = " · 📌 kept" if b.sticky else ""
-            lines.append(f"**{escape(b.name or b.id)}** · {when}{size}{pin}")
+            lines.append(f"{self.ctx.emojis['backup']} **{escape(b.name or b.id)}** · {when}{size}{pin}")
         more = f"\n…and {len(items) - 15} older" if len(items) > 15 else ""
         embed = card(title=f"Backups of {row.name}", description="\n".join(lines) + more)
-        embed.set_footer(text="Making, restoring and deleting are not yet seen working on a real panel.")
+        embed.set_footer(text="Making a backup works on a real panel. Restoring and deleting are not yet seen "
+                                    "working there.")
         can_make = await self.ctx.allowed(interaction.user, "backup.create", row.shard_id)
         can_restore = self.ctx.access.is_admin(interaction.user) and \
             await self.ctx.allowed(interaction.user, "backup.restore", row.shard_id)
@@ -739,12 +703,33 @@ class ServerModule(Module):
             log.warning("%s on %s failed: %s", node, row.name, exc)
             await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, result="failed",
                                         detail={**detail, "error": short_error(exc)})
-            await reply(interaction, f"AMP didn't do that for {escape(row.name)}: {escape(short_error(exc))}",
+            await reply(interaction, f"That didn't work for {escape(row.name)}. {plain_error(exc)}",
                         ephemeral=False)
             return
         await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, detail=detail)
         await reply(interaction, f"{done} Asked by {interaction.user.mention}. AMP finishes it in the "
                                  "background; check `/backups` in a minute.", ephemeral=False)
+
+    async def server_diagnostics(self, interaction: discord.Interaction, server: str) -> None:
+        """CPU, memory and disk against their limits, and AMP's last error. Operators only."""
+        if not await self.in_guild(interaction):
+            return
+        row = await self.server(interaction, server)
+        if row is None or not await self.require_mod(interaction, "server.diagnostics", row.shard_id):
+            return
+        await thinking(interaction)
+        try:
+            status = await asyncio.wait_for(self.ctx.port.get_status(row.shard_id), STATUS_TIMEOUT)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("status for %s failed: %s", row.name, exc)
+            await reply(interaction, f"Couldn't get the status of {escape(row.name)}. {plain_error(exc)}")
+            return
+        try:
+            disk = await asyncio.wait_for(self.ctx.port.disk_usage(row.shard_id), STATUS_TIMEOUT)
+        except Exception as exc:  # noqa: BLE001 - the card says the figure is missing
+            log.info("disk usage for %s unavailable: %s", row.name, exc)
+            disk = None
+        await reply(interaction, embed=diagnostics_embed(row, status, disk, emojis=self.ctx.emojis))
 
     def register(self, tree: app_commands.CommandTree) -> None:
         group = app_commands.Group(name="server", description="Game servers", guild_only=True)
@@ -760,6 +745,12 @@ class ServerModule(Module):
         @app_commands.autocomplete(server=auto)
         async def server_status(interaction: discord.Interaction, server: str) -> None:
             await self.server_status(interaction, server)
+
+        @group.command(name="diagnostics", description="CPU, memory, disk and the last error of a server (operators)")
+        @app_commands.describe(server="The game server")
+        @app_commands.autocomplete(server=auto)
+        async def server_diagnostics(interaction: discord.Interaction, server: str) -> None:
+            await self.server_diagnostics(interaction, server)
 
         @group.command(name="banner", description="A status picture of one server or all of them")
         @app_commands.describe(server="One game server (leave out for all)", theme="Dark or light",

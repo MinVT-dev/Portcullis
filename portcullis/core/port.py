@@ -13,6 +13,7 @@ from typing import Protocol, runtime_checkable
 
 from portcullis.core.types import (
     Backup,
+    DiskUsage,
     PowerAction,
     Schedule,
     ScheduleRun,
@@ -28,6 +29,8 @@ class AmpPort(Protocol):
     async def list_servers(self) -> list[ServerInfo]: ...
 
     async def get_status(self, server: ServerId) -> ServerStatus: ...
+
+    async def disk_usage(self, server: ServerId) -> DiskUsage: ...
 
     async def power(self, server: ServerId, action: PowerAction) -> None: ...
 

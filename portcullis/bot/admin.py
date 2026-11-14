@@ -17,6 +17,7 @@ import discord
 from discord import app_commands
 
 from portcullis.bot.base import (
+    BAD,
     OWNER_ONLY_KEYS,
     Module,
     card,
@@ -29,6 +30,9 @@ from portcullis.bot.base import (
     valid_template,
     when,
 )
+from portcullis.bot.emojis import SET
+from portcullis.bot.errors import plain_error
+from portcullis.bot.refresh import minutes
 from portcullis.bot.v3map import STATUS_LABELS, lookup, search
 from portcullis.core.relay import escape
 from portcullis.db.features import all_settings
@@ -60,6 +64,7 @@ def server_field_ok(key: str, value: object) -> bool:
 
 
 STARTED = time.monotonic()
+HEALTH_CACHE = 30.0  # /health is open to everyone, so AMP is asked at most this often
 STATS_DAYS = 30
 EXPORT_VERSION = 1
 MAX_IMPORT_BYTES = 1_000_000
@@ -76,11 +81,13 @@ HELP = [
     ("/link", "everyone", "Prove which in-game name is yours"),
     ("/notify", "everyone", "Get a DM when a server comes online"),
     ("/event list", "everyone", "Events coming up"),
+    ("/health", "everyone", "Is Portcullis working: Discord, AMP, live cards, brand emojis"),
     ("/help", "everyone", "This list"),
     ("/server power", "mod", "Start, stop, restart, or restart with a warning in game chat"),
     ("/server power-all", "mod", "Start, stop or restart every server, or every server with a tag"),
     ("/server send", "mod", "Send a console command or chat message"),
     ("/server console", "mod", "A server's latest console lines"),
+    ("/server diagnostics", "mod", "CPU, memory and disk against their limits, and the last error"),
     ("/backups", "mod", "A server's backups, with Make a backup and (for admins) Restore and Delete"),
     ("/schedule list", "mod", "A server's AMP schedules: Run now, On and Off, run history, Delete (admins)"),
     ("/whitelist add · remove · list", "mod", "Change or see a server's whitelist"),
@@ -89,7 +96,8 @@ HELP = [
     ("/poll create · list", "mod", "Community polls"),
     ("/event create", "mod", "Announce an event with a Going button and a reminder"),
     ("/user (or right-click → Apps → Portcullis user)", "mod", "A member's links and flags"),
-    ("/setup relay · server · bot", "admin", "Relays, server settings, bot settings"),
+    ("/setup start", "admin", "First-run setup: alerts, live status cards, links, emojis"),
+    ("/setup relay · server · bot · live", "admin", "Relays, server settings, bot settings, live status cards"),
     ("/alert create · list", "admin", "Your own alerts: CPU, memory, player count or offline, held for N minutes"),
     ("/audit", "admin", "Who did what through Portcullis (stats: counts for 30 days)"),
     ("/admin diagnostics · export · import", "admin", "Health check and settings backup"),
@@ -123,6 +131,8 @@ def grant_covers(grant: str, node: str) -> bool:
             or _nats_match(parts, list(tail)))
 
 class AdminModule(Module):
+    _health_amp: tuple[float, tuple[str, str]] | None = None
+
     # ---------------------------------------------------------------- /help
 
     async def help(self, interaction: discord.Interaction, v3: str | None = None) -> None:
@@ -272,6 +282,64 @@ class AdminModule(Module):
         embed.add_field(name="Database", value=f"schema version {self.ctx.db.version}")
         return embed
 
+    # ---------------------------------------------------------------- /health
+
+    async def health(self, interaction: discord.Interaction) -> None:
+        if not await self.in_guild(interaction):
+            return
+        await thinking(interaction)
+        await reply(interaction, embed=await self.health_embed())
+
+    async def health_embed(self) -> discord.Embed:
+        """One line per part of Portcullis, each with a mark and a word, worst first decides the colour."""
+        checks: list[tuple[str, str, str]] = []  # (mark, part, detail)
+        now = time.monotonic()
+        cached = self._health_amp
+        if cached is None or now - cached[0] > HEALTH_CACHE:
+            started = time.perf_counter()
+            try:
+                servers = await asyncio.wait_for(self.ctx.port.list_servers(), 5)
+                amp = ("ok", f"answering, {len(servers)} server(s), {(time.perf_counter() - started) * 1000:.0f} ms")
+            except Exception as exc:  # noqa: BLE001
+                amp = ("bad", plain_error(exc))
+            cached = self._health_amp = (now, amp)
+        checks.append((cached[1][0], "AMP", cached[1][1]))
+        client = self.ctx.client
+        latency = getattr(client, "latency", float("nan")) if client is not None else float("nan")
+        if latency == latency and latency != float("inf"):  # not NaN: connected
+            checks.append(("ok" if latency < 0.5 else "warn", "Discord", f"connected, {latency * 1000:.0f} ms"))
+        else:
+            checks.append(("warn", "Discord", "still connecting"))
+        checks.append(("ok", "Servers", self.ctx.live.summary().text()))
+        cards = self.ctx.live_cards
+        if cards is not None:
+            placed = len(await cards.rows())
+            pacer = cards.pacer
+            if not placed:
+                checks.append(("off", "Live status cards", "none yet (`/setup start` places them)"))
+            elif pacer.backing_off:
+                checks.append(("warn", "Live status cards", f"{placed} card(s), paused after {pacer.last_problem}; "
+                                                             f"next try {minutes(pacer.delay())} from now"))
+            else:
+                checks.append(("ok", "Live status cards", f"{placed} card(s), every {minutes(pacer.every)}"))
+        emojis = self.ctx.emojis
+        found = len(SET) - len(emojis.missing())
+        if emojis.error:
+            checks.append(("warn", "Brand emojis", "couldn't read them from Discord, plain emojis in use"))
+        elif found == len(SET):
+            checks.append(("ok", "Brand emojis", f"all {found} found"))
+        else:
+            checks.append(("off", "Brand emojis", f"{found} of {len(SET)} uploaded, plain emojis for the rest "
+                                                  "(docs/EMOJIS.md)"))
+        checks.append(("ok", "Database", f"schema version {self.ctx.db.version}"))
+        marks = {"ok": "✅", "warn": "⚠️", "bad": "❌", "off": "➖"}
+        worst = "bad" if any(c[0] == "bad" for c in checks) else "warn" if any(c[0] == "warn" for c in checks) \
+            else "good"
+        embed = card(title="Health", kind=worst,
+                     description="\n".join(f"{marks[m]} **{part}** · {detail}" for m, part, detail in checks))
+        embed.set_footer(text=f"Running for {duration(now - STARTED)} · details for admins: /admin diagnostics")
+        return embed
+
     # ---------------------------------------------------------------- /admin diagnostics
 
     async def diagnostics(self, interaction: discord.Interaction) -> None:
@@ -285,7 +353,8 @@ class AdminModule(Module):
             embed.add_field(name="AMP", value=f"✅ reachable, {len(servers)} server(s), "
                                               f"{(time.perf_counter() - started) * 1000:.0f} ms", inline=False)
         except Exception as exc:  # noqa: BLE001
-            embed.add_field(name="AMP", value=f"❌ {escape(short_error(exc))}", inline=False)
+            embed.add_field(name="AMP", value=f"❌ {plain_error(exc)}\n{code(short_error(exc))}", inline=False)
+            embed.colour = discord.Colour(BAD)
             servers = []
         lines = []
         for info in servers[:20]:
@@ -419,6 +488,11 @@ class AdminModule(Module):
         async def help_(interaction: discord.Interaction, v3: str | None = None) -> None:
             await self.help(interaction, v3)
 
+        @app_commands.command(name="health", description="Is Portcullis working? Discord, AMP, live cards, emojis")
+        @app_commands.guild_only()
+        async def health(interaction: discord.Interaction) -> None:
+            await self.health(interaction)
+
         @app_commands.command(name="audit", description="Who did what through Portcullis (admins)")
         @app_commands.guild_only()
         @app_commands.default_permissions(manage_guild=True)
@@ -455,5 +529,5 @@ class AdminModule(Module):
         async def import_(interaction: discord.Interaction, file: discord.Attachment) -> None:
             await self.import_(interaction, file)
 
-        for command in (help_, audit, group):
+        for command in (help_, health, audit, group):
             tree.add_command(command)

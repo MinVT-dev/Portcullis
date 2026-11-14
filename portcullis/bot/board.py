@@ -2,7 +2,8 @@
 """The live server board: one message in a channel that Portcullis keeps editing.
 
 It shows every visible server, its state and player count, from the same live state as the bot's
-profile status. Edits are spaced out (``EVERY`` seconds) so a burst of joins makes one edit. With the
+profile status. Edits are spaced out (``EVERY`` seconds, 2 minutes) so a burst of joins makes one
+edit, and a Discord 429 holds the next edit back for as long as Discord asked (``refresh.py``). With the
 ``board_style`` setting at ``image`` it shows a banner picture (``banners.py``) instead of the embed.
 """
 
@@ -19,12 +20,13 @@ import discord
 
 from portcullis.bot.banners import MAX_CARDS, BannerCard, render_banner
 from portcullis.bot.base import NONE, Ctx, card, state_text
+from portcullis.bot.refresh import BACKOFF_MAX, MIN_EVERY, minutes
 from portcullis.core.relay import escape
 from portcullis.core.types import ServerState
 
 log = logging.getLogger(__name__)
 
-EVERY = 30.0
+EVERY = MIN_EVERY
 BOARD_CHANNEL, BOARD_MESSAGE = "board_channel", "board_message"
 BOARD_STYLE = "board_style"  # bot: "embed" (default) or "image"
 STYLES = ("embed", "image")
@@ -49,7 +51,7 @@ class StatusBoard:
         summary = live.summary()
         embed = card(title="Servers", description="\n".join(lines)[:4000] or "No servers yet.",
                               timestamp=datetime.now(UTC))
-        embed.set_footer(text=f"{summary.text()} · updates by itself")
+        embed.set_footer(text=f"{summary.text()} · updates at most every {minutes(self.every)}")
         return embed
 
     async def image(self) -> discord.File:
@@ -102,6 +104,14 @@ class StatusBoard:
                     pass  # someone deleted it: post a new one
             message = await channel.send(allowed_mentions=NONE, **post)
             await self.ctx.settings.set(BOARD_MESSAGE, message.id)
+        except discord.HTTPException as exc:
+            if exc.status == 429:
+                wait = getattr(exc, "retry_after", None)
+                wait = min(BACKOFF_MAX, max(self.every, float(wait) if isinstance(wait, int | float) else 0.0))
+                self._at = time.monotonic() + wait - self.every  # changed() waits until then
+                log.warning("Discord rate-limited the server board; next edit in %.0f s", wait)
+            else:
+                log.warning("could not update the server board in channel %s: %s", channel_id, exc)
         except Exception as exc:  # noqa: BLE001 - cosmetic; never let it break the relay or presence
             log.warning("could not update the server board in channel %s: %s", channel_id, exc)
 

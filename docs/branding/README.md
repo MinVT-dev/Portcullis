@@ -29,6 +29,7 @@ SVG is the source. Upload-ready PNGs are in [`png/`](png/).
 | [portcullis-mark.svg](portcullis-mark.svg) / [-dark](portcullis-mark-dark.svg) | 512×512 | The mark on its own, transparent. The charcoal works on both dark and light, so the two files are the same; both names are kept so links don't break. |
 | [portcullis-game-banner.svg](portcullis-game-banner.svg) | 920×430 | Placeholder banner for a game with no art (`portcullis/assets/fallback/game-banner.png`; see [GAME_ASSETS.md](../GAME_ASSETS.md)). |
 | [portcullis-game-logo.svg](portcullis-game-logo.svg) | 512×512 | Placeholder logo for a game with no art (`portcullis/assets/fallback/game-logo.png`). Grey folds, so it doesn't read as the bot's own avatar. |
+| [emoji/](emoji/) | 128×128 each | The eight brand emojis (server states, licence, backup, console, players), uploaded as Discord application emojis. See [EMOJIS.md](../EMOJIS.md). Built by `emoji.py` and `render_emoji.js`. |
 
 **Rebuild:**
 
