@@ -257,6 +257,7 @@ Owners can give a role a single task, such as "may whitelist but not stop server
 - **Secrets stay out of logs and replies.** Error text from AMP is masked the same way before it reaches Discord or the audit log.
   - Passwords, tokens and hub tickets are redacted.
   - `.env`, the database and recordings are ignored by git.
+- **Found a security problem?** Email support@solvra-panel.com instead of opening an issue. [SECURITY.md](SECURITY.md) says what to include, and never to paste tokens or licence keys.
 - **Console rules can't freeze the bot.** Patterns that could backtrack badly are refused, and only the first 300 characters of a line are checked.
 
 ## How it is built
@@ -311,6 +312,8 @@ It covers:
 | [Game art](docs/GAME_ASSETS.md) | Banners and logos for the 229 games AMP can run |
 | [Branding](docs/branding/README.md) | The logo, icon, banners, palette and type |
 | [Beta checklist](docs/BETA_CHECKLIST.md) | What to check on a real panel before a release |
+| [Security policy](SECURITY.md) | How to report a vulnerability privately, and what to include |
+| [Security checks](docs/SECURITY_CHECKS.md) | The weekly dependency, secret and code scans, and what to do when one fails |
 
 ## Development
 
@@ -325,6 +328,8 @@ CI runs:
 - the tests on Python 3.11 and 3.13;
 - `pip-audit`;
 - a separate job that builds and tests `portcullis-api` on its own.
+
+[Security checks](docs/SECURITY_CHECKS.md) run on every pull request and every Monday: a dependency audit, a secret scan of the whole history, CodeQL and a workflow lint. Dependabot proposes updates weekly.
 
 `tools/record_events.py` records live events from your own panel, so support for a new game can be built from real data. Read [DEVELOPING.md](docs/DEVELOPING.md) before you change anything.
 
