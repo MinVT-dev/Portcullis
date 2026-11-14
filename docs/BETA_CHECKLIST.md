@@ -38,7 +38,8 @@ Tick each one on a real panel. For anything that fails, the bot's log line and t
 These use routes from the spec that have never run on a real panel. Try each on a server you can afford to lose.
 
 - [ ] `/server power`: update, sleep and wake.
-- [ ] `/backups`: restore one, delete one (making one works). Making a backup copies the kind and content values from an existing backup, because the spec doesn't document them; check the new backup looks like the one it copied.
+- [x] `/backups`: make a backup (works on Min's panel, 2026-11-14).
+- [ ] `/backups`: restore one (follow docs/RESTORE_TEST.md on a throwaway server), delete one. Making a backup copies the kind and content values from an existing backup, because the spec doesn't document them; check the new backup looks like the one it copied.
 - [ ] Schedules: run now, turn on and off, run history, delete.
 
 ### 3. Player events per game

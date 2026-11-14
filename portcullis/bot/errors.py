@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 
-from portcullis.bot.base import code
+from portcullis.bot.base import code, scrub
 from portcullis.core.types import TryLater
 
 # Read by class name, because the classes live in portcullis_api.
@@ -47,7 +47,7 @@ def _wait(seconds: object) -> str:
 def plain_error(exc: BaseException) -> str:
     """One or two sentences for the member. Never AMP's raw message, paths or status codes."""
     if isinstance(exc, TryLater):
-        return str(exc) or "AMP can't do that right now. Try again in a few minutes."
+        return scrub(str(exc)) or "AMP can't do that right now. Try again in a few minutes."
     if isinstance(exc, TimeoutError):
         return "AMP took too long to answer. The panel may be busy or restarting; try again in a minute."
     by_name = _BY_NAME.get(type(exc).__name__)
@@ -65,6 +65,6 @@ def plain_error(exc: BaseException) -> str:
     if isinstance(exc, ValueError):
         return "The bot can't send that: a console command must be one line without control characters."
     # Nothing we recognise: say so, and show AMP's words as a quoted detail rather than as the message.
-    detail = str(exc) or type(exc).__name__
+    detail = scrub(str(exc) or type(exc).__name__)  # AMP text can carry a session token
     detail = detail if len(detail) <= 200 else detail[:199] + "…"
     return f"What AMP said: {code(detail)}"

@@ -40,7 +40,7 @@ GROUPS = {
     "moderation": "Kick and ban, watchlist, /user",
     "polls": "Polls",
     "events": "Events calendar",
-    "backups": "Backup list",
+    "backups": "Backups: list and make. Restore and delete also need Manage Server",
 }
 # Audit node prefix -> group. The first match wins.
 NODE_GROUPS = (
@@ -350,8 +350,32 @@ def problem_text(ref: str) -> str:
             f"If it keeps happening, tell an admin and give them this code: `{ref}`.")
 
 
+# Error text from AMP goes into Discord replies, the audit log and the audit channel, none of which pass
+# through the logging redactor. These shapes are masked even before ``use_scrubber`` is called.
+_SECRET_SHAPES = (
+    (re.compile(r"eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*"), ""),
+    (re.compile(r"(?i)(bearer\s+)[^\s\"',]+"), r"\1"),
+    (re.compile(r"(?i)((?:access_token|token|ticket|password)=)[^&\s\"']+"), r"\1"),
+)
+_scrubbers: list[Callable[[str], str]] = []
+
+
+def use_scrubber(scrub: Callable[[str], str]) -> None:
+    """Mask the bot's known secrets (AMP password, Discord token, live session tokens) in member-facing
+    error text too. ``__main__`` passes the logging redactor's ``text``."""
+    _scrubbers[:] = [scrub]
+
+
+def scrub(text: str) -> str:
+    for known in _scrubbers:
+        text = known(text)
+    for pattern, keep in _SECRET_SHAPES:
+        text = pattern.sub(lambda m, k=keep: m.expand(k) + "<redacted>", text)
+    return text
+
+
 def short_error(exc: BaseException) -> str:
-    text = str(exc) or type(exc).__name__
+    text = scrub(str(exc) or type(exc).__name__)
     return text if len(text) <= 300 else text[:299] + "…"
 
 
@@ -402,6 +426,30 @@ async def thinking(interaction: discord.Interaction, *, ephemeral: bool = True) 
         await interaction.response.defer(ephemeral=ephemeral, thinking=True)
 
 
+class OwnedView(discord.ui.View):
+    """A panel made for one member (a reply to their command). Only they can press it: its selects keep
+    state between presses, and its buttons act with the panel's server already chosen."""
+
+    def __init__(self, owner_id: int, *, timeout: float | None = 300) -> None:
+        super().__init__(timeout=timeout)
+        self.owner_id = owner_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+        await reply(interaction, "This panel belongs to someone else. Run the command yourself.")
+        return False
+
+
+async def same_guild(ctx: Ctx, interaction: discord.Interaction) -> bool:
+    """Buttons that outlive a restart (whitelist, polls, events) are matched by their custom id alone, with
+    no view to say where they were posted. They only answer in the bot's own Discord server."""
+    if interaction.guild_id == ctx.guild_id:
+        return True
+    await reply(interaction, "Portcullis only works in the Discord server it was set up for.")
+    return False
+
+
 class Module:
     """Base for one command group. Subclasses add their commands in ``register``."""
 
@@ -437,7 +485,9 @@ class Module:
     async def server(self, interaction: discord.Interaction, name: str) -> ServerRow | None:
         """Find a server the caller may see, or reply that it doesn't exist."""
         row = await self.ctx.servers.find(name)
-        if row is None or (row.hidden and not await self.ctx.sees_hidden(interaction.user, row.shard_id)):
+        # A typed shard id finds removed servers too; those are gone from AMP and from every list.
+        if row is None or row.gone_at is not None or \
+                (row.hidden and not await self.ctx.sees_hidden(interaction.user, row.shard_id)):
             await reply(interaction, f"I don't know a server called {escape(name)}. "
                                      "Pick one from the list as you type.")
             return None

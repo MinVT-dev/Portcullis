@@ -62,6 +62,10 @@ WARNED = "restart_warned"
 # Warnings as (seconds before the restart, text for players).
 WARN_STEPS = ((300, "5 minutes"), (60, "1 minute"))
 WARN_TEXT = "Server restart in {when}."
+# Following a restore: AMP restores in the background. Discord lets the bot answer an interaction for 15
+# minutes, so the last check is a little before that.
+RESTORE_POLL = 20.0
+RESTORE_CHECKS = 40
 _ADDRESS = re.compile(r"^[A-Za-z0-9.\-]{1,253}(:\d{1,5})?$")
 
 
@@ -196,6 +200,7 @@ class ServerModule(Module):
         self.member_starts: dict[str, float] = {}
         self.restart_pending: set[str] = set()  # warned restarts between "asked" and "counting down"
         self.sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+        self.restore_watch: dict[str, asyncio.Task[None]] = {}
 
     async def players_online(self, row: ServerRow, timeout: float = STATUS_TIMEOUT) -> int | None:
         """How many players are on, or None if AMP couldn't say (in time)."""
@@ -662,12 +667,24 @@ class ServerModule(Module):
             await self.ctx.allowed(interaction.user, "backup.restore", row.shard_id)
         can_delete = self.ctx.access.is_admin(interaction.user) and \
             await self.ctx.allowed(interaction.user, "backup.delete", row.shard_id)
-        view = BackupView(self, row, items, can_make=can_make, can_restore=can_restore, can_delete=can_delete) \
+        view = BackupView(self, row, items, owner_id=interaction.user.id, can_make=can_make,
+                          can_restore=can_restore, can_delete=can_delete) \
             if can_make or can_restore or can_delete else None
         await reply(interaction, embed=embed, **({"view": view} if view is not None else {}))
 
+    async def may_restore(self, interaction: discord.Interaction, row: ServerRow, node: str = "backup.restore") -> bool:
+        """Restoring and deleting need Manage Server and the backups power for this server, checked again on
+        every press: roles can change while a panel is open."""
+        if self.ctx.access.is_admin(interaction.user) and await self.ctx.allowed(interaction.user, node, row.shard_id):
+            return True
+        await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, result="denied")
+        await reply(interaction, "That needs the Manage Server permission and the backups power for this server.")
+        return False
+
     def backups_make(self, row: ServerRow):  # noqa: ANN201
         async def make(interaction: discord.Interaction) -> None:
+            if not await self.require_mod(interaction, "backup.create", row.shard_id):
+                return
             name = f"Discord {time.strftime('%Y-%m-%d %H:%M', time.gmtime())}"
             await self._backup_job(interaction, row, "backup.create", f"Making a backup of {escape(row.name)}.",
                                    self.ctx.port.create_backup(row.shard_id, name), {"name": name})
@@ -675,19 +692,99 @@ class ServerModule(Module):
 
     def backups_restore(self, row: ServerRow, backup_id: str, name: str):  # noqa: ANN201
         async def restore(interaction: discord.Interaction) -> None:
-            if not self.ctx.access.is_admin(interaction.user):
-                await reply(interaction, "Restoring needs the Manage Server permission.")
-                return
-            self.ctx.expect_offline(row.shard_id)
-            await self._backup_job(interaction, row, "backup.restore",
-                                   f"Restoring {escape(row.name)} to **{escape(name)}**.",
-                                   self.ctx.port.restore_backup(row.shard_id, backup_id), {"backup": name})
+            await self.restore_backup(interaction, row, backup_id, name)
         return restore
+
+    async def restore_backup(self, interaction: discord.Interaction, row: ServerRow, backup_id: str,
+                             name: str) -> None:
+        """Check, start and then follow a restore, posting the outcome in the same channel."""
+        node = "backup.restore"
+        if not await self.may_restore(interaction, row):
+            return
+        await interaction.response.defer(thinking=True)  # public: everyone sees who rolled the server back
+        detail = {"backup": name}
+        try:
+            before = await self.ctx.port.backup_timeline(row.shard_id)
+        except Exception as exc:  # noqa: BLE001
+            await self._restore_failed(interaction, row, detail, exc, "read the backup list of")
+            return
+        # The id came from a menu built minutes ago: it must still be one of this server's backups.
+        if not any(b.id == backup_id for b in before.backups):
+            await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, result="failed",
+                                        detail={**detail, "error": "not in this server's backup list"})
+            await reply(interaction, f"**{escape(name)}** isn't in the backup list of {escape(row.name)} any more, "
+                                     "so nothing was restored.", ephemeral=False)
+            return
+        if before.restoring_id is not None or row.shard_id in self.restore_watch:
+            await reply(interaction, f"AMP is already restoring {escape(row.name)}. Wait for it to finish.",
+                        ephemeral=False)
+            return
+        self.ctx.expect_offline(row.shard_id)
+        try:
+            followed = await self.ctx.port.restore_backup(row.shard_id, backup_id)
+        except Exception as exc:  # noqa: BLE001
+            await self._restore_failed(interaction, row, detail, exc, "start restoring")
+            return
+        await self.ctx.audit.record(node, actor_id=interaction.user.id, shard_id=row.shard_id, detail=detail)
+        await reply(interaction, f"Restoring **{escape(row.name)}** to **{escape(name)}**, asked by "
+                                 f"{interaction.user.mention}. AMP works in the background; I'll post here "
+                                 "when it says it's done.", ephemeral=False)
+        targets = {backup_id} | ({followed} if followed else set())
+        known = {b.id for b in before.backups}
+        task = asyncio.create_task(self._follow_restore(interaction, row, targets, known, name),
+                                   name=f"restore {row.shard_id}")
+        self.restore_watch[row.shard_id] = task
+        task.add_done_callback(lambda _t: self.restore_watch.pop(row.shard_id, None))
+
+    async def _restore_failed(self, interaction: discord.Interaction, row: ServerRow, detail: dict[str, str],
+                              exc: Exception, doing: str) -> None:
+        log.warning("backup.restore on %s failed: %s", row.name, exc)
+        await self.ctx.audit.record("backup.restore", actor_id=interaction.user.id, shard_id=row.shard_id,
+                                    result="failed", detail={**detail, "error": short_error(exc)})
+        await reply(interaction, f"AMP didn't {doing} {escape(row.name)}: {escape(short_error(exc))}\n"
+                                 "Nothing was restored.", ephemeral=False)
+
+    async def _follow_restore(self, interaction: discord.Interaction, row: ServerRow, targets: set[str],
+                              known: set[str], name: str) -> None:
+        """Poll AMP's timeline until it stops restoring, then say whether HEAD moved to the backup and
+        whether AMP's PreRestore safety copy appeared."""
+        timeline = None
+        for _ in range(RESTORE_CHECKS):
+            await self.sleep(RESTORE_POLL)
+            try:
+                timeline = await self.ctx.port.backup_timeline(row.shard_id)
+            except Exception as exc:  # noqa: BLE001 - one failed read is not the restore failing
+                log.warning("following the restore of %s: %s", row.name, exc)
+                continue
+            if timeline.restoring_id is None:
+                break
+        else:
+            timeline = None
+        safety = [b for b in (timeline.backups if timeline else []) if b.id not in known and b.id not in targets]
+        if timeline is None:
+            outcome, text = "unknown", (f"AMP is still restoring **{escape(row.name)}** after "
+                                        f"{RESTORE_POLL * RESTORE_CHECKS / 60:.0f} minutes, or I couldn't read its "
+                                        "backup list. Check the server in AMP before starting it.")
+        elif timeline.head_id in targets:
+            outcome, text = "ok", f"✅ **{escape(row.name)}** is restored to **{escape(name)}**."
+        else:
+            outcome, text = "failed", (f"❌ AMP stopped restoring **{escape(row.name)}**, but the server isn't on "
+                                       f"**{escape(name)}**. The restore probably failed; check AMP's log.")
+        if timeline is not None:
+            text += (f" AMP saved the state from before as **{escape(safety[0].name or safety[0].id)}**."
+                     if safety else " I couldn't find the PreRestore backup AMP should have made first, so check "
+                     "the backup list in AMP before changing anything else.")
+        await self.ctx.audit.record("backup.restore.finished", actor_id=interaction.user.id, shard_id=row.shard_id,
+                                    result="ok" if outcome == "ok" else "failed",
+                                    detail={"backup": name, "outcome": outcome, "safety_copy": bool(safety)})
+        try:
+            await reply(interaction, text, ephemeral=False)
+        except Exception as exc:  # noqa: BLE001 - the interaction may have expired
+            log.warning("could not post how the restore of %s ended: %s", row.name, exc)
 
     def backups_delete(self, row: ServerRow, backup_id: str, name: str):  # noqa: ANN201
         async def delete(interaction: discord.Interaction) -> None:
-            if not self.ctx.access.is_admin(interaction.user):
-                await reply(interaction, "Deleting backups needs the Manage Server permission.")
+            if not await self.may_restore(interaction, row, "backup.delete"):
                 return
             await self._backup_job(interaction, row, "backup.delete",
                                    f"Deleting the backup **{escape(name)}** of {escape(row.name)}.",

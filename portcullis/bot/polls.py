@@ -12,7 +12,7 @@ from typing import Any
 import discord
 from discord import app_commands
 
-from portcullis.bot.base import NONE, Ctx, Module, card, reply, when
+from portcullis.bot.base import NONE, Ctx, Module, card, reply, same_guild, when
 from portcullis.core.relay import escape
 from portcullis.db.features import Poll
 
@@ -61,6 +61,10 @@ class PollVote(discord.ui.DynamicItem[discord.ui.Button[Any]], template=r"poll:(
                              match: re.Match[str]) -> PollVote:
         return cls(int(match["id"]), int(match["opt"]))
 
+    async def interaction_check(self, interaction: discord.Interaction, /) -> bool:
+        assert self.module is not None
+        return await same_guild(self.module.ctx, interaction)
+
     async def callback(self, interaction: discord.Interaction) -> None:
         assert self.module is not None
         await self.module.vote(interaction, self.poll_id, self.option)
@@ -78,6 +82,10 @@ class PollClose(discord.ui.DynamicItem[discord.ui.Button[Any]], template=r"pollc
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Item[Any],
                              match: re.Match[str]) -> PollClose:
         return cls(int(match["id"]))
+
+    async def interaction_check(self, interaction: discord.Interaction, /) -> bool:
+        assert self.module is not None
+        return await same_guild(self.module.ctx, interaction)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         assert self.module is not None

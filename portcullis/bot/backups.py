@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Making and restoring backups from ``/backups``, and ``/schedule list`` for AMP's own schedules.
 
-None of this has run against a real panel. Making a backup copies the settings of the newest
-existing one (the spec doesn't name the values), and AMP may pause or stop the server while it
-captures. Restoring needs Manage Server, and AMP takes a backup of the current state first.
+Making a backup works on a real panel (2026-11-14); restoring and deleting haven't been seen working
+yet. Making one copies the settings of the newest existing one (the spec doesn't name the values),
+and AMP may pause or stop the server while it captures. Restoring needs Manage Server, the backups
+power for that server, and the server's name typed into a form. AMP's spec says it saves a PreRestore
+backup of the current state first; the bot checks that one appeared and follows the restore until
+AMP reports it finished.
 Schedules can be run, switched on and off, deleted and their run history read. Creating them isn't
 here: the step and trigger formats are too involved to send blind.
 """
@@ -17,7 +20,7 @@ from typing import TYPE_CHECKING
 import discord
 from discord import app_commands
 
-from portcullis.bot.base import Module, card, reply, short_error
+from portcullis.bot.base import Module, OwnedView, card, reply, short_error
 from portcullis.bot.errors import plain_error
 from portcullis.core.relay import escape
 from portcullis.core.types import Backup, Schedule
@@ -33,12 +36,12 @@ RUN_ICONS = {"Succeeded": "✅", "CompletedWithErrors": "⚠️", "Failed": "❌
              "Running": "🔄", "Queued": "🕒"}
 
 
-class BackupView(discord.ui.View):
-    """A Make button and a restore picker under the backup list."""
+class BackupView(OwnedView):
+    """A Make button, a restore picker and a delete picker under the backup list of whoever asked."""
 
-    def __init__(self, module: ServerModule, row: ServerRow, items: list[Backup], *, can_make: bool,
+    def __init__(self, module: ServerModule, row: ServerRow, items: list[Backup], *, owner_id: int, can_make: bool,
                  can_restore: bool, can_delete: bool = False) -> None:
-        super().__init__(timeout=300)
+        super().__init__(owner_id, timeout=300)
         self.module = module
         self.row = row
         if can_make:
@@ -46,15 +49,17 @@ class BackupView(discord.ui.View):
                 label="Make a backup", style=discord.ButtonStyle.primary)
             make.callback = self._make  # type: ignore[method-assign]
             self.add_item(make)
-        restorable = [b for b in items if b.status in (None, "Completed", "completed", "Ready", "ready")][:25]
-        if can_restore and restorable:
+        # AMP reports a backup's status as a number the spec doesn't name, so every listed backup is offered.
+        # AMP refuses (409) one that isn't finished, and the bot says so.
+        if can_restore and items:
             options = [discord.SelectOption(
                 label=(b.name or b.id)[:90], value=b.id,
-                description=b.created_at.strftime("%d %b %Y %H:%M") if b.created_at else None) for b in restorable]
+                description=b.created_at.strftime("%d %b %Y %H:%M") if b.created_at else None) for b in items[:25]]
             pick: discord.ui.Select[BackupView] = discord.ui.Select(placeholder="Restore one of these…",
                                                                     options=options, row=1)
             pick.callback = self._restore  # type: ignore[method-assign]
             self.add_item(pick)
+        self.backups = {b.id: b for b in items}
         self.names = {b.id: b.name or b.id for b in items}
         self.kept = {b.id for b in items if b.sticky}
         if can_delete and items:
@@ -79,15 +84,19 @@ class BackupView(discord.ui.View):
         return select.values[0]
 
     async def _restore(self, interaction: discord.Interaction) -> None:
-        from portcullis.bot.server import Confirm
         backup_id = self._chosen(1)
+        if not await self.module.may_restore(interaction, self.row):
+            return
+        backup = self.backups.get(backup_id)
         name = self.names.get(backup_id, backup_id)
+        taken = discord.utils.format_dt(backup.created_at, "f") if backup and backup.created_at else "an unknown time"
         await interaction.response.send_message(
-            f"Restore **{escape(self.row.name)}** to **{escape(name)}**? Everything since then is rolled back "
-            f"and the server may stop. AMP saves the current state first. {UNVERIFIED}", ephemeral=True,
-            view=Confirm(interaction.user.id, self.module.backups_restore(self.row, backup_id, name),
-                         "Restore it"))
-
+            f"**Restore {escape(self.row.name)} to the backup {escape(name)}** (taken {taken})?\n"
+            "Everything on the server since then is rolled back and the server may stop while AMP works. "
+            "AMP's API says it saves the current state as a PreRestore backup first; I check that it did and "
+            "tell you. If you want your own copy too, use **Make a backup** first.\n"
+            f"To go ahead, press **Restore…** and type the server's name. {UNVERIFIED}", ephemeral=True,
+            view=RestorePrompt(self.module, self.row, backup_id, name, interaction.user.id))
 
     async def _delete(self, interaction: discord.Interaction) -> None:
         from portcullis.bot.server import Confirm
@@ -100,9 +109,55 @@ class BackupView(discord.ui.View):
             view=Confirm(interaction.user.id, self.module.backups_delete(self.row, backup_id, name), "Delete it"))
 
 
-class ScheduleView(discord.ui.View):
-    def __init__(self, module: ScheduleModule, row: ServerRow, items: list[Schedule]) -> None:
-        super().__init__(timeout=300)
+class RestorePrompt(OwnedView):
+    """The step between picking a backup and restoring it: a button that asks for the server's name."""
+
+    def __init__(self, module: ServerModule, row: ServerRow, backup_id: str, name: str, owner_id: int) -> None:
+        super().__init__(owner_id, timeout=120)
+        self.module = module
+        self.row = row
+        self.backup_id = backup_id
+        self.name = name
+
+    @discord.ui.button(label="Restore…", style=discord.ButtonStyle.danger)
+    async def go(self, interaction: discord.Interaction, button: discord.ui.Button[RestorePrompt]) -> None:
+        self.stop()
+        await interaction.response.send_modal(RestoreModal(self.module, self.row, self.backup_id, self.name))
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button[RestorePrompt]) -> None:
+        self.stop()
+        await interaction.response.edit_message(content="Cancelled. Nothing was restored.", view=None)
+
+
+class RestoreModal(discord.ui.Modal):
+    """Typing the server's name is the confirmation: a stray click can't roll a server back."""
+
+    def __init__(self, module: ServerModule, row: ServerRow, backup_id: str, name: str) -> None:
+        super().__init__(title=f"Restore {row.name}"[:45], timeout=300)
+        self.module = module
+        self.row = row
+        self.backup_id = backup_id
+        self.backup_name = name
+        self.typed: discord.ui.TextInput[RestoreModal] = discord.ui.TextInput(
+            label="Type the server's name to confirm", placeholder=row.name[:100], max_length=100)
+        self.add_item(self.typed)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not names_match(self.typed.value, self.row.name):
+            await reply(interaction, f"That isn't the name of **{escape(self.row.name)}**, so nothing was restored.")
+            return
+        await self.module.backups_restore(self.row, self.backup_id, self.backup_name)(interaction)
+
+
+def names_match(typed: str, name: str) -> bool:
+    """Case and surrounding spaces don't matter; anything else must match exactly."""
+    return typed.strip().casefold() == name.strip().casefold() and bool(name.strip())
+
+
+class ScheduleView(OwnedView):
+    def __init__(self, module: ScheduleModule, row: ServerRow, items: list[Schedule], owner_id: int) -> None:
+        super().__init__(owner_id, timeout=300)
         self.module = module
         self.row = row
         self.items = {s.id: s for s in items[:25]}
@@ -168,7 +223,7 @@ class ScheduleModule(Module):
             lines.append(f"{'🟢' if s.enabled else '⚪'} **{escape(s.name)}**: {when}")
         embed = card(title=f"Schedules on {row.name}", description="\n".join(lines))
         embed.set_footer(text=UNVERIFIED)
-        await reply(interaction, embed=embed, view=ScheduleView(self, row, items))
+        await reply(interaction, embed=embed, view=ScheduleView(self, row, items, interaction.user.id))
 
     async def act(self, interaction: discord.Interaction, row: ServerRow, schedule: Schedule, action: str) -> None:
         node = f"schedule.{action}"

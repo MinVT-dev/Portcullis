@@ -16,6 +16,7 @@ from typing import Any
 from portcullis.amp.events import field_of, parse_hub_event, state_from, to_int
 from portcullis.core.types import (
     Backup,
+    BackupTimeline,
     DiskUsage,
     Player,
     PowerAction,
@@ -240,6 +241,9 @@ class AmpServerPort:
         return self.hub.subscribe(server)
 
     async def list_backups(self, server: ServerId) -> list[Backup]:
+        return (await self.backup_timeline(server)).backups
+
+    async def backup_timeline(self, server: ServerId) -> BackupTimeline:
         graph = await self.client.files_backups.get_shards_snapshots(server)
         out = []
         for node in graph.nodes or []:
@@ -257,7 +261,8 @@ class AmpServerPort:
             )
         oldest = datetime.min.replace(tzinfo=UTC)
         out.sort(key=lambda b: b.created_at or oldest, reverse=True)
-        return out
+        return BackupTimeline(out, head_id=str(graph.head_id) if graph.head_id else None,
+                              restoring_id=str(graph.restoring_id) if graph.restoring_id else None)
 
     async def create_backup(self, server: ServerId, name: str) -> None:
         """Take a snapshot shaped like the newest existing one.
@@ -276,9 +281,12 @@ class AmpServerPort:
                 "kind": latest.kind.root, "content": latest.content.root, "name": name,
                 "description": "Made from Discord", "sticky": False})
 
-    async def restore_backup(self, server: ServerId, backup_id: str) -> None:
+    async def restore_backup(self, server: ServerId, backup_id: str) -> str | None:
+        """AMP takes a PreRestore snapshot of the current state first (per the spec), then rewinds in
+        the background. The returned node is the one to follow in the timeline."""
         async with _snapshot_errors():
-            await self.client.files_backups.post_shards_snapshots_restore(server, backup_id)
+            node = await self.client.files_backups.post_shards_snapshots_restore(server, backup_id)
+        return str(node.id) if node is not None and node.id is not None else None
 
     async def delete_backup(self, server: ServerId, backup_id: str) -> None:
         async with _snapshot_errors():

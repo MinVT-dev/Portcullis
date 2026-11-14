@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 
 from portcullis.core.types import (
     Backup,
+    BackupTimeline,
     ConsoleLine,
     DiskUsage,
     Player,
@@ -42,6 +43,8 @@ class FakeServer:
     console: list[str] = field(default_factory=list)
     backups: list[Backup] = field(default_factory=list)
     schedules: list[Schedule] = field(default_factory=list)
+    head_id: str | None = None
+    restoring_id: str | None = None
 
 
 def _now() -> datetime:
@@ -60,6 +63,10 @@ class FakeAmpPort:
         self.schedule_calls: list[tuple[str, ServerId, str]] = []
         self.schedule_runs: dict[str, list[ScheduleRun]] = {}
         self.licence_answers: list[tuple[ServerId, bool]] = []
+        # How a restore behaves: "done" (instant), "running" (stays in progress), "failed" (HEAD never moves),
+        # and whether AMP's PreRestore safety copy shows up.
+        self.restore_outcome = "done"
+        self.restore_safety_copy = True
         self._subs: dict[ServerId, set[asyncio.Queue[ServerEvent]]] = {}
 
     # ------------------------------------------------------------------ setup helpers
@@ -156,9 +163,22 @@ class FakeAmpPort:
         self.backup_calls.append(("create", server, name))
         srv.backups.append(Backup(f"b{len(srv.backups)}", name, _now()))
 
-    async def restore_backup(self, server: ServerId, backup_id: str) -> None:
-        self._get(server)
+    async def backup_timeline(self, server: ServerId) -> BackupTimeline:
+        srv = self._get(server)
+        return BackupTimeline(list(srv.backups), head_id=srv.head_id, restoring_id=srv.restoring_id)
+
+    async def restore_backup(self, server: ServerId, backup_id: str) -> str | None:
+        srv = self._get(server)
+        if not any(b.id == backup_id for b in srv.backups):
+            raise FakeAmpError("404 snapshot not found")
         self.backup_calls.append(("restore", server, backup_id))
+        if self.restore_safety_copy:
+            srv.backups.insert(0, Backup(f"pre{len(srv.backups)}", "PreRestore", _now()))
+        if self.restore_outcome == "done":
+            srv.head_id = backup_id
+        elif self.restore_outcome == "running":
+            srv.restoring_id = backup_id
+        return backup_id
 
     async def delete_backup(self, server: ServerId, backup_id: str) -> None:
         srv = self._get(server)

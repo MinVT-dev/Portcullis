@@ -233,7 +233,7 @@ Then, in Discord:
 |---|---|---|
 | Everyone | Any member of your Discord server | Server status, whitelist requests, `/link`, `/notify`, player lookups |
 | Operators | Roles in `PORTCULLIS_OPERATOR_ROLE_IDS` | Power, console, whitelist decisions, moderation, polls and events |
-| Admins | Members with **Manage Server** | Setup panels, alert rules, the audit log, restoring and deleting backups |
+| Admins | Members with **Manage Server** | Setup panels, alert rules, the audit log, and (with an operator role or the backups power too) restoring and deleting backups |
 | Owners | Users in `PORTCULLIS_OWNER_IDS` | Everything, plus handing out operator powers and `/admin bot` |
 
 Owners can give a role a single task, such as "may whitelist but not stop servers", or every task on one server only. Discord's own **Integrations** settings can narrow these permissions further, but never widen them.
@@ -249,12 +249,12 @@ Owners can give a role a single task, such as "may whitelist but not stop server
   - Player names and chat are escaped, so they can't format text or hide links.
 - **Confirm before damage.** These actions ask first:
   - stopping a server with players online;
-  - restoring or deleting a backup;
+  - restoring a backup (you type the server's name to confirm) or deleting one;
   - deleting a schedule;
   - updating a game;
   - stopping the bot.
 - **Everything is audited**, including refused attempts. `/server send` logs only the command word, never its arguments.
-- **Secrets stay out of logs.**
+- **Secrets stay out of logs and replies.** Error text from AMP is masked the same way before it reaches Discord or the audit log.
   - Passwords, tokens and hub tickets are redacted.
   - `.env`, the database and recordings are ignored by git.
 - **Console rules can't freeze the bot.** Patterns that could backtrack badly are refused, and only the first 300 characters of a line are checked.

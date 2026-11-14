@@ -435,3 +435,8 @@ async def test_server_diagnostics(h: Harness) -> None:
 def test_every_state_has_a_colour_and_an_icon(state: ServerState) -> None:
     assert state in STATE_COLOURS
     assert Emojis().state(state) != "❔" or state is ServerState.UNKNOWN
+
+
+def test_plain_error_masks_tokens() -> None:
+    text = plain_error(RuntimeError("POST /api/x?access_token=SECRETVALUE failed"))
+    assert "SECRETVALUE" not in text and "access_token=<redacted>" in text

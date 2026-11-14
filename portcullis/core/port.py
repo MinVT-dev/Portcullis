@@ -13,6 +13,7 @@ from typing import Protocol, runtime_checkable
 
 from portcullis.core.types import (
     Backup,
+    BackupTimeline,
     DiskUsage,
     PowerAction,
     Schedule,
@@ -46,7 +47,13 @@ class AmpPort(Protocol):
         """Copies the kind and content of the newest existing backup. Raises if there is none to copy."""
         ...
 
-    async def restore_backup(self, server: ServerId, backup_id: str) -> None: ...
+    async def backup_timeline(self, server: ServerId) -> BackupTimeline:
+        """The backups plus the one on disk now and the one being restored, for following a restore."""
+        ...
+
+    async def restore_backup(self, server: ServerId, backup_id: str) -> str | None:
+        """Start a restore. Returns the id of the node AMP said it is working on, if it named one."""
+        ...
 
     async def delete_backup(self, server: ServerId, backup_id: str) -> None: ...
 

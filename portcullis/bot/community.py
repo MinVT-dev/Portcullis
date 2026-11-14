@@ -21,6 +21,7 @@ from portcullis.bot.base import (
     WARN,
     Ctx,
     Module,
+    OwnedView,
     as_id,
     card,
     code,
@@ -29,6 +30,7 @@ from portcullis.bot.base import (
     reply,
     role_ids,
     role_problem,
+    same_guild,
     short_error,
     thinking,
     valid_line,
@@ -101,6 +103,10 @@ class WhitelistDecision(discord.ui.DynamicItem[discord.ui.Button[Any]],
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Item[Any],
                              match: re.Match[str]) -> WhitelistDecision:
         return cls(match["action"], int(match["id"]))
+
+    async def interaction_check(self, interaction: discord.Interaction, /) -> bool:
+        assert self.module is not None
+        return await same_guild(self.module.ctx, interaction)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         assert self.module is not None
@@ -662,9 +668,11 @@ class CommunityModule(Module):
             tree.add_command(command)
 
 
-class UnlinkView(discord.ui.View):
+class UnlinkView(OwnedView):
+    """Removes the links of the member who asked; nobody else can press it."""
+
     def __init__(self, module: CommunityModule, user_id: int) -> None:
-        super().__init__(timeout=300)
+        super().__init__(user_id, timeout=300)
         self.module = module
         self.user_id = user_id
 
