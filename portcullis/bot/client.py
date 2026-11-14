@@ -106,6 +106,7 @@ class PortcullisBot(discord.Client):
             self.live,
             self.notifier,
             self.modules.alerts,
+            self.modules.monitor,  # after self.live: thresholds read the state it keeps
             PlayerTracker(self.ctx.players),
             LinkVerifier(self.ctx.links, self.ctx.users, on_linked=self.modules.community.on_linked),
         ]
@@ -163,10 +164,13 @@ class PortcullisBot(discord.Client):
     async def refresh(self) -> None:
         """Sync servers with AMP, poll their states for the profile status, follow them, close due polls."""
         try:
-            new, gone = await self.servers.sync(await self.port.list_servers())
+            infos = await self.port.list_servers()
+            new, gone = await self.servers.sync(infos)
             if new or gone:
                 log.info("servers: %d new, %d gone", len(new), len(gone))
             await self.live.set_reachable(True)
+            with contextlib.suppress(Exception):
+                await self.modules.monitor.servers_seen(infos)  # an update finishing shows up here
         except Exception as exc:  # noqa: BLE001 - keep running on the last known list
             log.warning("could not read the server list from AMP: %s", exc)
             await self.live.set_reachable(False)
