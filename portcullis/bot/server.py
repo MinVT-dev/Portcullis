@@ -549,10 +549,12 @@ class ServerModule(Module):
         await interaction.followup.send(text[:2000], allowed_mentions=NONE)
 
     async def close(self) -> None:
-        for task in list(self.restarts.values()):
+        tasks = [*self.restarts.values(), *self.restore_watch.values()]
+        for task in tasks:
             task.cancel()
-        await asyncio.gather(*self.restarts.values(), return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
         self.restarts.clear()
+        self.restore_watch.clear()
 
     async def server_send(self, interaction: discord.Interaction, server: str, text: str, as_: str = "console") -> None:
         if not await self.in_guild(interaction):

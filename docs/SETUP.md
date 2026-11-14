@@ -180,6 +180,8 @@ Linux or macOS: `.venv/bin/python -m portcullis`.
 
 If a setting is missing it lists every problem and stops. Otherwise it logs in to AMP, then to Discord, registers its slash commands in your server (they appear at once; press Ctrl+R in Discord if not) and reads the server list from AMP every five minutes. Stop it with Ctrl+C. It creates `data\portcullis.db` on first start.
 
+Ctrl+C (or Ctrl+Break, or SIGTERM from a service manager or `docker stop`) stops it cleanly: it greys out the live status cards, closes the Discord connection, leaves the AMP event streams, logs out of AMP and closes the database, then prints `Portcullis stopped` and exits with code 0. That takes a second or two, and each step is skipped after a few seconds if Discord or AMP don't answer. Press Ctrl+C a second time to stop at once. If you start it from a `.bat` file, Windows then asks `Terminate batch job (Y/N)?`; that question comes from Windows, not the bot, and either answer is fine.
+
 ### 8.4 Commands
 
 Three levels: **everyone** in the server; **operators** (members with a role in `PORTCULLIS_OPERATOR_ROLE_IDS`); **admins** (members with **Manage Server**). Owners (`PORTCULLIS_OWNER_IDS`) can do everything. Owners can also give extra roles a single task (for example moderators who may whitelist but not stop servers), or a role that may do everything on one server only (8.6). Replies are only visible to you unless the table says otherwise.

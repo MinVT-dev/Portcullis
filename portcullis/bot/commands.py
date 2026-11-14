@@ -8,6 +8,7 @@ Handlers are plain methods taking an interaction, so tests call them with a fake
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 
 from discord import app_commands
 
@@ -37,6 +38,7 @@ DYNAMIC_ITEMS = (WhitelistDecision, PollVote, PollClose, EventGoing, EventCancel
 
 class Modules:
     def __init__(self, ctx: Ctx) -> None:
+        self.ctx = ctx
         if ctx.board is None:
             ctx.board = StatusBoard(ctx)
         if ctx.live_cards is None:
@@ -70,9 +72,18 @@ class Modules:
                 log.exception("the %s job failed", name)
 
     async def close(self) -> None:
-        await self.ctx.live_cards.close()
-        await self.server.close()
-        await self.audit_feed.close()
+        """Stop the background work the modules own. One failing step never skips the others."""
+        steps: list[tuple[str, Callable[[], Awaitable[None]]]] = [
+            ("server countdowns and restore watchers", self.server.close),
+            ("audit feed", self.audit_feed.close),
+        ]
+        if self.ctx.live_cards is not None:
+            steps.insert(0, ("live cards", self.ctx.live_cards.close))
+        for name, step in steps:
+            try:
+                await step()
+            except Exception:  # noqa: BLE001 - shutting down: log it and keep going
+                log.exception("could not stop the %s cleanly", name)
 
     def register(self, tree: app_commands.CommandTree) -> None:
         for module in self.all():

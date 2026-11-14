@@ -117,6 +117,7 @@ class PortcullisBot(discord.Client):
         self._presence_text: str | None = None
         self._presence_at = 0.0
         self._presence_pending: asyncio.Task[None] | None = None
+        self._shutting_down = False
 
     async def setup_hook(self) -> None:
         self.add_dynamic_items(*DYNAMIC_ITEMS)
@@ -255,15 +256,35 @@ class PortcullisBot(discord.Client):
         self._presence_text = text
         self._presence_at = time.monotonic()
 
+    async def mark_stopped(self) -> int:
+        """Grey out the live cards so nobody trusts a frozen status. Callers bound this with a timeout."""
+        if not self.is_ready():
+            return 0
+        return await self.ctx.live_cards.mark_stopped()
+
     async def close(self) -> None:
-        for task in (self._refresher, self._ticker, self._presence_pending):
-            if task is not None:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-        self._refresher = None
-        await self.modules.close()
-        await self.board.close()
-        await self.notifier.close()
-        await self.relay.close()
+        """Stop every loop, the relay and the Discord connection. Safe to call twice.
+
+        ``/admin bot stop`` and ``python -m portcullis`` both end here. Each step is isolated so one
+        failure (a relay that won't leave its hub, say) still lets the Discord connection close.
+        """
+        if not self._shutting_down:
+            self._shutting_down = True
+            for task in (self._refresher, self._ticker, self._presence_pending):
+                if task is not None:
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await task
+            self._refresher = self._ticker = self._presence_pending = None
+            steps: list[tuple[str, Callable[[], Awaitable[None]]]] = [
+                ("modules", self.modules.close),
+                ("server board", self.board.close),
+                ("notifier", self.notifier.close),
+                ("relay", self.relay.close),
+            ]
+            for name, step in steps:
+                try:
+                    await step()
+                except Exception:  # noqa: BLE001 - shutting down: log it and keep going
+                    log.exception("could not stop the %s cleanly", name)
         await super().close()

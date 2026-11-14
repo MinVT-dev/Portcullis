@@ -11,6 +11,7 @@ a factory for hub connections.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +25,8 @@ from portcullis_api.transport import AmpTransport
 
 if TYPE_CHECKING:
     from portcullis_api import api
+
+log = logging.getLogger(__name__)
 
 
 class AmpClient:
@@ -71,17 +74,27 @@ class AmpClient:
         if self._keep_renewed and self._renewal is None:
             self._renewal = asyncio.create_task(self.auth.run_renewal(), name="amp-session-renewal")
 
-    async def close(self) -> None:
-        if self._renewal is not None:
-            self._renewal.cancel()
+    async def close(self, *, logout_timeout: float = 5.0) -> None:
+        """Stop renewing, log out (bounded by ``logout_timeout``) and close the HTTP session.
+
+        The session is closed even when the logout fails, times out or is cancelled, so no
+        "Unclosed client session" warning or half-closed socket is left for the event loop.
+        """
+        try:
+            if self._renewal is not None:
+                self._renewal.cancel()
+                try:
+                    await self._renewal
+                except (asyncio.CancelledError, Exception):  # noqa: BLE001 - shutting down
+                    pass
+                self._renewal = None
             try:
-                await self._renewal
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001 - shutting down
-                pass
-            self._renewal = None
-        await self.auth.logout()
-        if self._own_session:
-            await self.session.close()
+                await asyncio.wait_for(self.auth.logout(), logout_timeout)
+            except Exception as exc:  # noqa: BLE001 - the session ends on AMP's side anyway when it expires
+                log.debug("AMP logout skipped: %r", exc)
+        finally:
+            if self._own_session and not self.session.closed:
+                await self.session.close()
 
     async def __aenter__(self) -> AmpClient:
         await self.start()

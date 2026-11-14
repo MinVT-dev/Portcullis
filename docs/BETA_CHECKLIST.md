@@ -58,6 +58,7 @@ These use routes from the spec that have never run on a real panel. Try each on 
 - [ ] Leave the bot running for more than 8 hours, so the session token is renewed at least once, and check the relay still posts afterwards.
 - [ ] Restart the AMP panel while the bot is running. The relay should come back by itself within a few minutes.
 - [ ] Change the bot account's password in AMP while it runs. The log should say the login was refused, about once a minute and no faster.
+- [ ] Stop the bot with Ctrl+C on Windows while it shows at least one live status card. Expect `Stopping Portcullis (Ctrl+C)`, then `Portcullis stopped (Ctrl+C)` within a few seconds, no traceback, the card greyed with "Portcullis is stopped, so this card is not updating", and `echo %ERRORLEVEL%` printing 0. Start it again: the card should update at once.
 
 ## What must never be shared
 
