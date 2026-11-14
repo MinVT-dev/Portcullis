@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import discord
 from discord import app_commands
 
-from portcullis.bot.base import MUTED, NONE, Ctx, Module, card, reply, valid_line
+from portcullis.bot.base import MUTED, NONE, Ctx, Module, card, reply, same_guild, valid_line
 from portcullis.core.relay import escape
 from portcullis.db.ops import Event
 
@@ -109,6 +109,10 @@ class EventGoing(discord.ui.DynamicItem[discord.ui.Button[Any]], template=r"even
                              match: re.Match[str]) -> EventGoing:
         return cls(int(match["id"]))
 
+    async def interaction_check(self, interaction: discord.Interaction, /) -> bool:
+        assert self.module is not None
+        return await same_guild(self.module.ctx, interaction)
+
     async def callback(self, interaction: discord.Interaction) -> None:
         assert self.module is not None
         await self.module.going(interaction, self.event_id)
@@ -126,6 +130,10 @@ class EventCancel(discord.ui.DynamicItem[discord.ui.Button[Any]], template=r"eve
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Item[Any],
                              match: re.Match[str]) -> EventCancel:
         return cls(int(match["id"]))
+
+    async def interaction_check(self, interaction: discord.Interaction, /) -> bool:
+        assert self.module is not None
+        return await same_guild(self.module.ctx, interaction)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         assert self.module is not None

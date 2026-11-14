@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -667,8 +668,10 @@ async def test_backups_make_and_restore(h: Harness) -> None:
     assert any(getattr(c, "placeholder", "") == "Restore one of these…" for c in i.replies[-1]["view"].children)
     await h.m.server.backups_restore(await h.ctx.servers.find("Survival"), "b0", "Nightly")(FakeInteraction(operator()))
     assert not any(c[0] == "restore" for c in h.port.backup_calls)  # not an admin
+    h.m.server.sleep = lambda seconds: asyncio.sleep(0)
     await h.m.server.backups_restore(await h.ctx.servers.find("Survival"), "b0", "Nightly")(FakeInteraction(owner()))
     assert h.port.backup_calls[-1] == ("restore", SURVIVAL, "b0") and h.ctx.offline_expected(SURVIVAL)
+    await h.m.server.restore_watch[SURVIVAL]  # tests/test_access_restore.py covers what it reports
 
 
 async def test_backup_without_a_model_explains(h: Harness) -> None:
