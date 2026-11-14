@@ -80,3 +80,14 @@ The recorder redacts these, but look through a capture before sending it. If som
 - [ ] Rename one emoji in the portal: after **Check emojis**, that one falls back to its plain emoji and nothing else changes.
 - [ ] `/server diagnostics` shows a disk figure (`GET /api/Shards/{id}/disk` hasn't run on a real panel).
 - [ ] A schedule named with "restart" shows as **Next restart** on the card.
+
+## Confirmations, /players, audit log and secrets (draft PR, 14 Nov 2026)
+
+- [ ] `/server power` stop on a running server: a private card names the server, the action and the player count. Pressing **Cancel** changes nothing; leaving it for a minute turns it into "Timed out".
+- [ ] Someone else can't press your card's buttons (they get "Only the person who asked can answer this").
+- [ ] `/server power` update: the result message ("finished", "failed" with AMP's reason, or "still updating") appears in the channel within 15 minutes. A game that needs a Steam login and has none in the panel gives the Steam message, not a raw error. The update task's body from `POST /api/Shards/{id}/update` hasn't been captured; record it if you can.
+- [ ] A member without an operator role tries `/server power`: they only see the refusal, and the staff channel gets a **Blocked attempt** card that pings the staff role once.
+- [ ] The audit log channel gets one line per action with ✅, ⛔ or ❌.
+- [ ] `/players` on a busy server shows names, `count` mode hides them from members, `staff` mode hides the server from members.
+- [ ] On Windows: `python -m portcullis secrets migrate` moves both secrets into Credential Manager (look for `portcullis` under Windows Credentials), `.env` no longer holds them, and the bot starts without the plain-text warning.
+- [ ] `secrets rotate DISCORD_TOKEN` with a new token from the portal, restart, then `secrets rollback` with an old one: the bot starts with the new token and refuses the old one with the "Discord refused the bot token" message.

@@ -71,6 +71,7 @@ MAX_IMPORT_BYTES = 1_000_000
 
 # (command, who, what) for /help. "who" is everyone, mod or admin.
 HELP = [
+    ("/players", "everyone", "Who is online on each server"),
     ("/server list", "everyone", "Every server and whether it's online (players: names who's on)"),
     ("/server status", "everyone", "One server's state, who is online and its address"),
     ("/server banner", "everyone", "A status picture of one server or all of them"),
@@ -83,7 +84,7 @@ HELP = [
     ("/event list", "everyone", "Events coming up"),
     ("/health", "everyone", "Is Portcullis working: Discord, AMP, live cards, brand emojis"),
     ("/help", "everyone", "This list"),
-    ("/server power", "mod", "Start, stop, restart, or restart with a warning in game chat"),
+    ("/server power", "mod", "Start, stop, restart, update, or restart with a warning (asks first)"),
     ("/server power-all", "mod", "Start, stop or restart every server, or every server with a tag"),
     ("/server send", "mod", "Send a console command or chat message"),
     ("/server console", "mod", "A server's latest console lines"),
@@ -98,6 +99,7 @@ HELP = [
     ("/user (or right-click → Apps → Portcullis user)", "mod", "A member's links and flags"),
     ("/setup start", "admin", "First-run setup: alerts, live status cards, links, emojis"),
     ("/setup relay · server · bot · live", "admin", "Relays, server settings, bot settings, live status cards"),
+    ("/setup safety · players", "admin", "Confirmations, blocked-attempt reports, who sees /players"),
     ("/alert create · list", "admin", "Your own alerts: CPU, memory, player count or offline, held for N minutes"),
     ("/audit", "admin", "Who did what through Portcullis (stats: counts for 30 days)"),
     ("/admin diagnostics · export · import", "admin", "Health check and settings backup"),

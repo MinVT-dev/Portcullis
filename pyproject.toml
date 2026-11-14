@@ -16,6 +16,8 @@ dependencies = [
     "discord.py>=2.5,<3",
     # Status banners (/server banner and the image board). Pillow's licence (HPND) is AGPL-compatible.
     "pillow>=10.1",
+    # The OS keyring (Windows Credential Manager, macOS Keychain, Secret Service) for the bot's secrets.
+    "keyring>=25",
 ]
 
 [project.optional-dependencies]

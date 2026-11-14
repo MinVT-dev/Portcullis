@@ -13,18 +13,22 @@ from collections.abc import Awaitable, Callable
 from discord import app_commands
 
 from portcullis.bot.admin import AdminModule
-from portcullis.bot.alerts import Alerts, AuditFeed
+from portcullis.bot.alerts import Alerts
+from portcullis.bot.auditlog import AuditLog
 from portcullis.bot.backups import ScheduleModule
 from portcullis.bot.base import Access, Ctx, Module
 from portcullis.bot.board import StatusBoard
 from portcullis.bot.community import CommunityModule, WhitelistDecision
 from portcullis.bot.digest import Digest
 from portcullis.bot.events import EventCancel, EventGoing, EventModule
+from portcullis.bot.guard import StaffAlerts
 from portcullis.bot.joins import JoinWatch
 from portcullis.bot.livecard import LiveCards
 from portcullis.bot.notify import NotifyModule
+from portcullis.bot.players import PlayersModule
 from portcullis.bot.polls import PollClose, PollModule, PollVote
 from portcullis.bot.rules import AlertRuleModule
+from portcullis.bot.safety import SafetyModule
 from portcullis.bot.server import ServerModule
 from portcullis.bot.setup import SetupModule
 
@@ -55,12 +59,15 @@ class Modules:
         self.rules = AlertRuleModule(ctx)
         self.joins = JoinWatch(ctx)
         self.digest = Digest(ctx)
-        self.audit_feed = AuditFeed(ctx)
-        ctx.audit.listeners.append(self.audit_feed)
+        self.players = PlayersModule(ctx)
+        self.safety = SafetyModule(ctx)  # adds to /setup, so it registers after self.setup
+        self.audit_feed = AuditLog(ctx)
+        self.staff_alerts = StaffAlerts(ctx)
+        ctx.audit.listeners += [self.audit_feed, self.staff_alerts]
 
     def all(self) -> list[Module]:
         return [self.server, self.setup, self.community, self.polls, self.notify, self.events, self.schedules,
-                self.rules, self.admin]
+                self.rules, self.admin, self.players, self.safety]
 
     async def tick(self) -> None:
         """Once a minute: event reminders, load and backup alerts, alert rules, the daily summary and milestones."""
@@ -76,6 +83,7 @@ class Modules:
         steps: list[tuple[str, Callable[[], Awaitable[None]]]] = [
             ("server countdowns and restore watchers", self.server.close),
             ("audit feed", self.audit_feed.close),
+            ("staff alerts", self.staff_alerts.close),
         ]
         if self.ctx.live_cards is not None:
             steps.insert(0, ("live cards", self.ctx.live_cards.close))

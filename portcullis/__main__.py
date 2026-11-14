@@ -103,6 +103,10 @@ def stopped(reason: str) -> None:
 
 
 def main() -> int:
+    if sys.argv[1:2] == ["secrets"]:  # python -m portcullis secrets ... (portcullis/secretstore.py)
+        from portcullis.secretstore import cli
+
+        return cli(sys.argv[2:])
     try:
         settings = load()
     except ConfigError as exc:

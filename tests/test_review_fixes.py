@@ -160,7 +160,8 @@ async def test_stop_does_not_wait_long_for_the_player_count(h: Harness) -> None:
     started = asyncio.get_running_loop().time()
     await h.m.server.server_power(i, "Survival", "stop")
     assert asyncio.get_running_loop().time() - started < 2.9
-    assert "someone may be playing" in i.text
+    fields = {f.name: f.value for f in i.embed.fields}
+    assert fields["Players online"] == "AMP didn't say"
 
 
 # ------------------------------------------------------------------------------ warned restart
@@ -178,7 +179,8 @@ async def test_two_warned_restarts_at_once_start_one_countdown(h: Harness) -> No
     row = await h.ctx.servers.get(SURVIVAL)
     assert row is not None
     first, second = FakeInteraction(operator()), FakeInteraction(operator())
-    await asyncio.gather(h.m.server.warned_restart(first, row), h.m.server.warned_restart(second, row))
+    await asyncio.gather(h.m.server.warned_restart(first, row, confirmed=True),
+                         h.m.server.warned_restart(second, row, confirmed=True))
     texts = sorted((first.text, second.text))
     assert "already counting down" in texts[0] and "Restarting" in texts[1]
     await asyncio.sleep(0.01)

@@ -48,6 +48,7 @@ sys.path.insert(0, str(ROOT))
 from portcullis.amp import AmpClient, Credentials  # noqa: E402
 from portcullis.amp.events import state_from  # noqa: E402
 from portcullis.config import load_env_file  # noqa: E402
+from portcullis.secretstore import find  # noqa: E402
 from portcullis_api.errors import AmpError, AuthFailed, LoginNotSupported  # noqa: E402
 from portcullis_api.live import DEFAULT_TENANT  # noqa: E402
 from portcullis_api.redact import RedactingFilter, Redactor  # noqa: E402
@@ -249,7 +250,8 @@ async def run(args: argparse.Namespace) -> int:
     if not url or not username:
         print("Set AMP_URL and AMP_USERNAME in .env (see .env.example) or pass --url/--username.")
         return 2
-    password = os.environ.get("AMP_PASSWORD") or getpass.getpass(f"AMP password for {username}: ")
+    stored = find("AMP_PASSWORD", os.environ, {})  # environment (and .env, loaded above), file or keyring
+    password = stored.value if stored else getpass.getpass(f"AMP password for {username}: ")
 
     redactor = CaptureRedactor(scrub_ips=not args.keep_ips)
     redactor.add(password)

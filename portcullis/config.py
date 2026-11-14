@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from portcullis import secretstore
 from portcullis_api.redact import RedactingFilter, Redactor
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
@@ -37,6 +38,9 @@ class Settings:
     operator_role_ids: tuple[int, ...] = ()  # Discord roles allowed to start, stop and restart servers
     database: Path = Path("data/portcullis.db")
     log_level: str = "INFO"
+    # Where each secret came from (``secretstore.WHERE`` keys), and warnings to log at start-up.
+    secret_sources: tuple[tuple[str, str], ...] = ()
+    notes: tuple[str, ...] = ()
 
     def secrets(self) -> list[str]:
         return [s for s in (self.amp_password, self.discord_token) if s]
@@ -95,8 +99,10 @@ def load(
     env_file: Path | None = Path(".env"),
     require_discord: bool = True,
 ) -> Settings:
-    merged: dict[str, str] = dict(parse_env_file(env_file)) if env_file else {}
-    merged.update(os.environ if env is None else env)
+    dotenv = parse_env_file(env_file) if env_file else {}
+    environ = os.environ if env is None else env
+    merged: dict[str, str] = dict(dotenv)
+    merged.update(environ)
 
     def get(name: str) -> str:
         return (merged.get(name) or "").strip()
@@ -117,13 +123,29 @@ def load(
     username = get("AMP_USERNAME")
     if not username:
         problems.append("AMP_USERNAME is missing. Use a dedicated bot account, not your own.")
-    password = merged.get("AMP_PASSWORD") or ""
-    if not password:
-        problems.append("AMP_PASSWORD is missing.")
+    # Secrets: environment, *_FILE, OS keyring, then .env (secretstore has the order and why).
+    found_password = secretstore.find("AMP_PASSWORD", environ, dotenv, problems)
+    password = found_password.value if found_password else ""
+    if not password and not get("AMP_PASSWORD_FILE"):
+        problems.append("AMP_PASSWORD is missing. Store it with `python -m portcullis secrets set AMP_PASSWORD`.")
 
-    token = get("DISCORD_TOKEN") or None
-    if require_discord and not token:
-        problems.append("DISCORD_TOKEN is missing. Copy it from the Discord developer portal (Bot tab).")
+    found_token = secretstore.find("DISCORD_TOKEN", environ, dotenv, problems)
+    token = found_token.value.strip() if found_token else None
+    if require_discord and not token and not get("DISCORD_TOKEN_FILE"):
+        problems.append("DISCORD_TOKEN is missing. Copy it from the Discord developer portal (Bot tab) and store "
+                        "it with `python -m portcullis secrets set DISCORD_TOKEN`.")
+
+    sources = tuple((name, found.source) for name, found in (("AMP_PASSWORD", found_password),
+                                                             ("DISCORD_TOKEN", found_token)) if found)
+    plain = [name for name, source in sources if source == ".env"]
+    plaintext = (get("PORTCULLIS_PLAINTEXT_SECRETS") or "warn").lower()
+    notes: list[str] = []
+    if plaintext not in secretstore.PLAINTEXT_MODES:
+        problems.append("PORTCULLIS_PLAINTEXT_SECRETS must be warn, refuse or allow.")
+    elif plain and plaintext == "refuse":
+        problems.append(secretstore.plaintext_note(plain) + " (PORTCULLIS_PLAINTEXT_SECRETS=refuse)")
+    elif plain and plaintext == "warn":
+        notes.append(secretstore.plaintext_note(plain))
 
     def id_list(name: str, what: str) -> list[int]:
         ids: list[int] = []
@@ -167,6 +189,8 @@ def load(
         operator_role_ids=tuple(operator_role_ids),
         database=database,
         log_level=level,
+        secret_sources=sources,
+        notes=tuple(notes),
     )
 
 
@@ -179,6 +203,8 @@ def setup_logging(settings: Settings, redactor: Redactor | None = None) -> Redac
     for handler in logging.getLogger().handlers:
         if not any(isinstance(f, RedactingFilter) for f in handler.filters):
             handler.addFilter(RedactingFilter(redactor))
+    for note in settings.notes:
+        logging.getLogger("portcullis").warning(note)
     risk = plain_http_risk(settings.amp_url)
     if risk:
         logging.getLogger("portcullis").warning(risk)

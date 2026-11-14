@@ -82,15 +82,49 @@ notepad .env
 |---|---|---|
 | `AMP_URL` | recorder | The panel address with its port, as your browser shows it, e.g. `http://192.168.1.10:8443`. Use `https://` if the panel is behind HTTPS. No path such as `/api`. |
 | `AMP_USERNAME` | recorder | The bot user from step 5, e.g. `portcullis`. |
-| `AMP_PASSWORD` | recorder, bot | For the recorder alone, **leave this empty**: it asks for the password when it starts, and the typing doesn't show. The bot can't ask, so to run the bot put the password here. |
-| `DISCORD_TOKEN` | bot | The bot token from section 8.1. |
+| `AMP_PASSWORD` | recorder, bot | **Leave this empty.** Store it in the OS keyring instead (6.1). The recorder asks for it when it starts if it finds none. |
+| `DISCORD_TOKEN` | bot | **Leave this empty** too, and store the token from section 8.1 in the keyring (6.1). |
 | `DISCORD_GUILD_ID` | bot | Your Discord server's id (section 8.2). The bot only works there. |
 | `PORTCULLIS_OWNER_IDS` | bot | Your own Discord user id. Owners can use every command. |
 | `PORTCULLIS_OPERATOR_ROLE_IDS` | bot | Ids of the Discord roles allowed to start, stop and restart servers, comma separated. |
 | `PORTCULLIS_DB` | bot | Optional; the default is `data/portcullis.db`. |
 | `PORTCULLIS_LOG_LEVEL` | recorder, bot | Optional: `DEBUG`, `INFO`, `WARNING` or `ERROR`. |
+| `AMP_PASSWORD_FILE`, `DISCORD_TOKEN_FILE` | bot | Optional: a file holding the secret, for Docker or systemd secrets (6.1). |
+| `PORTCULLIS_PLAINTEXT_SECRETS` | bot | Optional: `warn` (default) logs a warning at every start while a secret is in `.env`; `refuse` stops the bot instead; `allow` says nothing. |
+| `PORTCULLIS_KEYRING` | bot | Optional: `off` skips the OS keyring, for a machine where it would prompt or hang. |
 
 Real environment variables override `.env` values.
+
+### 6.1 Secrets: the AMP password and the Discord token
+
+Anyone who has these two can run your servers and speak as the bot, so they don't belong in a text file. Portcullis looks for each one in this order and uses the first it finds:
+
+1. an environment variable (`AMP_PASSWORD`, `DISCORD_TOKEN`), for services and containers;
+2. a file named by `AMP_PASSWORD_FILE` or `DISCORD_TOKEN_FILE` (Docker and systemd secrets);
+3. the **OS keyring**: Windows Credential Manager, the macOS Keychain, or the Secret Service on Linux (GNOME Keyring, KWallet). This is the normal place;
+4. `.env`, as plain text. This still works, so an existing install keeps running after an update, but the bot logs a warning at every start until you move the secret.
+
+Store them in the keyring (the typing doesn't show, and you type each one twice):
+
+```powershell
+.\.venv\Scripts\python.exe -m portcullis secrets set AMP_PASSWORD
+.\.venv\Scripts\python.exe -m portcullis secrets set DISCORD_TOKEN
+.\.venv\Scripts\python.exe -m portcullis secrets status
+```
+
+`status` says where each secret comes from, never its value, and warns about an old copy left in `.env` or a `.env` other users can read.
+
+**Moving an existing install.** If your secrets are in `.env` today, run `python -m portcullis secrets migrate`. It copies each one into the keyring, checks it reads back the same, and only then replaces the line in `.env` with a comment. Restart the bot afterwards. Copies of the old file (backups, a synced folder) still hold the old values; if that file was ever shared, rotate both secrets.
+
+**Rotating a secret** (a leak, a new password, or just routine):
+
+1. Make the new one first: reset the token on the Bot tab of the Discord developer portal, or change the bot user's password in AMP. The old one stops working at once.
+2. `python -m portcullis secrets rotate DISCORD_TOKEN` (or `AMP_PASSWORD`). The old value is kept next to the new one.
+3. Restart Portcullis. If the new value is wrong, `python -m portcullis secrets rollback DISCORD_TOKEN` puts the previous one back.
+
+`secrets delete NAME` removes one from the keyring. With no keyring on the machine (a headless Linux server), use an environment variable or a `_FILE` readable only by the bot's user (`chmod 600`).
+
+The secrets never appear in the bot's log, in Discord replies, embeds or the audit log: every log line and every error shown in Discord passes through a filter that replaces them with `<redacted>`.
 
 ## 7. Record live events
 
@@ -170,7 +204,7 @@ It isn't known yet whether AMP 3 counts the hub's negotiate request and its WebS
 
 ### 8.3 Start it
 
-The bot logs in to AMP, so run it on the PC that can reach the panel, like the recorder. `AMP_PASSWORD` must be filled in (section 6).
+The bot logs in to AMP, so run it on the PC that can reach the panel, like the recorder. `AMP_PASSWORD` and `DISCORD_TOKEN` must be stored (section 6.1).
 
 ```powershell
 .\.venv\Scripts\python.exe -m portcullis
@@ -188,11 +222,12 @@ Three levels: **everyone** in the server; **operators** (members with a role in 
 
 | Command | Who | What it does |
 |---|---|---|
+| `/players [server]` | everyone | Who is online on each server, with the count and the player limit when AMP knows it. Admins choose per server whether members see names, only the count, or nothing (`/setup players`). Some games don't report players to AMP; those show 0 with a note. |
 | `/server list [players]` | everyone | Every server with its state and player count. With `players`, also names everyone online. |
 | `/server status <server>` | everyone | State, players, CPU, memory and how long it has been up. Operators also get Start, Stop and Restart buttons, plus the server's quick commands (8.6). If the server allows it, members get a Start button while it is stopped. Shows the address players connect to, when one is set. |
 | `/server diagnostics <server>` | operators | CPU, memory and disk as bars against their limits, how long it has been up, and AMP's last error message. AMP 3 has no TPS figure, so none is shown. The disk figure hasn't been seen on a real panel. |
 | `/server banner [server] [theme] [public]` | everyone | A picture with a card per server (up to 10): state in words, players, CPU, memory, uptime and address. Dark or light. Only you see it, unless an operator sets `public`. |
-| `/server power <server> <action>` | operators | Start, stop, restart, or restart with a warning (says so in game chat 5 minutes and 1 minute before, with a Cancel button). Also update the game, sleep and wake, which ask first (update and sleep) and haven't been seen working on a real panel. Stopping or restarting asks first when players are online. The reply is public, so the channel sees who did it. |
+| `/server power <server> <action>` | operators | Start, stop, restart, or restart with a warning (says so in game chat 5 minutes and 1 minute before, with a Cancel button). Also update the game, sleep and wake, which haven't been seen working on a real panel. Every action asks first, privately: a card names the server, the action and how many players are on, and only you can answer it. It expires after a minute. Your roles are checked again when you confirm. The result is public, so the channel sees who did it. After an update, Portcullis follows the server and posts how it ended (finished, failed with AMP's reason, or still running after 14 minutes). There is no **kill**: AMP 3 has no route for it, so use stop, or kill the server in the AMP panel. |
 | `/server power-all <action> [tag]` | operators | Starts or stops every server you may run, or only those with an AMP tag. Asks first. |
 | `/server send <server> <text> [as]` | operators | Sends one console command, or a chat message if the server has a chat command set (8.6). Only the command word is logged, never its arguments. Commands on the server's blocked list (8.6, Console rules) are refused for everyone but owners. |
 | `/server console <server> [lines]` | operators | The latest console lines (20 by default, up to 50) from AMP's own history, without needing a console relay. AMP's own lines can be mixed in. Lines matching the server's hide rules are left out. |
@@ -217,6 +252,8 @@ Three levels: **everyone** in the server; **operators** (members with a role in 
 | `/setup start` | admins | The first-run wizard: five steps (AMP, alerts, live status cards, Panel and Support links, brand emojis), each marked done or not. Each pick saves at once. |
 | `/setup live <server> [channel]` | admins | Posts a live status card for one server in a channel, or with no channel, removes its card (8.6). |
 | `/setup relay`, `/setup server <server>`, `/setup bot` | admins | Relay channels, per-server settings, and bot-wide settings (8.6). |
+| `/setup safety [confirm] [staff_channel] [staff_role] [denied_alerts] [clear]` | admins | Whether starting a server asks first too (it does by default; stop, restart and update always ask), and where blocked attempts are reported (8.6, Safety). With no options, shows the current settings. |
+| `/setup players <show> [server]` | admins | What `/players` shows members: names (the default), only the count, or nothing. Staff always see names. Leave out `server` to set the default. |
 | `/alert create <metric> [threshold] [minutes] [server] [channel] [role]` | admins | Your own alert: CPU or memory at or above a percentage, more or fewer players than a number, or offline, for `minutes` (default 5, 0 = at once). Leave out `server` to watch every server, and `channel` to post in the alert channel. It fires once, pings only `role`, and posts again when it clears. Up to 25 rules. These are Portcullis's own checks, once a minute, not AMP triggers. |
 | `/alert list` | admins | Your alert rules, with **Mute 1 hour**, **Unmute** and **Delete**. |
 | `/audit [member] [server] [action] [result] [export] [stats]` | admins | Who did what through Portcullis, refused attempts included. `export` sends it all as a JSON file. `stats` shows counts for the last 30 days instead: most common actions, most active members, and results. |
@@ -276,12 +313,14 @@ Two notes:
 The rest of `/setup bot`:
 
 - **Daily summary and count channel**: a channel for a daily summary (yesterday's players, new players and peak) and play-time milestones, and a channel, voice channels included, renamed to the number online (needs Manage Channels, and lags a few minutes).
-- **Alert and log channels**: clear a picker to turn that channel off. An **alerts** channel (a server crashes, stops without `/server power`, stays above its CPU or memory threshold, or hasn't been backed up for the set number of days; also when AMP can't be reached for 3 minutes and when it's back), a **moderator notes** channel (watchlist and name-rule joins) and an **audit log** channel (every action as it happens, at most 20 posts a minute).
+- **Alert and log channels**: clear a picker to turn that channel off. An **alerts** channel (a server crashes, stops without `/server power`, stays above its CPU or memory threshold, or hasn't been backed up for the set number of days; also when AMP can't be reached for 3 minutes and when it's back), a **moderator notes** channel (watchlist and name-rule joins) and an **audit log** channel: one line per admin action as it happens, such as `✅ ok · server.power.stop · Survival · by @Min · confirmed` or `⛔ denied · server.power.stop · Survival · by @Guest`. Each line has the result (ok, denied or failed), the action, the server, who asked, and for a failure the reason with any secret masked. At most 20 lines a minute; the rest are counted and stay in `/audit`.
 - **Roles**: a role pinged on alerts; a role whose members' whitelist requests are approved at once if they ask for a name they have linked; and a role given to members who link a name. The last two can't be `@everyone`, a role with admin-type permissions, or a role above the bot's own; the bot needs **Manage Roles** to hand one out.
 - **Whitelist rules**: whether `/whitelist request` only takes names the member has proved with `/link`; whether donators asking for their linked name are approved at once, like the auto-approve role; and an optional message (up to 500 characters) added to what an approved member is told.
 - **Options**: the time zone for `/event` times (such as `Europe/Amsterdam`), the backup age in days that triggers an alert, name rules: words that flag a joining player's name to moderators (look-alike letters such as `4` for `a` are caught too), and the live server board style: `embed` (text, the default) or `image` (the same picture as `/server banner`).
 - **Who can do what (owners)**: extra roles per task (power, console, whitelist, moderation, polls, events, backups). Only owners can change this, and `/admin import` skips it unless an owner runs the import.
 - **Check setup** lists what is missing: no relay, a game command not filled in, a channel the bot can't post in, and similar.
+
+**Safety** (`/setup safety`). Power actions ask first, and only the member who asked can confirm (8.4). When someone without the right role tries a power action, a backup restore or a backup delete, they only see "You need an operator role for that." Staff get a **Blocked attempt** card in the staff channel naming the member, the action and the server, and the staff role is pinged if one is set. One card per member and action every 10 minutes; repeats are counted on the next card. Nothing is reported until a staff channel is set. The full history is in `/audit`.
 
 Player names are checked before they go into a console command: names with line breaks or characters such as `;`, `|`, `&`, quotes or `$` are refused, so a name can't add a second command.
 

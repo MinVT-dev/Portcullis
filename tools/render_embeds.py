@@ -29,19 +29,33 @@ sys.path.insert(0, str(ROOT))
 
 from portcullis.bot import admin as admin_module  # noqa: E402
 from portcullis.bot.admin import AdminModule  # noqa: E402
+from portcullis.bot.auditlog import audit_line  # noqa: E402
+from portcullis.bot.base import card  # noqa: E402
 from portcullis.bot.cards import diagnostics_embed, link_buttons, status_embed  # noqa: E402
 from portcullis.bot.emojis import EMOJI, SET, Emojis  # noqa: E402
+from portcullis.bot.guard import Confirm, power_question  # noqa: E402
+from portcullis.bot.players import server_block  # noqa: E402
 from portcullis.bot.refresh import Pacer  # noqa: E402
 from portcullis.bot.setup import SetupModule  # noqa: E402
 from portcullis.core.live import Summary  # noqa: E402
-from portcullis.core.types import DiskUsage, Player, Schedule, ServerId, ServerState, ServerStatus  # noqa: E402
-from portcullis.db.repos import ServerRow  # noqa: E402
+from portcullis.core.types import (  # noqa: E402
+    DiskUsage,
+    Player,
+    PowerAction,
+    Schedule,
+    ServerId,
+    ServerState,
+    ServerStatus,
+)
+from portcullis.db.repos import AuditEntry, ServerRow  # noqa: E402
 
 NOW = datetime(2026, 11, 14, 20, 0, tzinfo=UTC)
 EMOJI_DIR = ROOT / "docs" / "branding" / "emoji"
 AVATAR = ROOT / "docs" / "branding" / "png" / "portcullis-avatar-512.png"
 PLACEHOLDER = ROOT / "portcullis" / "assets" / "fallback" / "game-logo.png"
-CHANNELS = {55: "server-status", 56: "alerts"}
+CHANNELS = {55: "server-status", 56: "alerts", 57: "staff"}
+USERS = {30: "Min", 20: "Guest42"}
+ROLES = {800: "Staff"}
 
 
 def data_uri(path: Path) -> str:
@@ -90,6 +104,10 @@ def markdown(text: str) -> str:
     out = re.sub(r"&lt;t:(\d+):R&gt;", lambda m: f'<span class="ts">{relative(int(m.group(1)))}</span>', out)
     out = re.sub(r"&lt;#(\d+)&gt;", lambda m: f'<span class="mention">#{CHANNELS.get(int(m.group(1)), "channel")}'
                                              "</span>", out)
+    out = re.sub(r"&lt;@&amp;(\d+)&gt;", lambda m: f'<span class="mention">@{ROLES.get(int(m.group(1)), "role")}'
+                                                  "</span>", out)
+    out = re.sub(r"&lt;@(\d+)&gt;", lambda m: f'<span class="mention">@{USERS.get(int(m.group(1)), "member")}'
+                                             "</span>", out)
     out = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", out)
     out = re.sub(r"`([^`]+)`", r"<code>\1</code>", out)
     out = re.sub(r"\\([_*~|`>\\])", r"\1", out)
@@ -134,16 +152,24 @@ def embed_html(embed: discord.Embed) -> str:
 def buttons_html(view: discord.ui.View | None) -> str:
     if view is None:
         return ""
-    items = "".join(f'<span class="button">{html.escape(b.label or "")} <span class="ext">↗</span></span>'
-                    for b in view.children if isinstance(b, discord.ui.Button))
+    def one(b: discord.ui.Button[Any]) -> str:
+        if b.url:
+            return f'<span class="button">{html.escape(b.label or "")} <span class="ext">↗</span></span>'
+        danger = " danger" if b.style is discord.ButtonStyle.danger else ""
+        return f'<span class="button{danger}">{html.escape(b.label or "")}</span>'
+
+    items = "".join(one(b) for b in view.children if isinstance(b, discord.ui.Button))
     return f'<div class="buttons">{items}</div>'
 
 
-def message(embed: discord.Embed, view: discord.ui.View | None = None, *, command: str | None = None) -> str:
+def message(embed: discord.Embed | None, view: discord.ui.View | None = None, *, command: str | None = None,
+            text: str | None = None, only_you: bool = False) -> str:
     used = f'<div class="used"><span class="slash">used</span> {html.escape(command)}</div>' if command else ""
+    body = (f'<div class="text">{markdown(text)}</div>' if text else "") + (embed_html(embed) if embed else "")
+    note = '<div class="only">Only you can see this</div>' if only_you else ""
     return (f'<div class="message">{used}<img class="avatar" src="{data_uri(AVATAR)}" alt="">'
             f'<div class="content"><div class="head"><span class="name">Portcullis</span><span class="app">APP'
-            f'</span><span class="when">Today at 20:00</span></div>{embed_html(embed)}{buttons_html(view)}'
+            f'</span><span class="when">Today at 20:00</span></div>{body}{buttons_html(view)}{note}'
             "</div></div>")
 
 
@@ -181,6 +207,9 @@ code{background:#1E1F22;border-radius:3px;padding:0 3px;font-size:85%;font-famil
 .buttons{display:flex;gap:8px;margin-top:8px}
 .button{background:#4E5058;color:#fff;font-size:14px;font-weight:500;padding:6px 16px;border-radius:3px}
 .ext{font-size:12px;opacity:.8}
+.button.danger{background:#DA373C}
+.text{font-size:15px;line-height:1.375;margin-top:2px}
+.only{font-size:12px;color:#949BA4;margin-top:6px}
 """
 
 
@@ -270,6 +299,62 @@ async def setup_start(emojis: Emojis) -> str:
     return message(embed, command="/setup start")
 
 
+def power_confirm() -> str:
+    async def nothing(_interaction: Any) -> None:
+        return None
+
+    stop = power_question("Valheim Vikings", PowerAction.STOP, online=3, expires=NOW + timedelta(seconds=60))
+    update = power_question("Space Station", PowerAction.UPDATE, online=0, expires=NOW + timedelta(seconds=60))
+    return (message(stop, Confirm(1, nothing, "Stop Valheim Vikings"), command="/server power", only_you=True)
+            + message(update, Confirm(1, nothing, "Update Space Station"), command="/server power", only_you=True)
+            + message(None, text="Stopping **Valheim Vikings** (asked by <@30>)."))
+
+
+def blocked_attempt() -> str:
+    embed = card(title="Blocked attempt", kind="warn",
+                 description="<@20> tried something their roles don't allow. Nothing changed.",
+                 footer="They only saw a plain refusal. Full history: /audit")
+    embed.add_field(name="Member", value="<@20> (`20`)", inline=True)
+    embed.add_field(name="Action", value="Stop", inline=True)
+    embed.add_field(name="Server", value="Valheim Vikings", inline=True)
+    embed.add_field(name="Earlier tries", value="2 more in the last 10 minutes", inline=False)
+    refused = message(None, text="You need an operator role for that.", command="/server power", only_you=True)
+    return refused + message(embed, text="<@&800>")
+
+
+def players_list(emojis: Emojis) -> str:
+    online = ServerStatus(id=VALHEIM.shard_id, state=ServerState.RUNNING, max_players=10,
+                          players=players("Ragnhild", "Torvald", "Sigrun"))
+    counted = ServerStatus(id=SURVIVAL.shard_id, state=ServerState.RUNNING, max_players=20,
+                           players=players("Steve", "Alex", "Notch", "Jeb"))
+    silent = ServerStatus(id=ENGINEERS.shard_id, state=ServerState.RUNNING, max_players=8)
+    blocks = [server_block(VALHEIM, online, "names", False, emojis.state(ServerState.RUNNING)),
+              server_block(SURVIVAL, counted, "count", False, emojis.state(ServerState.RUNNING)),
+              server_block(ENGINEERS, silent, "names", False, emojis.state(ServerState.RUNNING))]
+    embed = card(title=f"{emojis['players']} Players online", description="\n".join(b for b in blocks if b))
+    return message(embed, command="/players", only_you=True)
+
+
+def audit_channel() -> str:
+    entries = [
+        (AuditEntry(1, "", 30, "server.power.stop", "a1", None, "ok", {"confirmed": True}), "Valheim Vikings"),
+        (AuditEntry(2, "", 20, "server.power.stop", "a1", None, "denied", None), "Valheim Vikings"),
+        (AuditEntry(3, "", 30, "server.power.update", "c3", None, "failed",
+                    {"error": "AMP is busy with another job on this server"}), "Space Station"),
+        (AuditEntry(4, "", 30, "server.power.update.finished", "b2", None, "ok", {"outcome": "ok"}), "Survival"),
+    ]
+    return "".join(message(None, text=audit_line(entry, server)) for entry, server in entries)
+
+
+def safety_settings() -> str:
+    embed = card(title="Safety settings")
+    embed.add_field(name="Confirmations", value="Ask before start, stop, restart and update", inline=False)
+    embed.add_field(name="Blocked attempts go to", value="<#57>", inline=True)
+    embed.add_field(name="Ping", value="<@&800>", inline=True)
+    embed.add_field(name="Reports", value="On", inline=True)
+    return message(embed, command="/setup safety", text="Saved.", only_you=True)
+
+
 async def main(out: Path) -> None:
     brand, plain = uploaded(), Emojis()
     EMOJI.found = brand.found  # state_text reads the shared set
@@ -279,6 +364,14 @@ async def main(out: Path) -> None:
         "live-card-states": ("The same card offline, busy and waiting for the licence (EULA).", other_states(brand)),
         "diagnostics": ("/server diagnostics for one server.", diagnostics(brand)),
         "health": ("/health: one line per part of Portcullis.", await health(brand)),
+        "power-confirm": ("/server power asks first, privately. Only the member who asked can answer; it expires "
+                          "after a minute. The result is posted for everyone.", power_confirm()),
+        "blocked-attempt": ("A member without the role tries to stop a server: they see a plain refusal, staff get "
+                            "this card.", blocked_attempt()),
+        "players": ("/players. Survival is set to show the count only; Space Station's game doesn't report "
+                    "players to AMP.", players_list(brand)),
+        "audit-log": ("The audit log channel: one line per action, with its result.", audit_channel()),
+        "setup-safety": ("/setup safety after picking a staff channel and role.", safety_settings()),
         "setup-start": ("/setup start on a new install, emojis not uploaded yet. The selects and buttons under "
                         "it are not drawn.", await setup_start(plain)),
     }

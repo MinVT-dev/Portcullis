@@ -21,7 +21,7 @@ from portcullis.core.relay import ChatLine, GameHooks
 from portcullis.core.types import Player, PlayerJoined, PlayerLeft, PowerAction, ServerId, ServerState, StateChanged
 from portcullis.db.database import Database
 from tests.fakes.amp import FakeAmpError, FakeAmpPort
-from tests.fakes.discord import FakeChannel, FakeClient, FakeInteraction, FakeMember, FakeRole
+from tests.fakes.discord import FakeChannel, FakeClient, FakeInteraction, FakeMember, FakeRole, press_yes
 
 GUILD = 1
 OWNER, OPERATOR_ROLE = 10, 500
@@ -131,9 +131,9 @@ async def test_status_embed_and_power_buttons_for_mods_only(h: Harness) -> None:
     press = FakeInteraction(operator())
     await view.children[1].callback(press)
     assert h.port.power_calls == []  # a player is online, so it asks first
-    assert "1 player is online" in press.text
-    confirm = FakeInteraction(operator())
-    await press.replies[-1]["view"].children[0].callback(confirm)
+    fields = {f.name: f.value for f in press.embed.fields}
+    assert press.embed.title == "Stop Survival?" and fields["Players online"] == "1"
+    await press_yes(press)
     assert h.port.power_calls == [(SURVIVAL, PowerAction.STOP)]
 
 
@@ -166,7 +166,10 @@ async def test_power_permissions_and_audit(h: Harness) -> None:
     assert "operator role" in i.text and h.port.power_calls == []
     i = FakeInteraction(operator())
     await h.m.server.server_power(i, "Creative", "start")
+    assert h.port.power_calls == [] and i.embed.title == "Start Creative?"
+    i = await press_yes(i)
     assert h.port.power_calls == [(CREATIVE, PowerAction.START)]
+    assert i.edits[-1]["view"] is None  # the private question is closed
     assert i.replies[-1]["ephemeral"] is False and "Starting **Creative** (asked by <@30>)" in i.text
     results = [(e.action, e.result) for e in await h.ctx.audit.query()]
     assert results == [("server.power.start", "ok"), ("server.power.stop", "denied")]
@@ -179,6 +182,7 @@ async def test_power_failure_and_bad_action(h: Harness) -> None:
     h.port.power = broken  # type: ignore[method-assign]
     i = FakeInteraction(operator())
     await h.m.server.server_power(i, "Survival", "restart")
+    i = await press_yes(i)
     assert "Couldn't restart Survival" in i.text
     i = FakeInteraction(owner())
     await h.m.server.server_power(i, "Survival", "explode")

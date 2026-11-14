@@ -12,6 +12,12 @@ from portcullis_api.auth import Credentials, TokenManager
 from portcullis_api.testing import PASSWORD, USERNAME, FakeAmp
 
 
+@pytest.fixture(autouse=True)
+def no_os_keyring(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests never read or write the real keyring of the machine they run on."""
+    monkeypatch.setenv("PORTCULLIS_KEYRING", "off")
+
+
 @pytest.fixture
 def fake() -> FakeAmp:
     return FakeAmp()
