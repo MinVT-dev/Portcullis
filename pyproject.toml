@@ -22,7 +22,7 @@ dependencies = [
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
-    "ruff>=0.6",
+    "ruff>=0.17.4",
     # Pinned so regenerating from the same spec gives the same code.
     "datamodel-code-generator==0.90.0",
     "black==26.10.1",
