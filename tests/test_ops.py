@@ -9,6 +9,7 @@ import io
 import json
 import logging
 import logging.handlers
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -375,9 +376,43 @@ def test_banner_hides_secrets_and_falls_back_to_ascii(tmp_path: Path) -> None:
     for text in (fancy, plain):
         assert SECRET not in text and TOKEN not in text
         assert "http://10.0.0.1:8443" in text and "metrics off" in text and "a warning" in text
-    assert "\x1b[38;2;232;113;10m" in fancy and "╔" in fancy
-    plain.encode("ascii")  # no box drawing, no middle dots
+    assert "\x1b[38;2;232;113;10m" in fancy and "█" in fancy and "╔" not in fancy
+    plain.encode("ascii")  # no block characters, no middle dots
     assert "\x1b[" not in plain
+
+
+def test_banner_mark_is_five_lines_in_every_mode() -> None:
+    for unicode, colour in ((True, True), (True, False), (False, False)):
+        rows = banner.mark_lines(unicode=unicode, colour=colour)
+        assert len(rows) == 5
+        assert all(len(re.sub(r"\x1b\[[0-9;]*m", "", row)) == banner.MARK_WIDTH for row in rows)
+    assert all("\x1b" not in row for row in banner.mark_lines(unicode=True, colour=False))
+    assert "▒" in "".join(banner.mark_lines(unicode=True, colour=False))  # folds stay visible without colour
+    "".join(banner.mark_lines(unicode=False)).encode("ascii")
+
+
+def test_banner_survives_a_legacy_console_encoding(tmp_path: Path) -> None:
+    checked = checked_for(tmp_path)
+    info = banner.BootInfo("0.1.0", "reachable", True, "first start")
+    for encoding in ("cp1252", "cp437", "ascii"):
+        stream = io.TextIOWrapper(io.BytesIO(), encoding=encoding)  # strict: raises on what it can't encode
+        banner.show(checked.settings, checked.ops, info, stream)  # must not raise UnicodeEncodeError
+        stream.flush()
+        assert b"portcullis" in stream.buffer.getvalue()
+        assert b"\x1b[" not in stream.buffer.getvalue()  # not a terminal: no colour codes either
+
+
+def test_no_colour_env_and_redirected_output_drop_colour(monkeypatch: pytest.MonkeyPatch) -> None:
+    from portcullis.ops.logs import supports_colour
+
+    class Tty(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert not supports_colour(Tty())
+    monkeypatch.delenv("NO_COLOR")
+    assert not supports_colour(io.StringIO())
 
 
 def test_banner_detects_what_the_console_can_draw() -> None:

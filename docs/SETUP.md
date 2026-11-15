@@ -41,6 +41,15 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e ".[dev]"
 ```
 
+### Start-up package check
+
+Every start (`python -m portcullis`) first compares the packages in `pyproject.toml` with what is installed, so a pulled update that adds a package doesn't crash the bot half-way. What it does:
+
+- Missing **required** packages (for example `tzdata`, which Windows needs for time zones) are installed with `python -m pip install` using the same Python, **only inside a virtual environment**, and only the exact lines from this project's own `pyproject.toml`. Nothing comes from `.env`, Discord or the network. What was installed is printed, logged, shown in the start-up banner and posted in the alert channel when one is set.
+- Missing **optional** packages (the `voice` extra: `PyNaCl` and `davey`, which silence discord.py's "voice will NOT be supported" warnings) are installed the same way; if that fails the bot starts anyway and says so.
+- If a required package can't be installed (offline, or not in a virtual environment) the bot stops with the exact `pip install` command to run.
+- `python -m portcullis --check` only reports what is missing and installs nothing. Turn installing off with `--no-auto-install` or `PORTCULLIS_AUTO_INSTALL=off`.
+
 This guide calls `.venv\Scripts\python.exe` directly, so you never need to "activate" the environment. If you'd rather activate it (`.\.venv\Scripts\Activate.ps1`) and PowerShell refuses with "running scripts is disabled", run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, or just keep using the full path.
 
 ## 4. Run the tests
@@ -104,6 +113,7 @@ notepad .env
 | `PORTCULLIS_METRICS_HOST`, `PORTCULLIS_METRICS_PORT` | bot | Optional: where it listens. Default `127.0.0.1` and `9464`, so only this PC can reach it. |
 | `PORTCULLIS_METRICS_TOKEN` | bot | Required if the host is anything but this PC; at least 16 characters. Callers send `Authorization: Bearer <token>`. |
 | `PORTCULLIS_UPDATE_CHECK` | bot | Optional, **off by default**: `notify` checks once a day for a newer release and posts in the alert channel. It never installs anything. |
+| `PORTCULLIS_AUTO_INSTALL` | bot | `off` stops the start-up package check from installing anything (it still says what is missing). Default on. Same as `--no-auto-install`. See [Start-up package check](#start-up-package-check). |
 | `PORTCULLIS_UPDATE_REPO` | bot | Optional: the repository to check, default `MinVT-dev/Portcullis`. |
 
 Real environment variables override `.env` values.

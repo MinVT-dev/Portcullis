@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -33,22 +33,32 @@ _CLOCK = re.compile(r"^(?:(today|tomorrow)\s+)?(\d{1,2}):(\d{2})$", re.I)
 _DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})$")
 
 
-def zone(name: object) -> ZoneInfo:
-    try:
-        return ZoneInfo(str(name)) if name else ZoneInfo("UTC")
-    except (ZoneInfoNotFoundError, ValueError):
-        return ZoneInfo("UTC")
+def zone(name: object) -> tzinfo:
+    """The named time zone, or UTC. Never raises: Windows has no time zone database unless the
+    ``tzdata`` package is installed, and even ``ZoneInfo("UTC")`` fails there without it."""
+    if name:
+        try:
+            return ZoneInfo(str(name))
+        except (ZoneInfoNotFoundError, ValueError, OSError):
+            pass
+    return UTC
+
+
+def zone_name(tz: tzinfo) -> str:
+    return getattr(tz, "key", None) or "UTC"
 
 
 def valid_zone(name: str) -> bool:
+    if name.strip().upper() == "UTC":
+        return True  # zone() answers UTC itself, so this works without a time zone database too
     try:
         ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError):
+    except (ZoneInfoNotFoundError, ValueError, OSError):
         return False
     return True
 
 
-def parse_when(text: str, tz: ZoneInfo, now: datetime | None = None) -> datetime | None:
+def parse_when(text: str, tz: tzinfo, now: datetime | None = None) -> datetime | None:
     """``in 2h 30m``, ``20:00``, ``tomorrow 20:00`` or ``2026-11-14 20:00``, as a UTC time in the future."""
     now = now or datetime.now(UTC)
     text = text.strip()
@@ -173,8 +183,8 @@ class EventModule(Module):
         start = parse_when(when_, tz)
         if start is None:
             await reply(interaction, f"I couldn't read that time. Try `in 2h`, `20:00`, `tomorrow 20:00` or "
-                                     f"`2026-11-14 20:00` (times are {tz.key}, set in `/setup bot`). It has to be "
-                                     "in the next year.")
+                                     f"`2026-11-14 20:00` (times are {zone_name(tz)}, set in `/setup bot`). "
+                                     "It has to be in the next year.")
             return
         row = None
         if server:

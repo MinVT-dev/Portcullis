@@ -8,10 +8,17 @@ the first signal closes everything in order, a second one stops at once. Both ex
 
 from __future__ import annotations
 
+import sys
+
+if __name__ == "__main__":
+    # Before the first third-party import: check the requirements, installing what is missing in a venv.
+    from portcullis.ops.deps import startup_check
+
+    startup_check(sys.argv[1:])
+
 import argparse
 import asyncio
 import logging
-import sys
 import time
 from typing import Any
 
@@ -25,7 +32,7 @@ from portcullis.config import ConfigError, Settings
 from portcullis.core.games import game_hooks
 from portcullis.core.guard import GuardedPort, panel_down
 from portcullis.db.database import Database
-from portcullis.ops import logs
+from portcullis.ops import deps, logs
 from portcullis.ops.banner import BootInfo, panel_address
 from portcullis.ops.banner import show as show_banner
 from portcullis.ops.check import run_checks
@@ -113,7 +120,8 @@ def quiet_ops() -> OpsSettings:
     return OpsSettings(log_file=None, state_file=None, banner=False)
 
 
-async def run(settings: Settings, ops: OpsSettings | None = None, warnings: list[str] | None = None) -> str:
+async def run(settings: Settings, ops: OpsSettings | None = None, warnings: list[str] | None = None,
+              notice: list[str] | None = None) -> str:
     ops = ops or quiet_ops()
     redactor = logs.setup(settings, ops)
     use_scrubber(redactor.text)  # error text shown in Discord and the audit log is masked too
@@ -149,6 +157,8 @@ async def run(settings: Settings, ops: OpsSettings | None = None, warnings: list
                     hooks=game_hooks,
                 )
                 extras = start_extras(bot, ops)
+                if notice:
+                    extras.append(asyncio.create_task(announce(bot, notice), name="portcullis-deps-notice"))
                 if not panel_ok:
                     extras.append(asyncio.create_task(login_later(amp), name="portcullis-panel-login"))
                 if ops.state_file is not None:
@@ -176,6 +186,15 @@ async def run(settings: Settings, ops: OpsSettings | None = None, warnings: list
             await step("the database", db.close, limit(DB_TIMEOUT), stopper=stopper, essential=True)
             await cancel_leftovers(limit(3.0))
             await asyncio.sleep(0.1)  # lets closed sockets finish closing before the loop does (Windows)
+
+
+async def announce(bot: PortcullisBot, lines: list[str]) -> None:
+    """Tell the alert channel (when one is set) what the start-up dependency check installed or couldn't."""
+    await bot.wait_until_ready()
+    try:
+        await bot.ctx.post(ALERT_CHANNEL, "**Start-up package check**\n" + "\n".join(lines)[:1800])
+    except Exception:  # noqa: BLE001 - an alert that can't be sent must not stop the bot
+        log.debug("could not post the package check result", exc_info=True)
 
 
 def start_extras(bot: PortcullisBot, ops: OpsSettings) -> list[asyncio.Task[Any]]:
@@ -224,6 +243,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--check", "--dry-run", action="store_true", dest="check",
                         help="check the settings and both logins, then exit without starting the bot")
     parser.add_argument("--offline", action="store_true", help="with --check: skip the panel and Discord logins")
+    parser.add_argument("--no-auto-install", action="store_true",
+                        help="don't install missing packages at start-up (same as PORTCULLIS_AUTO_INSTALL=off)")
     parser.add_argument("--version", action="version", version=f"Portcullis {version()}")
     return parser.parse_args(argv)
 
@@ -246,7 +267,8 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(run_checks(checked, offline=args.offline))
     settings = checked.settings
     try:
-        reason = asyncio.run(run(settings, checked.ops, checked.warnings))
+        notes = deps.LAST.lines() if deps.LAST is not None else []
+        reason = asyncio.run(run(settings, checked.ops, [*checked.warnings, *notes], notice=notes))
     except AuthFailed:
         log.error("AMP refused the bot's login. Check AMP_USERNAME and AMP_PASSWORD in .env.")
         return 1
