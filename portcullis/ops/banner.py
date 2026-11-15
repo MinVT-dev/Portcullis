@@ -25,18 +25,72 @@ GREEN = "\x1b[38;2;74;222;128m"
 AMBER = "\x1b[38;2;242;179;61m"
 RESET = "\x1b[0m"
 
-GATE_UTF8 = (
-    "╔═╤═╤═╤═╗",
-    "╟─┼─┼─┼─╢",
-    "╟─┼─┼─┼─╢",
-    "║ ╵ ╵ ╵ ║",
+GREY = "\x1b[38;2;92;87;82m"  # the mark's charcoal card #5C5752
+BOLD = "\x1b[1m"
+
+# The brand mark ("Inside out"): a lowercase p folded from a card. '#' is the charcoal card, 'o' the
+# orange folds (the turned corner top right and the tail), '.' is empty. Two pixel rows become one
+# text row with the half blocks, so the five lines below are ten pixels tall.
+MARK = (
+    "#######o.",
+    "#######oo",
+    "###...###",
+    "###...###",
+    "#########",
+    "#########",
+    "###......",
+    "ooo......",
+    ".ooo.....",
+    "..ooo....",
 )
-GATE_ASCII = (
-    "+-+-+-+-+",
-    "|-+-+-+-|",
-    "|-+-+-+-|",
-    "| ' ' ' |",
-)
+MARK_WIDTH = len(MARK[0])
+
+
+def mark_lines(*, unicode: bool = True, colour: bool = False) -> list[str]:
+    """The brand mark as five text rows, all ``MARK_WIDTH`` cells wide (trailing blanks kept).
+
+    Colour: charcoal and orange, with the half blocks carrying both colours where a fold meets the card.
+    Without colour the folds are shaded (``▒``) so they still read as folds. Without Unicode it is
+    plain ASCII: ``#`` for the card and ``+`` for the folds.
+    """
+    rows: list[str] = []
+    for top_row, bottom_row in zip(MARK[::2], MARK[1::2], strict=True):
+        line = ""
+        for top, bottom in zip(top_row, bottom_row, strict=True):
+            pair = {top, bottom} - {"."}
+            if not unicode:
+                line += " " if not pair else ("#" if "#" in pair else "+")
+            elif not pair:
+                line += " "
+            elif colour:
+                line += _coloured_cell(top, bottom)
+            elif "o" in pair:
+                line += "▓" if "#" in pair else "▒"
+            else:
+                line += "█" if top == bottom else ("▀" if top == "#" else "▄")
+        rows.append(line)
+    return rows
+
+
+_COLOUR = {"#": (92, 87, 82), "o": (232, 113, 10)}
+
+
+def _coloured_cell(top: str, bottom: str) -> str:
+    def fg(pixel: str) -> str:
+        r, g, b = _COLOUR[pixel]
+        return f"\x1b[38;2;{r};{g};{b}m"
+
+    def bg(pixel: str) -> str:
+        r, g, b = _COLOUR[pixel]
+        return f"\x1b[48;2;{r};{g};{b}m"
+
+    if top == bottom:
+        return f"{fg(top)}█{RESET}"
+    if bottom == ".":
+        return f"{fg(top)}▀{RESET}"
+    if top == ".":
+        return f"{fg(bottom)}▄{RESET}"
+    return f"{fg(top)}{bg(bottom)}▀{RESET}"
 
 
 @dataclass
@@ -62,7 +116,7 @@ def panel_address(url: str) -> str:
 def can_draw(stream: TextIO) -> bool:
     encoding = getattr(stream, "encoding", None) or "ascii"
     try:
-        "╔═╤║╵·".encode(encoding)
+        "╔═╤║╵·█▀▄▒▓".encode(encoding)
     except (LookupError, UnicodeEncodeError):
         return False
     return True
@@ -83,9 +137,9 @@ def render(settings: Settings, ops: OpsSettings, info: BootInfo, *, unicode: boo
         return f"{code}{text}{RESET}" if colour else text
 
     dot = "·" if unicode else "-"
-    gate = GATE_UTF8 if unicode else GATE_ASCII
-    side = [c(ORANGE, "PORTCULLIS") + f" {info.version}", "Discord bot for AMP 3 panels", "", ""]
-    lines = [""] + [f"  {c(ORANGE, g)}   {s}".rstrip() for g, s in zip(gate, side, strict=True)] + [""]
+    mark = mark_lines(unicode=unicode, colour=colour)
+    side = ["", c(BOLD, "portcullis") + " " + c(DIM, info.version), "Discord bot for AMP 3 panels", "", ""]
+    lines = [""] + [f"  {m}   {t}".rstrip() for m, t in zip(mark, side, strict=True)] + [""]
 
     owners = len(settings.owner_ids)
     roles = len(settings.operator_role_ids)

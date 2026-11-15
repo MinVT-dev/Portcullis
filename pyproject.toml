@@ -18,9 +18,19 @@ dependencies = [
     "pillow>=10.1",
     # The OS keyring (Windows Credential Manager, macOS Keychain, Secret Service) for the bot's secrets.
     "keyring>=25",
+    # Windows has no system time zone database, so zoneinfo needs this (harmless elsewhere).
+    "tzdata>=2024.1",
+    # Reads the requirement lines above for the start-up dependency check (portcullis/ops/deps.py).
+    "packaging>=23",
 ]
 
 [project.optional-dependencies]
+# Optional runtime packages. discord.py logs "voice will NOT be supported" without these; the bot works
+# without them, and the start-up dependency check installs them when it runs inside a virtualenv.
+voice = [
+    "PyNaCl>=1.5",
+    "davey>=0.1",
+]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
@@ -62,3 +72,5 @@ known-first-party = ["portcullis", "portcullis_api", "tests", "tools"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ASYNC240"]
+# The start-up dependency check has to run before the first third-party import.
+"portcullis/__main__.py" = ["E402", "I001"]

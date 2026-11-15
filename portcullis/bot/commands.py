@@ -45,6 +45,7 @@ DYNAMIC_ITEMS = (WhitelistDecision, PollVote, PollClose, EventGoing, EventCancel
 class Modules:
     def __init__(self, ctx: Ctx) -> None:
         self.ctx = ctx
+        self._failing: dict[str, tuple[int, str]] = {}  # job name -> (failures in a row, last error)
         if ctx.board is None:
             ctx.board = StatusBoard(ctx)
         if ctx.live_cards is None:
@@ -81,8 +82,23 @@ class Modules:
                           ("monitoring", self.monitor.tick)):
             try:
                 await job()
-            except Exception:  # one failing job must not stop the others
-                log.exception("the %s job failed", name)
+            except Exception as exc:  # one failing job must not stop the others
+                self.job_failed(name, exc)
+            else:
+                self._failing.pop(name, None)
+
+    def job_failed(self, name: str, exc: Exception) -> None:
+        """The first failure of a job gets a traceback; the same failure again one line, then a reminder every
+        hour, so a problem that repeats every minute doesn't bury the log. Another error or a recovery resets it."""
+        key = f"{type(exc).__name__}: {exc}"
+        count, _ = self._failing.get(name, (0, key))
+        if name in self._failing and self._failing[name][1] != key:
+            count = 0
+        self._failing[name] = (count + 1, key)
+        if count == 0:
+            log.error("the %s job failed", name, exc_info=exc)
+        elif count % 60 == 0:
+            log.warning("the %s job is still failing (%d times in a row): %s", name, count + 1, key)
 
     async def close(self) -> None:
         """Stop the background work the modules own. One failing step never skips the others."""
