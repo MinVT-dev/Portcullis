@@ -17,7 +17,7 @@ dependencies = [
     # Status banners (/server banner and the image board). Pillow's licence (HPND) is AGPL-compatible.
     "pillow>=10.1",
     # The OS keyring (Windows Credential Manager, macOS Keychain, Secret Service) for the bot's secrets.
-    "keyring>=25",
+    "keyring>=25.7.0",
     # Windows has no system time zone database, so zoneinfo needs this (harmless elsewhere).
     "tzdata>=2024.1",
     # Reads the requirement lines above for the start-up dependency check (portcullis/ops/deps.py).
