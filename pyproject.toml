@@ -29,7 +29,7 @@ dependencies = [
 # without them, and the start-up dependency check installs them when it runs inside a virtualenv.
 voice = [
     "PyNaCl>=1.5",
-    "davey>=0.1",
+    "davey>=0.2.0",
 ]
 dev = [
     "pytest>=8",
