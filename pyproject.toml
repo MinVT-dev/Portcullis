@@ -28,7 +28,7 @@ dependencies = [
 # Optional runtime packages. discord.py logs "voice will NOT be supported" without these; the bot works
 # without them, and the start-up dependency check installs them when it runs inside a virtualenv.
 voice = [
-    "PyNaCl>=1.5",
+    "PyNaCl>=1.6.2",
     "davey>=0.1",
 ]
 dev = [
