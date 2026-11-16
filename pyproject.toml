@@ -39,7 +39,7 @@ dev = [
     "datamodel-code-generator==0.90.0",
     "black==26.10.1",
     "isort==8.0.1",
-    "pip-audit>=2.7",
+    "pip-audit>=2.10.1",
 ]
 
 # The AMP client lives in packages/portcullis-api so others can use it on its own. Installing this
