@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 dependencies = [
     "aiohttp>=3.10,<4",
     "pydantic>=2.6,<3",
-    "aiosqlite>=0.20,<1",
+    "aiosqlite>=0.22.1,<1",
     "discord.py>=2.5,<3",
     # Status banners (/server banner and the image board). Pillow's licence (HPND) is AGPL-compatible.
     "pillow>=10.1",
